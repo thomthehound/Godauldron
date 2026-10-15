@@ -31,6 +31,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download Godot for selected track
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ matrix.track }}" = "godot4" ]; then
             python tools/fetch_preview.py --major 4

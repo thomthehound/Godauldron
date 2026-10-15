@@ -6,6 +6,7 @@ for a separate stable compatibility lane. Build upstream master on demand.
 from __future__ import annotations
 import argparse
 import json
+import os
 import re
 import shutil
 import stat
@@ -38,10 +39,17 @@ def choose_asset(releases: list[dict], platform: str, major: int | None = None) 
                 return tag, asset["browser_download_url"]
     raise RuntimeError("No matching upstream Godot release asset")
 
-def request(url: str):
-    return urllib.request.urlopen(urllib.request.Request(url, headers={
-        "User-Agent": "Godauldron-CI", "Accept": "application/vnd.github+json"
-    }), timeout=120)
+def request(url: str, *, github_api: bool = False):
+    headers = {"User-Agent": "Godauldron-CI"}
+    if github_api:
+        headers["Accept"] = "application/vnd.github+json"
+        token = os.environ.get("GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    # Do not send GitHub API credentials to the artifact download host.
+    return urllib.request.urlopen(
+        urllib.request.Request(url, headers=headers), timeout=120
+    )
 
 def main():
     parser = argparse.ArgumentParser()
@@ -51,7 +59,7 @@ def main():
                         help="Limit to a specific Godot major; omit to follow the latest")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    with request(RELEASES) as response:
+    with request(RELEASES, github_api=True) as response:
         releases = json.load(response)
     tag, url = choose_asset(releases, args.platform, major=args.major)
     archive = args.output / "upstream-preview.zip"

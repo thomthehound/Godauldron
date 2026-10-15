@@ -13,6 +13,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Optional world grid, axis indicators, and experiment bounds overlays, disabled by default.
 - Technical-scene gallery with named scene selections, bundled glTF 2.0 mesh specimen and Godot material study; imported scenes share the existing inspector and run contract.
 - Host graphics presets (Low, Medium, High, Ultra, Showcase), expandable per-setting controls with experiment ownership, and viewport PNG captures with adjacent provenance metadata.
+- Saved-capture comparison window with side-by-side images, magnification, RGB difference maps, channel-error statistics and warnings for mismatched experiment/camera/graphics settings.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
@@ -43,6 +44,8 @@ To exercise a proposed upstream change, select a public Godot fork and feature b
 To **test a particular PR against Godot master HEAD**, add the `ci:godot-head` label. This triggers a one-shot Linux and Windows source build and runs that PR's Godauldron code against the binaries. Ordinary PR builds and subsequent pushes never compile Godot. To re-test a changed PR with a fresh master revision, remove and reapply the label (or rerun the previous workflow if you intentionally want to test its original revision). Create the repository label once under GitHub **Issues → Labels** if it doesn't already exist. See [Engine tracking](docs/ENGINE_TRACKING.md#opt-in-per-pr-master-builds) for details.
 
 ## Graphics and captures
+
+Use **Compare images…** in the viewport toolbar to inspect two saved PNG captures side by side, zoom in, and view an amplified RGB difference image with numerical channel errors. Comparison checks the capture metadata and warns when the camera, experiment or graphics conditions differ; images of different sizes are shown but not silently aligned. A difference PNG and its source metadata can be saved under `user://comparisons`. See [Visual comparisons](docs/VISUAL_COMPARISON.md).
 
 The viewport toolbar has **Graphics** presets (Low, Medium, High, Ultra, Showcase) and an **Advanced…** panel for the currently implemented per-viewport settings. An experiment can reserve specific graphics properties so the host cannot overwrite what it is testing. **Capture PNG** saves the rendered experiment viewport—without the surrounding laboratory UI—to `user://captures` with a JSON metadata file recording the scene, settings, camera and engine version. Observation-only provider capture metadata stays separate from benchmark metrics, and runs cannot begin during pending frame readback.
 

@@ -152,6 +152,14 @@ func _verify() -> void:
 	if panes.size() != 3 or (panes[2] as TextureRect).texture == null:
 		_fail("Difference pane is not populated")
 		return
+	# A changed picker must invalidate the already computed source pair.
+	picker_b.select(baseline_index)
+	picker_b.item_selected.emit(baseline_index)
+	if not (window.get("_save_button") as Button).disabled or 			not (window.get("_comparison") as Dictionary).is_empty():
+		_fail("Changing source selection left a stale difference export enabled")
+		return
+	picker_b.select(candidate_index)
+	window.call("compare_selection")
 	window.call("_save_difference")
 	var saved_status: String = (window.get("_status") as Label).text
 	if not saved_status.contains("Difference saved:"):

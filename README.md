@@ -6,10 +6,11 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 
 ## Current implementation
 
-- Interactive Godot host with experiment discovery and a parameter inspector.
+- Interactive Godot host with experiment discovery, a parameter inspector, and scene-owned-camera inspection controls (orbit, pan, zoom, frame, reset).
 - Namespace-based manifest v1 with scalar integer, floating-point and boolean options.
 - UI-independent experiment execution with optional warmup, isolated measured steps, per-run setup, cancellation and result reporting.
 - Versioned campaign presets with sequential parameter sweeps, per-run reports, and a comparison table showing dispersion and optional engineering guard limits.
+- Optional world grid, axis indicators, and experiment bounds overlays, disabled by default.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
@@ -18,7 +19,7 @@ The timing measures **CPU wall time inside host step calls**, not asynchronous G
 
 ## Getting started
 
-Open the project folder in a current Godot 4.8 development build or an editor compiled from upstream master. Run the main scene, select an experiment, adjust its parameters, and press **Run experiment**. The report appears under Godot's user-data folder, in the results subdirectory.
+Open the project folder in a current Godot 4.8 development build or an editor compiled from upstream master. Run the main scene, select an experiment, adjust its parameters, and press **Run experiment**. In the 3D viewport, right-drag to orbit, middle-drag to pan, use the mouse wheel to zoom, and use **Frame** or **Reset camera** from the toolbar. Debug grids, axes and bounds are opt-in; see [Visual inspection](docs/INSPECTION.md). The report appears under Godot's user-data folder, in the results subdirectory.
 
 To run manifest tests:
 

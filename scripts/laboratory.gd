@@ -266,10 +266,10 @@ func _select_experiment(index: int) -> void:
 			var chooser := OptionButton.new()
 			for option in spec.get("options", []):
 				chooser.add_item(String(option["label"]))
-				var index: int = chooser.item_count - 1
-				chooser.set_item_metadata(index, String(option["value"]))
+				var choice_index: int = chooser.item_count - 1
+				chooser.set_item_metadata(choice_index, String(option["value"]))
 				if option["value"] == spec.get("default"):
-					chooser.select(index)
+					chooser.select(choice_index)
 			chooser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			chooser.item_selected.connect(func(_selected: int) -> void: _preview_active_scene())
 			_parameters.add_child(chooser)

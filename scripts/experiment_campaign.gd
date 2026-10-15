@@ -4,6 +4,7 @@ extends RefCounted
 
 const MAX_CASES := 32
 const MAX_RUNS := 128
+const Stats = preload("res://scripts/campaign_statistics.gd")
 
 var _plan: Dictionary = {}
 var _cases: Array[Dictionary] = []
@@ -88,6 +89,22 @@ static func validate(plan: Dictionary, manifest: Dictionary) -> PackedStringArra
 	var baseline: Variant = plan.get("baseline_index", 0)
 	if not _json_integer(baseline) or typeof(values) != TYPE_ARRAY or baseline < 0 or baseline >= values.size():
 		errors.append("baseline_index must identify a sweep value")
+	if plan.has("regression_guard"):
+		var policy: Variant = plan["regression_guard"]
+		if typeof(policy) != TYPE_DICTIONARY:
+			errors.append("regression_guard must be an object")
+		else:
+			var limit: Variant = policy.get("max_ratio")
+			var count: Variant = policy.get("min_repetitions")
+			var cv: Variant = policy.get("max_coefficient_of_variation")
+			if typeof(limit) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(limit)) or 					float(limit) <= 0.0:
+				errors.append("regression_guard.max_ratio must be a positive finite number")
+			if not _json_integer(count) or count < 2 or count > MAX_RUNS:
+				errors.append("regression_guard.min_repetitions must be an integer from 2 to 128")
+			if typeof(cv) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(cv)) or 					float(cv) <= 0.0 or float(cv) > 1.0:
+				errors.append("regression_guard.max_coefficient_of_variation must be in (0, 1]")
+			if _json_integer(count) and _json_integer(repeats) and count > repeats:
+				errors.append("regression_guard.min_repetitions exceeds campaign repetitions")
 	return errors
 
 
@@ -154,30 +171,40 @@ func summary(completed: bool) -> Dictionary:
 			if int(entry["case_index"]) == i:
 				result_paths.append(String(entry["result_path"]))
 				if bool(entry["completed"]):
-					times.append(float(entry["mean_host_cpu_usec"]))
-		var mean: Variant = null
-		if not times.is_empty():
-			var total: float = 0.0
-			for sample in times:
-				total += sample
-			mean = total / float(times.size())
+					var timing: float = float(entry["mean_host_cpu_usec"])
+					if is_finite(timing) and timing >= 0.0:
+						times.append(timing)
+		var descriptive: Dictionary = Stats.describe(times)
 		summaries.append({
 			"axis_value": axis["values"][i],
 			"completed_repetitions": times.size(),
 			"requested_repetitions": int(_plan.get("repetitions", 1)),
-			"mean_host_step_cpu_usec": mean,
+			"mean_host_step_cpu_usec": descriptive["mean"],
+			"median_host_step_cpu_usec": descriptive["median"],
+			"minimum_host_step_cpu_usec": descriptive["minimum"],
+			"maximum_host_step_cpu_usec": descriptive["maximum"],
+			"population_stddev_host_step_cpu_usec": descriptive["population_stddev"],
+			"coefficient_of_variation": descriptive["coefficient_of_variation"],
 			"relative_to_baseline": null,
+			"guard_status": "not_configured",
 			"report_paths": result_paths
 		})
 	var baseline_index: int = int(_plan.get("baseline_index", 0))
-	var baseline: Variant = summaries[baseline_index]["mean_host_step_cpu_usec"]
-	# No ratio until the entire baseline and compared case are complete.
+	var baseline_summary: Dictionary = summaries[baseline_index]
+	var baseline: Variant = baseline_summary["mean_host_step_cpu_usec"]
+	# Incomplete cases never acquire a misleading baseline ratio or verdict.
 	if baseline != null and float(baseline) > 0.0:
 		for item in summaries:
 			if item["mean_host_step_cpu_usec"] != null and \
 					int(item["completed_repetitions"]) == int(item["requested_repetitions"]) and \
-					int(summaries[baseline_index]["completed_repetitions"]) == int(summaries[baseline_index]["requested_repetitions"]):
+					int(baseline_summary["completed_repetitions"]) == int(baseline_summary["requested_repetitions"]):
 				item["relative_to_baseline"] = float(item["mean_host_step_cpu_usec"]) / float(baseline)
+	var policy: Dictionary = _plan.get("regression_guard", {})
+	for i in range(summaries.size()):
+		if i == baseline_index:
+			summaries[i]["guard_status"] = "baseline"
+		else:
+			summaries[i]["guard_status"] = Stats.evaluate_guard(summaries[i], baseline_summary, policy)
 	return {
 		"schema_version": 1,
 		"campaign_id": String(_plan.get("id", "")),
@@ -188,8 +215,9 @@ func summary(completed: bool) -> Dictionary:
 		"axis": axis.duplicate(true),
 		"baseline_index": baseline_index,
 		"case_summaries": summaries,
+		"regression_guard": policy.duplicate(true),
 		"comparison_metric": "mean host-step CPU wall microseconds per fixed step",
-		"comparison_note": "Descriptive CPU callback timing only; not a GPU measure or statistically significant regression test.",
+		"comparison_note": "Descriptive CPU callback timing and optional engineering guard limits only; not a GPU measure, confidence interval, or statistically significant regression test.",
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
 		"timestamp": Time.get_datetime_string_from_system()

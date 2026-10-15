@@ -1,0 +1,236 @@
+extends Window
+## Inspector for saved SDR captures. Deliberately separate from experiment
+## execution and camera/graphics settings: it only reads persisted images.
+
+const Comparison = preload("res://scripts/visual_comparison.gd")
+const ImageCapture = preload("res://scripts/image_capture.gd")
+
+var capture_directory: String = "user://captures"
+var comparison_directory: String = "user://comparisons"
+
+var _reference_picker: OptionButton
+var _candidate_picker: OptionButton
+var _status: Label
+var _warnings: Label
+var _metrics: Label
+var _save_button: Button
+var _zoom: HSlider
+var _images: Array[TextureRect] = []
+var _current_images: Array[Image] = []
+var _catalog: Array[Dictionary] = []
+var _comparison: Dictionary = {}
+var _save_sequence: int = 0
+
+
+func _ready() -> void:
+	title = "Godauldron  |  Visual comparison"
+	size = Vector2i(1300, 790)
+	min_size = Vector2i(940, 600)
+	close_requested.connect(hide)
+	_build_ui()
+	refresh_captures()
+
+
+func _build_ui() -> void:
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	add_child(margin)
+	var stack := VBoxContainer.new()
+	margin.add_child(stack)
+
+	var selectors := HBoxContainer.new()
+	stack.add_child(selectors)
+	var label_a := Label.new()
+	label_a.text = "Reference"
+	selectors.add_child(label_a)
+	_reference_picker = OptionButton.new()
+	_reference_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	selectors.add_child(_reference_picker)
+	var label_b := Label.new()
+	label_b.text = "Candidate"
+	selectors.add_child(label_b)
+	_candidate_picker = OptionButton.new()
+	_candidate_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	selectors.add_child(_candidate_picker)
+	var refresh := Button.new()
+	refresh.text = "Refresh"
+	refresh.pressed.connect(refresh_captures)
+	selectors.add_child(refresh)
+	var compare_button := Button.new()
+	compare_button.text = "Compare"
+	compare_button.pressed.connect(compare_selection)
+	selectors.add_child(compare_button)
+	_save_button = Button.new()
+	_save_button.text = "Save difference"
+	_save_button.disabled = true
+	_save_button.pressed.connect(_save_difference)
+	selectors.add_child(_save_button)
+
+	var zoom_row := HBoxContainer.new()
+	stack.add_child(zoom_row)
+	var zoom_label := Label.new()
+	zoom_label.text = "Preview magnification"
+	zoom_row.add_child(zoom_label)
+	_zoom = HSlider.new()
+	_zoom.min_value = 1.0
+	_zoom.max_value = 8.0
+	_zoom.step = 0.25
+	_zoom.value = 1.0
+	_zoom.custom_minimum_size = Vector2(190, 0)
+	_zoom.value_changed.connect(_update_zoom)
+	zoom_row.add_child(_zoom)
+	var caption := Label.new()
+	caption.text = "Scroll each pane to inspect detail; no image alignment or scaling is applied to the comparison"
+	zoom_row.add_child(caption)
+
+	var panels := HBoxContainer.new()
+	panels.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_child(panels)
+	for heading in ["Reference capture", "Candidate capture", "RGB difference  ×4 contrast"]:
+		var column := VBoxContainer.new()
+		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panels.add_child(column)
+		var title_label := Label.new()
+		title_label.text = heading
+		column.add_child(title_label)
+		var scroll := ScrollContainer.new()
+		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		column.add_child(scroll)
+		var display := TextureRect.new()
+		display.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		display.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		display.custom_minimum_size = Vector2(330, 250)
+		scroll.add_child(display)
+		_images.append(display)
+		_current_images.append(null)
+
+	_status = Label.new()
+	_status.text = "Choose two captures and compare"
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(_status)
+	_metrics = Label.new()
+	_metrics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(_metrics)
+	_warnings = Label.new()
+	_warnings.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(_warnings)
+
+
+func open_gallery() -> void:
+	refresh_captures()
+	popup_centered(Vector2i(1300, 790))
+
+
+func _selected_stem(picker: OptionButton) -> String:
+	if picker.selected < 0 or picker.selected >= picker.item_count:
+		return ""
+	return String(picker.get_item_metadata(picker.selected))
+
+
+func refresh_captures() -> void:
+	var prev_ref: String = _selected_stem(_reference_picker)
+	var prev_candidate: String = _selected_stem(_candidate_picker)
+	_catalog = Comparison.catalog(capture_directory)
+	_reference_picker.clear()
+	_candidate_picker.clear()
+	for entry in _catalog:
+		for picker in [_reference_picker, _candidate_picker]:
+			picker.add_item(entry["label"])
+			picker.set_item_metadata(picker.item_count - 1, entry["stem"])
+	if _catalog.is_empty():
+		_status.text = "No complete captures in " + capture_directory
+		_save_button.disabled = true
+		return
+	var ref_index: int = 1 if _catalog.size() > 1 else 0
+	var candidate_index: int = 0
+	for i in range(_catalog.size()):
+		if _catalog[i]["stem"] == prev_ref:
+			ref_index = i
+		if _catalog[i]["stem"] == prev_candidate:
+			candidate_index = i
+	_reference_picker.select(ref_index)
+	_candidate_picker.select(candidate_index)
+	_status.text = "%d saved captures available" % _catalog.size()
+
+
+func _show_image(index: int, image: Image) -> void:
+	_current_images[index] = image
+	_images[index].texture = null if image == null else ImageTexture.create_from_image(image)
+	_update_zoom(_zoom.value)
+
+
+func _update_zoom(scale: float) -> void:
+	for i in range(_images.size()):
+		var picture: Image = _current_images[i]
+		if picture == null or picture.is_empty():
+			continue
+		var fit: float = minf(1.0, minf(350.0 / float(picture.get_width()), 460.0 / float(picture.get_height())))
+		_images[i].custom_minimum_size = Vector2(picture.get_size()) * fit * scale
+
+
+func compare_selection() -> void:
+	_comparison.clear()
+	_save_button.disabled = true
+	_metrics.text = ""
+	_warnings.text = ""
+	for i in range(_images.size()):
+		_show_image(i, null)
+	var a: String = _selected_stem(_reference_picker)
+	var b: String = _selected_stem(_candidate_picker)
+	if a.is_empty() or b.is_empty():
+		_status.text = "Select two saved captures"
+		return
+	var reference: Dictionary = Comparison.load_capture(capture_directory, a)
+	var candidate: Dictionary = Comparison.load_capture(capture_directory, b)
+	if not bool(reference.get("ok", false)) or not bool(candidate.get("ok", false)):
+		_status.text = "Load failed: %s%s" % [
+			String(reference.get("error", "")), String(candidate.get("error", ""))
+		]
+		return
+	var result: Dictionary = Comparison.compare(reference, candidate)
+	_comparison = result
+	_show_image(0, reference["image"])
+	_show_image(1, candidate["image"])
+	var warnings: PackedStringArray = result.get("warnings", PackedStringArray())
+	_warnings.text = "Conditions to review: " + "\n".join(warnings) if not warnings.is_empty() else "Capture context fields match"
+	if not bool(result.get("ok", false)):
+		_status.text = String(result.get("error", "Could not compare captures"))
+		return
+	_show_image(2, result["difference_image"])
+	var metrics: Dictionary = result["metrics"]
+	_metrics.text = "RGB MAE %.3f /255   •   RGB RMSE %.3f /255   •   changed pixels (>8): %d / %d (%.2f%%)   •   max channel Δ %d" % [
+		float(metrics["rgb_mae_8bit"]), float(metrics["rgb_rmse_8bit"]),
+		int(metrics["changed_pixels"]), int(metrics["width"]) * int(metrics["height"]),
+		float(metrics["changed_fraction"]) * 100.0, int(metrics["max_channel_difference_8bit"])
+	]
+	_status.text = "Compared %s → %s (encoded SDR RGB; not perceptual or HDR)" % [a, b]
+	_save_button.disabled = false
+
+
+func _save_difference() -> void:
+	if not bool(_comparison.get("ok", false)):
+		return
+	_save_sequence += 1
+	var stem: String = "difference_%s_p%d_%d" % [
+		Time.get_datetime_string_from_system().replace(":", "-"),
+		OS.get_process_id(), _save_sequence
+	]
+	var metadata: Dictionary = {
+		"format_version": 1,
+		"reference_capture": _selected_stem(_reference_picker),
+		"candidate_capture": _selected_stem(_candidate_picker),
+		"method": _comparison["metrics"]["method"],
+		"metrics": _comparison["metrics"],
+		"warnings": Array(_comparison["warnings"]),
+		"timestamp": Time.get_datetime_string_from_system()
+	}
+	var result: Dictionary = ImageCapture.write_image(
+		_comparison["difference_image"], comparison_directory, stem, metadata
+	)
+	_status.text = "Difference saved: " + String(result["image"]) if bool(result["ok"]) else \
+		"Cannot save difference: " + String(result["error"])

@@ -15,6 +15,18 @@ func _fail(message: String) -> void:
 	quit(1)
 
 
+func _await_window_idle(window: Window) -> bool:
+	var deadline: int = Time.get_ticks_msec() + 30000
+	while bool(window.call("analysis_busy")):
+		window.call("_poll_analysis")
+		if not bool(window.call("analysis_busy")):
+			break
+		if Time.get_ticks_msec() > deadline:
+			return false
+		await process_frame
+	return true
+
+
 func _verify() -> void:
 	var directory: String = "user://visual-compare-smoke-%d" % OS.get_process_id()
 	var a := Image.create(4, 2, false, Image.FORMAT_RGBA8)
@@ -188,6 +200,21 @@ func _verify() -> void:
 	picker_a.select(baseline_index)
 	picker_b.select(candidate_index)
 	window.call("compare_selection")
+	# Even a tiny test image now runs on an independently joined worker.
+	if not bool(window.call("analysis_busy")):
+		_fail("Comparing images did not reserve an asynchronous worker")
+		return
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")):
+		_fail("Benchmark started while analysis was still pending")
+		return
+	host.call("_start_campaign")
+	if host.get("_campaign") != null:
+		_fail("Campaign started while analysis was still pending")
+		return
+	if not await _await_window_idle(window):
+		_fail("Image comparison worker did not finish")
+		return
 	var ui_result: Dictionary = window.get("_comparison")
 	if not bool(ui_result.get("ok", false)):
 		_fail("Compare UI did not display valid source images")
@@ -204,7 +231,16 @@ func _verify() -> void:
 		return
 	picker_b.select(candidate_index)
 	window.call("compare_selection")
+	if not await _await_window_idle(window):
+		_fail("Second comparison worker did not finish")
+		return
 	window.call("_save_difference")
+	if not bool(window.call("analysis_busy")):
+		_fail("Saving a difference did not start an asynchronous worker")
+		return
+	if not await _await_window_idle(window):
+		_fail("Difference export worker did not finish")
+		return
 	var saved_status: String = (window.get("_status") as Label).text
 	if not saved_status.contains("Difference saved:"):
 		_fail("Comparison result could not be saved: " + saved_status)
@@ -221,6 +257,12 @@ func _verify() -> void:
 	if images != 1 or jsons != 1:
 		_fail("A persisted visual comparison did not produce one PNG/JSON pair")
 		return
+	for filename in filenames:
+		if filename.ends_with(".json"):
+			var saved_metadata: Variant = JSON.parse_string(FileAccess.get_file_as_string(saved_dir.path_join(filename)))
+			if typeof(saved_metadata) != TYPE_DICTIONARY or int(saved_metadata.get("analysis_elapsed_usec", -1)) < 0:
+				_fail("Saved difference omitted wall-clock analysis duration")
+				return
 	# Releasing a modal comparison window must drop both CPU-side Images and
 	# GPU-side ImageTexture references before subsequent showcase captures.
 	window.close_requested.emit()
@@ -237,5 +279,23 @@ func _verify() -> void:
 			_fail("Closing the comparison left stale magnified scroll extents")
 			return
 
-	print("Godauldron visual comparison smoke passed: matching, alpha, provenance, metadata validation, UI cleanup, saved diff")
+	# Close a window while a worker is running: no blocking join, no stale UI,
+	# and no new benchmark until the worker has truly retired.
+	window.call("compare_selection")
+	window.close_requested.emit()
+	if not bool(window.call("analysis_busy")):
+		_fail("Closing the comparison prematurely abandoned an unjoined worker")
+		return
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")):
+		_fail("Closing a busy window let background analysis contaminate a run")
+		return
+	if not await _await_window_idle(window):
+		_fail("Dismissed comparison worker did not retire")
+		return
+	if not (window.get("_comparison") as Dictionary).is_empty():
+		_fail("Dismissed comparison published an unwanted late result")
+		return
+
+	print("Godauldron visual comparison smoke passed: async jobs, run isolation, alpha, metadata, UI cleanup, saved diff")
 	quit(0)

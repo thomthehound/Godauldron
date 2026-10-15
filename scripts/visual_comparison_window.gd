@@ -286,6 +286,7 @@ func _display_comparison(outcome: Dictionary) -> void:
 	var candidate: Dictionary = outcome["candidate"]
 	_comparison["reference_metadata"] = reference["metadata"].duplicate(true)
 	_comparison["candidate_metadata"] = candidate["metadata"].duplicate(true)
+	_comparison["analysis_elapsed_usec"] = int(outcome["elapsed_usec"])
 	var previews: Array = outcome["previews"]
 	_show_image(0, previews[0])
 	_show_image(1, previews[1])
@@ -326,6 +327,7 @@ func _save_difference() -> void:
 		"candidate_metadata": _comparison["candidate_metadata"],
 		"method": _comparison["metrics"]["method"],
 		"metrics": _comparison["metrics"],
+		"analysis_elapsed_usec": _comparison["analysis_elapsed_usec"],
 		"warnings": Array(_comparison["warnings"]),
 		"timestamp": Time.get_datetime_string_from_system()
 	}

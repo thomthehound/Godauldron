@@ -377,6 +377,9 @@ func _capture_provider_state(scene: Node) -> Dictionary:
 
 
 func _capture_screenshot() -> void:
+	if _comparison_window != null and bool(_comparison_window.call("analysis_busy")):
+		_status.text = "Image analysis in progress; capture cannot start yet"
+		return
 	if _capture_pending:
 		_status.text = "Capture already in progress"
 		return

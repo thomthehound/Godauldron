@@ -27,6 +27,7 @@ func _verify() -> void:
 		return
 	var search: LineEdit = host.get("_catalog_search")
 	search.text = "org.godauldron.technical-gallery"
+	host.call("_refresh_catalog", search.text)
 	var visible: Array = host.get("_catalog_visible")
 	if visible.size() != 1 or visible[0] != gallery:
 		_fail("Experiment filtering selected incorrect index")
@@ -36,6 +37,7 @@ func _verify() -> void:
 		_fail("Filtered visible item did not open the matching experiment")
 		return
 	search.text = ""
+	host.call("_refresh_catalog", search.text)
 	host.call("_select_experiment", gallery)
 
 	var scene_control: OptionButton = (host.get("_controls") as Dictionary)["scene"]

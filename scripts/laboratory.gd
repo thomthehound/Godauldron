@@ -26,6 +26,7 @@ var _graphics_values: Dictionary = GraphicsSettings.PROFILES["High"].duplicate(t
 var _graphics_owned: PackedStringArray = PackedStringArray()
 var _graphics_run_snapshot: Dictionary = {}
 var _capture_sequence: int = 0
+var _capture_pending: bool = false
 var _capture_directory: String = "user://captures"
 var _camera_inspector: RefCounted = null
 var _inspection_overlay: Node3D
@@ -339,21 +340,41 @@ func _apply_graphics() -> void:
 		input.set_block_signals(false)
 
 
+func _capture_provider_state(scene: Node) -> Dictionary:
+	# Run metrics belong exclusively to ExperimentRun.make_report(); this
+	# optional observation hook is safe even before the first setup.
+	if scene == null or not scene.has_method("godauldron_capture_metadata"):
+		return {}
+	var observed: Variant = scene.call("godauldron_capture_metadata")
+	return observed.duplicate(true) if typeof(observed) == TYPE_DICTIONARY else {}
+
+
 func _capture_screenshot() -> void:
+	if _capture_pending:
+		_status.text = "Capture already in progress"
+		return
 	if _active_scene == null:
 		return
 	# Readback and PNG encoding can stall the device; don't contaminate a
 	# measured run with capture overhead.
 	if _has_active_run():
 		_finish_run(false)
+	# Reserve the entire asynchronous interval: starting a new run while the
+	# frame is pending would make its measurements overlap GPU readback.
+	_capture_pending = true
 	var source_scene: Node = _active_scene
 	# Godot's viewport texture can be empty/stale before rendering completes.
 	await RenderingServer.frame_post_draw
 	if not is_instance_valid(source_scene) or _active_scene != source_scene:
+		_capture_pending = false
 		_status.text = "Capture cancelled: scene changed"
 		return
+	# Defense in depth against any future bypass of the public run entrypoints.
+	if _has_active_run():
+		_finish_run(false)
 	var view_texture: ViewportTexture = _viewport.get_texture()
 	if view_texture == null:
+		_capture_pending = false
 		_status.text = "Capture failed: viewport has no texture"
 		return
 	var rendered: Image = view_texture.get_image()
@@ -377,12 +398,11 @@ func _capture_screenshot() -> void:
 		"os": OS.get_name(),
 		"timestamp": Time.get_datetime_string_from_system()
 	}
-	# The controls express user intent, not necessarily the scene's achieved
-	# state. Keep provider-reported actual metrics independently attributable.
-	if _active_scene.has_method("godauldron_metrics"):
-		var actual: Variant = _active_scene.call("godauldron_metrics")
-		if typeof(actual) == TYPE_DICTIONARY:
-			metadata["experiment_metrics"] = actual.duplicate(true)
+	# A preview may not have run setup. Never call the lifecycle metrics hook
+	# from capture, and never collect a second copy after run finalization.
+	var observed: Dictionary = _capture_provider_state(source_scene)
+	if not observed.is_empty():
+		metadata["capture_state"] = observed
 	var camera: Camera3D = _viewport.get_camera_3d()
 	if camera != null:
 		metadata["camera"] = {
@@ -392,6 +412,7 @@ func _capture_screenshot() -> void:
 			"fov": camera.fov
 		}
 	var result: Dictionary = ImageCapture.write_image(rendered, _capture_directory, stem, metadata)
+	_capture_pending = false
 	if not bool(result["ok"]):
 		_status.text = "Capture failed: " + String(result["error"])
 	else:
@@ -628,6 +649,9 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	if _capture_pending:
+		_status.text = "Capture in progress; campaign cannot start yet"
+		return
 	if _active_scene == null or _campaign_plans.is_empty():
 		return
 	if _has_active_run():
@@ -720,6 +744,9 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	if _capture_pending:
+		_status.text = "Capture in progress; experiment cannot start yet"
+		return
 	if _active_scene == null:
 		return
 	if _has_active_run():

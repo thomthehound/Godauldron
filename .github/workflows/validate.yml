@@ -65,3 +65,5 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/gallery_smoke.gd
       - name: Verify graphics ownership, presets and image persistence
         run: .engine/godot --headless --path . --script res://tests/capture_graphics_smoke.gd
+      - name: Verify saved image comparisons and visual diff UI
+        run: .engine/godot --headless --path . --script res://tests/visual_comparison_smoke.gd

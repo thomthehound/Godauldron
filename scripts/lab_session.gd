@@ -28,7 +28,7 @@ static func validate(record: Variant, manifests: Array[Dictionary]) -> String:
 	if typeof(record) != TYPE_DICTIONARY:
 		return "Session must be a JSON object"
 	var doc: Dictionary = record
-	if typeof(doc.get("version")) != TYPE_INT or int(doc["version"]) != VERSION:
+	if not _number(doc.get("version"), VERSION, VERSION):
 		return "Unsupported session format version"
 	var name: Variant = doc.get("name")
 	if typeof(name) != TYPE_STRING or String(name).strip_edges().is_empty() or String(name).length() > 80:
@@ -87,13 +87,13 @@ static func validate(record: Variant, manifests: Array[Dictionary]) -> String:
 			if typeof(value) != TYPE_BOOL:
 				return "Invalid graphics boolean: " + key
 		elif key == "msaa_3d":
-			if typeof(value) != TYPE_INT or value < 0 or value > 3:
+			if not _number(value, 0, 3) or floor(float(value)) != float(value):
 				return "Invalid MSAA setting"
 		elif key == "screen_space_aa":
-			if typeof(value) != TYPE_INT or value < 0 or value > 1:
+			if not _number(value, 0, 1) or floor(float(value)) != float(value):
 				return "Invalid screen-space AA setting"
 		elif key == "positional_shadow_atlas_size":
-			if typeof(value) != TYPE_INT or value < 0 or value > 16384:
+			if not _number(value, 0, 16384) or floor(float(value)) != float(value):
 				return "Invalid shadow atlas size"
 	var profile: Variant = doc.get("graphics_profile")
 	if typeof(profile) != TYPE_STRING or (profile != "Custom" and not Graphics.PROFILES.has(profile)):
@@ -117,8 +117,8 @@ static func validate(record: Variant, manifests: Array[Dictionary]) -> String:
 	if not camera.is_empty():
 		if not _vector3(camera.get("position")) or not _vector3(camera.get("rotation_degrees")):
 			return "Invalid camera transform"
-		if typeof(camera.get("projection")) != TYPE_INT or \
-				int(camera["projection"]) < 0 or int(camera["projection"]) > 2:
+		if not _number(camera.get("projection"), 0, 2) or \
+				floor(float(camera["projection"])) != float(camera["projection"]):
 			return "Invalid camera projection"
 		if not _number(camera.get("fov"), 1.0, 179.0) or \
 				not _number(camera.get("size"), 0.001, 1.0e6):

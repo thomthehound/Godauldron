@@ -85,13 +85,31 @@ func _verify() -> void:
 		_fail("No aggregate campaign report was exported")
 		return
 	var summaries: Array = summary.get("case_summaries", [])
+	var results_tree: Tree = host.get("_comparison_table") as Tree
+	if results_tree == null or results_tree.get_root() == null:
+		_fail("Host did not render the comparison table")
+		return
+	var displayed: int = 0
+	var displayed_item: TreeItem = results_tree.get_root().get_first_child()
+	while displayed_item != null:
+		displayed += 1
+		if displayed_item.get_text(2).is_empty() or displayed_item.get_text(5).is_empty():
+			_fail("Displayed results contain empty values")
+			return
+		displayed_item = displayed_item.get_next()
+	if displayed != 3:
+		_fail("Campaign table omitted sweep cases")
+		return
 	if summaries.size() != 3 or int(summary.get("baseline_index", -1)) != 1:
 		_fail("Campaign case summaries or baseline index are incorrect")
 		return
 	for i in range(3):
 		var item: Dictionary = summaries[i]
-		if int(item.get("completed_repetitions", -1)) != 2 or item.get("relative_to_baseline") == null:
-			_fail("Case missing complete samples or baseline ratio")
+		if int(item.get("completed_repetitions", -1)) != 2 or item.get("relative_to_baseline") == null or 				item.get("median_host_step_cpu_usec") == null or 				item.get("coefficient_of_variation") == null:
+			_fail("Case missing complete descriptive statistics")
+			return
+		if String(item.get("guard_status", "")) != ("baseline" if i == 1 else "not_configured"):
+			_fail("Reference campaign must remain descriptive")
 			return
 		var expected_grid: int = int(plan["axis"]["values"][i])
 		var reports: Array = item["report_paths"]

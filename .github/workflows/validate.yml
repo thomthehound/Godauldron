@@ -57,3 +57,5 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/runtime_smoke.gd
       - name: Verify campaigns and comparisons
         run: .engine/godot --headless --path . --script res://tests/campaign_smoke.gd
+      - name: Verify campaign statistics and optional guard limits
+        run: .engine/godot --headless --path . --script res://tests/analysis_smoke.gd

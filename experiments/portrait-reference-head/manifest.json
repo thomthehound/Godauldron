@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.portrait-reference-head",
+  "display_name": "Showcase / MakeHuman Reference Head (CC0)",
+  "category": "Reusable stage templates",
+  "description": "Textured CC0 MakeHuman portrait reference with scalp anatomy and a real-scale presentation rig. No native hair or physics simulation; scalp marker positions are provisional.",
+  "entry_scene": "res://scenes/showcase/portrait_reference_head.tscn",
+  "visualization_path": "godot_scene",
+  "parameters": [
+    {
+      "id": "motion",
+      "label": "Subject anchor motion",
+      "type": "choice",
+      "default": "still",
+      "options": [
+        {
+          "value": "still",
+          "label": "Stationary"
+        },
+        {
+          "value": "turn",
+          "label": "Turn"
+        },
+        {
+          "value": "nod",
+          "label": "Nod"
+        },
+        {
+          "value": "translate",
+          "label": "Translate (side to side)"
+        }
+      ]
+    },
+    {
+      "id": "show_placeholder",
+      "label": "Show primitive integration placeholder",
+      "type": "bool",
+      "default": false
+    },
+    {
+      "id": "background",
+      "label": "Backdrop",
+      "type": "choice",
+      "default": "as_authored",
+      "options": [
+        {
+          "value": "as_authored",
+          "label": "As authored in scene"
+        },
+        {
+          "value": "slate",
+          "label": "Dark slate"
+        },
+        {
+          "value": "light",
+          "label": "Light neutral"
+        },
+        {
+          "value": "warm",
+          "label": "Warm contrast"
+        }
+      ]
+    }
+  ]
+}

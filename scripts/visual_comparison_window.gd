@@ -3,7 +3,7 @@ extends Window
 ## execution and camera/graphics settings: it only reads persisted images.
 
 const Comparison = preload("res://scripts/visual_comparison.gd")
-const ImageCapture = preload("res://scripts/image_capture.gd")
+const VisualAnalysisJob = preload("res://scripts/visual_analysis_job.gd")
 
 var capture_directory: String = "user://captures"
 var comparison_directory: String = "user://comparisons"
@@ -14,12 +14,17 @@ var _status: Label
 var _warnings: Label
 var _metrics: Label
 var _save_button: Button
+var _compare_button: Button
+var _refresh_button: Button
 var _zoom: HSlider
 var _images: Array[TextureRect] = []
 var _current_images: Array[Image] = []
 var _catalog: Array[Dictionary] = []
 var _comparison: Dictionary = {}
 var _save_sequence: int = 0
+var _worker: RefCounted
+var _operation: String = ""
+var _discard_result: bool = false
 
 
 func _ready() -> void:
@@ -29,6 +34,47 @@ func _ready() -> void:
 	close_requested.connect(_close_gallery)
 	_build_ui()
 	refresh_captures()
+
+
+func _exit_tree() -> void:
+	if _worker != null:
+		_worker.finish_on_shutdown()
+		_worker = null
+
+
+func analysis_busy() -> bool:
+	return _worker != null
+
+
+func _process(_delta: float) -> void:
+	_poll_analysis()
+
+
+func _poll_analysis() -> void:
+	if _worker == null or _worker.is_running():
+		return
+	var outcome: Dictionary = _worker.take_result()
+	_worker = null
+	_set_worker_controls(false)
+	if _discard_result:
+		_discard_result = false
+		return
+	if _operation == "export":
+		_status.text = ("Difference saved: " + String(outcome.get("image", ""))) if bool(outcome.get("ok", false)) else \
+			"Could not save difference: " + String(outcome.get("error", "Unknown export error"))
+		return
+	if not bool(outcome.get("ok", false)):
+		_status.text = String(outcome.get("error", "Comparison failed"))
+		return
+	_display_comparison(outcome)
+
+
+func _set_worker_controls(busy: bool) -> void:
+	_reference_picker.disabled = busy
+	_candidate_picker.disabled = busy
+	_refresh_button.disabled = busy
+	_compare_button.disabled = busy
+	_save_button.disabled = busy or not bool(_comparison.get("ok", false))
 
 
 func _build_ui() -> void:
@@ -58,14 +104,14 @@ func _build_ui() -> void:
 	selectors.add_child(_candidate_picker)
 	_reference_picker.item_selected.connect(_on_source_changed)
 	_candidate_picker.item_selected.connect(_on_source_changed)
-	var refresh := Button.new()
-	refresh.text = "Refresh"
-	refresh.pressed.connect(refresh_captures)
-	selectors.add_child(refresh)
-	var compare_button := Button.new()
-	compare_button.text = "Compare"
-	compare_button.pressed.connect(compare_selection)
-	selectors.add_child(compare_button)
+	_refresh_button = Button.new()
+	_refresh_button.text = "Refresh"
+	_refresh_button.pressed.connect(refresh_captures)
+	selectors.add_child(_refresh_button)
+	_compare_button = Button.new()
+	_compare_button.text = "Compare"
+	_compare_button.pressed.connect(compare_selection)
+	selectors.add_child(_compare_button)
 	_save_button = Button.new()
 	_save_button.text = "Save difference"
 	_save_button.disabled = true
@@ -86,7 +132,7 @@ func _build_ui() -> void:
 	_zoom.value_changed.connect(_update_zoom)
 	zoom_row.add_child(_zoom)
 	var caption := Label.new()
-	caption.text = "Scroll to inspect detail; same-size pixels are compared without alignment or resampling"
+	caption.text = "Full-resolution pixel metrics; large images have downsized display previews"
 	zoom_row.add_child(caption)
 
 	var panels := HBoxContainer.new()
@@ -141,6 +187,10 @@ func _clear_comparison() -> void:
 
 func _close_gallery() -> void:
 	hide()
+	# There is no blocking join here. An in-flight worker finishes in the
+	# background and its result is discarded; the host blocks new benchmarks
+	# until the worker has actually exited.
+	_discard_result = _worker != null
 	_clear_comparison()
 
 
@@ -159,6 +209,8 @@ func _selected_stem(picker: OptionButton) -> String:
 
 
 func refresh_captures() -> void:
+	if analysis_busy():
+		return
 	_clear_comparison()
 	var prev_ref: String = _selected_stem(_reference_picker)
 	var prev_candidate: String = _selected_stem(_candidate_picker)
@@ -205,33 +257,44 @@ func _update_zoom(scale: float) -> void:
 
 
 func compare_selection() -> void:
+	if analysis_busy():
+		return
 	_clear_comparison()
 	var a: String = _selected_stem(_reference_picker)
 	var b: String = _selected_stem(_candidate_picker)
 	if a.is_empty() or b.is_empty():
 		_status.text = "Select two saved captures"
 		return
-	var reference: Dictionary = Comparison.load_capture(capture_directory, a)
-	var candidate: Dictionary = Comparison.load_capture(capture_directory, b)
-	if not bool(reference.get("ok", false)) or not bool(candidate.get("ok", false)):
-		_status.text = "Load failed: %s%s" % [
-			String(reference.get("error", "")), String(candidate.get("error", ""))
-		]
+	_operation = "compare"
+	_discard_result = false
+	_worker = VisualAnalysisJob.new()
+	var error: Error = _worker.start_comparison(capture_directory, a, b)
+	if error != OK:
+		_worker = null
+		_status.text = "Could not start comparison worker: " + error_string(error)
 		return
-	var result: Dictionary = Comparison.compare(reference, candidate)
+	_set_worker_controls(true)
+	_status.text = "Loading and comparing captures on a low-priority CPU worker…"
+
+
+func _display_comparison(outcome: Dictionary) -> void:
+	var result: Dictionary = outcome["comparison"]
 	_comparison = result
-	_comparison["reference_stem"] = a
-	_comparison["candidate_stem"] = b
+	_comparison["reference_stem"] = outcome["reference_stem"]
+	_comparison["candidate_stem"] = outcome["candidate_stem"]
+	var reference: Dictionary = outcome["reference"]
+	var candidate: Dictionary = outcome["candidate"]
 	_comparison["reference_metadata"] = reference["metadata"].duplicate(true)
 	_comparison["candidate_metadata"] = candidate["metadata"].duplicate(true)
-	_show_image(0, reference["image"])
-	_show_image(1, candidate["image"])
+	var previews: Array = outcome["previews"]
+	_show_image(0, previews[0])
+	_show_image(1, previews[1])
 	var warnings: PackedStringArray = result.get("warnings", PackedStringArray())
 	_warnings.text = "Conditions to review: " + "\n".join(warnings) if not warnings.is_empty() else "Capture context fields match"
 	if not bool(result.get("ok", false)):
 		_status.text = String(result.get("error", "Could not compare captures"))
 		return
-	_show_image(2, result["difference_image"])
+	_show_image(2, previews[2])
 	var metrics: Dictionary = result["metrics"]
 	_metrics.text = "RGB MAE %.3f /255   •   RGB RMSE %.3f /255   •   changed (>8): %d / %d (%.2f%%)   •   max RGB Δ %d   •   alpha changed: %d" % [
 		float(metrics["rgb_mae_8bit"]), float(metrics["rgb_rmse_8bit"]),
@@ -239,12 +302,15 @@ func compare_selection() -> void:
 		float(metrics["changed_fraction"]) * 100.0, int(metrics["max_channel_difference_8bit"]),
 		int(metrics["alpha_changed_pixels"])
 	]
-	_status.text = "Compared %s → %s (encoded SDR RGB; not perceptual or HDR)" % [a, b]
+	_status.text = "Compared %s → %s (analysis %.1f ms; SDR, full resolution)" % [
+		String(_comparison["reference_stem"]), String(_comparison["candidate_stem"]),
+		float(outcome["elapsed_usec"]) / 1000.0
+	]
 	_save_button.disabled = false
 
 
 func _save_difference() -> void:
-	if not bool(_comparison.get("ok", false)):
+	if analysis_busy() or not bool(_comparison.get("ok", false)):
 		return
 	_save_sequence += 1
 	var stem: String = "difference_%s_p%d_%d" % [
@@ -263,8 +329,13 @@ func _save_difference() -> void:
 		"warnings": Array(_comparison["warnings"]),
 		"timestamp": Time.get_datetime_string_from_system()
 	}
-	var result: Dictionary = ImageCapture.write_image(
-		_comparison["difference_image"], comparison_directory, stem, metadata
-	)
-	_status.text = "Difference saved: " + String(result["image"]) if bool(result["ok"]) else \
-		"Cannot save difference: " + String(result["error"])
+	_operation = "export"
+	_discard_result = false
+	_worker = VisualAnalysisJob.new()
+	var error: Error = _worker.start_export(_comparison["difference_image"], comparison_directory, stem, metadata)
+	if error != OK:
+		_worker = null
+		_status.text = "Cannot start difference export: " + error_string(error)
+		return
+	_set_worker_controls(true)
+	_status.text = "Encoding and saving full-resolution difference image…"

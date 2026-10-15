@@ -129,13 +129,13 @@ func _verify() -> void:
 			_fail("Cannot reset stage translation fixture")
 			return
 		var authored_origin: Vector3 = stage.get_node("SubjectMotion").position
-		var authored_rotation: Vector3 = stage.get_node("SubjectMotion").rotation
+		var original_subject_rotation: Vector3 = stage.get_node("SubjectMotion").rotation
 		if not clock.seek(60):
 			_fail("Translation timeline could not seek to frame 60")
 			return
 		var translated: Vector3 = stage.get_node("SubjectMotion").position
 		if translated.distance_to(authored_origin) < 0.10 or \
-				not stage.get_node("SubjectMotion").rotation.is_equal_approx(authored_rotation):
+				not stage.get_node("SubjectMotion").rotation.is_equal_approx(original_subject_rotation):
 			_fail("Generic translation was missing or inadvertently rotated subject")
 			return
 		if not clock.seek(0) or not stage.get_node("SubjectMotion").position.is_equal_approx(authored_origin):

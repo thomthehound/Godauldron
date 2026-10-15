@@ -15,6 +15,17 @@ func _fail(message: String) -> void:
 	quit(1)
 
 
+func _await_window_idle(window: Window) -> bool:
+	var deadline: int = Time.get_ticks_msec() + 30000
+	while bool(window.call("analysis_busy")):
+		# Do not manually poll the job here: the window must retire workers
+		# through its own _process, including while hidden.
+		if Time.get_ticks_msec() > deadline:
+			return false
+		await process_frame
+	return true
+
+
 func _verify() -> void:
 	var directory: String = "user://visual-compare-smoke-%d" % OS.get_process_id()
 	var a := Image.create(4, 2, false, Image.FORMAT_RGBA8)
@@ -78,6 +89,14 @@ func _verify() -> void:
 	var warnings: String = "\n".join(result["warnings"])
 	if not warnings.contains("Camera") or not warnings.contains("graphics"):
 		_fail("The comparison omitted mismatched provenance warnings")
+		return
+
+	# Cooperative cancellation must stop pixel iteration before completing
+	# even for a mathematically valid source pair.
+	var stopped: Dictionary = Comparison.compare(reference, candidate, func() -> bool: return true)
+	if bool(stopped.get("ok", true)) or not bool(stopped.get("cancelled", false)) or \
+			stopped.has("difference_image"):
+		_fail("The comparison algorithm ignored cancellation requests")
 		return
 
 	var identical: Dictionary = Comparison.compare(reference, reference)
@@ -161,6 +180,22 @@ func _verify() -> void:
 	restored.store_string(JSON.stringify(reference["metadata"]))
 	restored.close()
 
+	# Display downsampling must never change the full-resolution source,
+	# resulting difference image, or the pixel statistics.
+	var full := Image.create(2048, 1024, false, Image.FORMAT_RGBA8)
+	full.fill(Color(0.25, 0.5, 0.75, 1))
+	var VisualAnalysisJob = preload("res://scripts/visual_analysis_job.gd")
+	var preview: Image = VisualAnalysisJob.preview_image(full)
+	if preview.get_size() != Vector2i(1536, 768) or \
+			full.get_size() != Vector2i(2048, 1024) or \
+			preview == full:
+		_fail("Large-image preview exceeded its budget or modified the source")
+		return
+	var small: Image = VisualAnalysisJob.preview_image(reference["image"])
+	if small != reference["image"]:
+		_fail("Small images were needlessly resized")
+		return
+
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
 	var window: Window = host.get("_comparison_window")
@@ -170,6 +205,22 @@ func _verify() -> void:
 	window.set("capture_directory", directory)
 	window.set("comparison_directory", "user://comparison-results-smoke-%d" % OS.get_process_id())
 	window.call("refresh_captures")
+	# An open viewer consumes its own UI/graphics resources even when idle.
+	# Block runs and captures for the whole visible session, not only workers.
+	window.visible = true
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")):
+		_fail("An open comparison window allowed a benchmark to start")
+		return
+	host.call("_start_campaign")
+	if host.get("_campaign") != null:
+		_fail("An open comparison window allowed a campaign to start")
+		return
+	host.call("_capture_screenshot")
+	if bool(host.get("_capture_pending")):
+		_fail("An open comparison window allowed a new GPU readback")
+		return
+	window.visible = false
 	var picker_a: OptionButton = window.get("_reference_picker")
 	var picker_b: OptionButton = window.get("_candidate_picker")
 	if picker_a.item_count != 3 or picker_b.item_count != 3:
@@ -188,6 +239,21 @@ func _verify() -> void:
 	picker_a.select(baseline_index)
 	picker_b.select(candidate_index)
 	window.call("compare_selection")
+	# Even a tiny test image now runs on an independently joined worker.
+	if not bool(window.call("analysis_busy")):
+		_fail("Comparing images did not reserve an asynchronous worker")
+		return
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")):
+		_fail("Benchmark started while analysis was still pending")
+		return
+	host.call("_start_campaign")
+	if host.get("_campaign") != null:
+		_fail("Campaign started while analysis was still pending")
+		return
+	if not await _await_window_idle(window):
+		_fail("Image comparison worker did not finish")
+		return
 	var ui_result: Dictionary = window.get("_comparison")
 	if not bool(ui_result.get("ok", false)):
 		_fail("Compare UI did not display valid source images")
@@ -204,7 +270,16 @@ func _verify() -> void:
 		return
 	picker_b.select(candidate_index)
 	window.call("compare_selection")
+	if not await _await_window_idle(window):
+		_fail("Second comparison worker did not finish")
+		return
 	window.call("_save_difference")
+	if not bool(window.call("analysis_busy")):
+		_fail("Saving a difference did not start an asynchronous worker")
+		return
+	if not await _await_window_idle(window):
+		_fail("Difference export worker did not finish")
+		return
 	var saved_status: String = (window.get("_status") as Label).text
 	if not saved_status.contains("Difference saved:"):
 		_fail("Comparison result could not be saved: " + saved_status)
@@ -221,6 +296,12 @@ func _verify() -> void:
 	if images != 1 or jsons != 1:
 		_fail("A persisted visual comparison did not produce one PNG/JSON pair")
 		return
+	for filename in filenames:
+		if filename.ends_with(".json"):
+			var saved_metadata: Variant = JSON.parse_string(FileAccess.get_file_as_string(saved_dir.path_join(filename)))
+			if typeof(saved_metadata) != TYPE_DICTIONARY or int(saved_metadata.get("analysis_elapsed_usec", -1)) < 0:
+				_fail("Saved difference omitted wall-clock analysis duration")
+				return
 	# Releasing a modal comparison window must drop both CPU-side Images and
 	# GPU-side ImageTexture references before subsequent showcase captures.
 	window.close_requested.emit()
@@ -237,5 +318,23 @@ func _verify() -> void:
 			_fail("Closing the comparison left stale magnified scroll extents")
 			return
 
-	print("Godauldron visual comparison smoke passed: matching, alpha, provenance, metadata validation, UI cleanup, saved diff")
+	# Close a window while a worker is running: no blocking join, no stale UI,
+	# and no new benchmark until the worker has truly retired.
+	window.call("compare_selection")
+	window.close_requested.emit()
+	if not bool(window.call("analysis_busy")):
+		_fail("Closing the comparison prematurely abandoned an unjoined worker")
+		return
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")):
+		_fail("Closing a busy window let background analysis contaminate a run")
+		return
+	if not await _await_window_idle(window):
+		_fail("Dismissed comparison worker did not retire")
+		return
+	if not (window.get("_comparison") as Dictionary).is_empty():
+		_fail("Dismissed comparison published an unwanted late result")
+		return
+
+	print("Godauldron visual comparison smoke passed: async jobs, run isolation, alpha, metadata, UI cleanup, saved diff")
 	quit(0)

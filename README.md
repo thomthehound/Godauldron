@@ -11,7 +11,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Fixed-step host experiment execution, per-run setup and result reporting.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
-- Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus optional on-demand build of upstream source.
+- Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
 
 The initial timing measures **CPU wall time inside host step calls**, not asynchronous GPU execution, frame latency, or complete frame performance. The reference fixture validates the harness; it is not a performance benchmark. Native SDK integration, GPU interoperability, reference image comparison, captures and advanced profiling are planned, not yet implemented.
 
@@ -30,7 +30,11 @@ On Linux, the preview fetch helper downloads the newest published upstream Godot
     python tools/fetch_preview.py
     .engine/godot --path . --editor
 
-For a master build, use the manual **Build upstream Godot** GitHub Actions workflow. A modified Godot fork is not currently required.
+For a build of upstream `master` at its current HEAD, choose **Actions → Build Godot master HEAD → Run workflow** after the workflow is available on the default branch. The defaults build `godotengine/godot` `master` on Linux and Windows. Both platforms build the same revision resolved when the run begins; they do not independently resolve a moving branch.
+
+Each artifact contains the editor, `extension_api.json`, `gdextension_interface.h`, and `source.txt` with build provenance. Godauldron integration smoke tests run after the builds.
+
+To exercise a proposed upstream change, select a public Godot fork and feature branch instead. The compiler is a reusable GitHub Actions workflow at [build-godot.yml](.github/workflows/build-godot.yml), with usage documented under [Engine tracking](docs/ENGINE_TRACKING.md).
 
 ## Extending the laboratory
 

@@ -15,6 +15,8 @@ var _image: Image
 var _stem: String = ""
 var _metadata: Dictionary = {}
 var _start_usec: int = 0
+var _cancel_mutex := Mutex.new()
+var _cancel_requested: bool = false
 
 
 func start_comparison(root: String, reference: String, candidate: String) -> Error:
@@ -47,6 +49,21 @@ func _start() -> Error:
 		_image = null
 		_metadata.clear()
 	return error
+
+
+func request_cancel() -> void:
+	# Only the main thread requests cancellation, but a worker may read it.
+	# A Mutex makes the cross-core handoff defined rather than accidental.
+	_cancel_mutex.lock()
+	_cancel_requested = true
+	_cancel_mutex.unlock()
+
+
+func _is_cancel_requested() -> bool:
+	_cancel_mutex.lock()
+	var requested: bool = _cancel_requested
+	_cancel_mutex.unlock()
+	return requested
 
 
 func is_started() -> bool:
@@ -99,10 +116,14 @@ static func preview_image(image: Image, maximum_edge: int = 1536) -> Image:
 
 
 func _execute() -> Dictionary:
+	if _is_cancel_requested():
+		return {"ok": false, "cancelled": true, "error": "Analysis cancelled"}
 	if _kind == "export":
 		return ImageCapture.write_image(_image, _root, _stem, _metadata)
 	var reference: Dictionary = Comparison.load_capture(_root, _reference)
 	var candidate: Dictionary = Comparison.load_capture(_root, _candidate)
+	if _is_cancel_requested():
+		return {"ok": false, "cancelled": true, "error": "Analysis cancelled"}
 	if not bool(reference.get("ok", false)) or not bool(candidate.get("ok", false)):
 		return {
 			"ok": false,
@@ -110,7 +131,9 @@ func _execute() -> Dictionary:
 				String(reference.get("error", "")), String(candidate.get("error", ""))
 			]
 		}
-	var comparison: Dictionary = Comparison.compare(reference, candidate)
+	var comparison: Dictionary = Comparison.compare(reference, candidate, _is_cancel_requested)
+	if _is_cancel_requested() or bool(comparison.get("cancelled", false)):
+		return {"ok": false, "cancelled": true, "error": "Analysis cancelled"}
 	var difference: Image = comparison.get("difference_image")
 	return {
 		"ok": true,

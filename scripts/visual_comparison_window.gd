@@ -191,6 +191,8 @@ func _close_gallery() -> void:
 	# background and its result is discarded; the host blocks new benchmarks
 	# until the worker has actually exited.
 	_discard_result = _worker != null
+	if _worker != null and _operation == "compare":
+		_worker.request_cancel()
 	_clear_comparison()
 
 

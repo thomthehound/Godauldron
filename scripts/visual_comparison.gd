@@ -111,7 +111,7 @@ static func provenance_warnings(a: Dictionary, b: Dictionary) -> PackedStringArr
 	return warnings
 
 
-static func compare(reference: Dictionary, candidate: Dictionary) -> Dictionary:
+static func compare(reference: Dictionary, candidate: Dictionary, cancelled: Callable = Callable()) -> Dictionary:
 	if not bool(reference.get("ok", false)) or not bool(candidate.get("ok", false)):
 		return {"ok": false, "error": "Both sources must be valid captures"}
 	var a: Image = reference["image"]
@@ -148,26 +148,32 @@ static func compare(reference: Dictionary, candidate: Dictionary) -> Dictionary:
 	var changed: int = 0
 	var changed_alpha: int = 0
 	var maximum_alpha: int = 0
-	for i in range(0, source_a.size(), 4):
-		var dr: int = absi(int(source_a[i]) - int(source_b[i]))
-		var dg: int = absi(int(source_a[i + 1]) - int(source_b[i + 1]))
-		var db: int = absi(int(source_a[i + 2]) - int(source_b[i + 2]))
-		var delta: int = maxi(dr, maxi(dg, db))
-		absolute_total += float(dr + dg + db)
-		squared_total += float(dr * dr + dg * dg + db * db)
-		maximum = maxi(maximum, delta)
-		if delta > CHANNEL_THRESHOLD:
-			changed += 1
-		var alpha_delta: int = absi(int(source_a[i + 3]) - int(source_b[i + 3]))
-		if alpha_delta > 0:
-			changed_alpha += 1
-		maximum_alpha = maxi(maximum_alpha, alpha_delta)
-		# Red/yellow indicates encoded RGB differences. Blue independently
-		# indicates alpha differences, including alpha-only pixel changes.
-		image_bytes[i] = mini(255, delta * 4)
-		image_bytes[i + 1] = mini(255, delta)
-		image_bytes[i + 2] = mini(255, alpha_delta * 4)
-		image_bytes[i + 3] = 255
+	# Cooperatively check once per 32 rows. This keeps the hot pixel loop
+	# free of mutex overhead while allowing users to dismiss huge comparisons.
+	var byte_stride: int = width * 4 * 32
+	for begin in range(0, source_a.size(), byte_stride):
+		if cancelled.is_valid() and bool(cancelled.call()):
+			return {"ok": false, "cancelled": true, "error": "Comparison cancelled"}
+		for i in range(begin, mini(begin + byte_stride, source_a.size()), 4):
+			var dr: int = absi(int(source_a[i]) - int(source_b[i]))
+			var dg: int = absi(int(source_a[i + 1]) - int(source_b[i + 1]))
+			var db: int = absi(int(source_a[i + 2]) - int(source_b[i + 2]))
+			var delta: int = maxi(dr, maxi(dg, db))
+			absolute_total += float(dr + dg + db)
+			squared_total += float(dr * dr + dg * dg + db * db)
+			maximum = maxi(maximum, delta)
+			if delta > CHANNEL_THRESHOLD:
+				changed += 1
+			var alpha_delta: int = absi(int(source_a[i + 3]) - int(source_b[i + 3]))
+			if alpha_delta > 0:
+				changed_alpha += 1
+			maximum_alpha = maxi(maximum_alpha, alpha_delta)
+			# Red/yellow indicates encoded RGB differences. Blue independently
+			# indicates alpha differences, including alpha-only pixel changes.
+			image_bytes[i] = mini(255, delta * 4)
+			image_bytes[i + 1] = mini(255, delta)
+			image_bytes[i + 2] = mini(255, alpha_delta * 4)
+			image_bytes[i + 3] = 255
 	if changed_alpha > 0:
 		warnings.append("Alpha differs in %d pixels (blue heatmap; excluded from RGB error statistics)" % changed_alpha)
 	var n: float = float(width) * float(height) * 3.0

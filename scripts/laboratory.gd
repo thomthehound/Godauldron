@@ -377,7 +377,7 @@ func _capture_provider_state(scene: Node) -> Dictionary:
 
 
 func _capture_screenshot() -> void:
-	if _comparison_window != null and bool(_comparison_window.call("analysis_busy")):
+	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
 		_status.text = "Image analysis in progress; capture cannot start yet"
 		return
 	if _capture_pending:
@@ -679,7 +679,7 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
-	if _comparison_window != null and bool(_comparison_window.call("analysis_busy")):
+	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
 		_status.text = "Image analysis in progress; campaign cannot start yet"
 		return
 	if _capture_pending:
@@ -777,7 +777,7 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
-	if _comparison_window != null and bool(_comparison_window.call("analysis_busy")):
+	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
 		_status.text = "Image analysis in progress; experiment cannot start yet"
 		return
 	if _capture_pending:

@@ -18,9 +18,8 @@ func _fail(message: String) -> void:
 func _await_window_idle(window: Window) -> bool:
 	var deadline: int = Time.get_ticks_msec() + 30000
 	while bool(window.call("analysis_busy")):
-		window.call("_poll_analysis")
-		if not bool(window.call("analysis_busy")):
-			break
+		# Do not manually poll the job here: the window must retire workers
+		# through its own _process, including while hidden.
 		if Time.get_ticks_msec() > deadline:
 			return false
 		await process_frame

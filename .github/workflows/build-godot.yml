@@ -91,13 +91,14 @@ jobs:
         run: |
           mkdir -p _engine_dist
           cp _engine_source/bin/godot.linuxbsd.editor.x86_64 _engine_dist/godot
-          cp _engine_source/core/extension/gdextension_interface.h _engine_dist/
           chmod +x _engine_dist/godot
           printf 'repository=%s\nrequested_ref=%s\nresolved_revision=%s\n' "$GODOT_REPOSITORY" "$GODOT_REF" "$GODOT_REVISION" > _engine_dist/source.txt
           cd _engine_dist
           ./godot --version
           ./godot --headless --dump-extension-api
+          ./godot --headless --dump-gdextension-interface
           test -s extension_api.json
+          test -s gdextension_interface.h
       - uses: actions/upload-artifact@v4
         with:
           name: godot-linux-editor
@@ -144,7 +145,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path _engine_dist | Out-Null
           Copy-Item "_engine_source\bin\godot.windows.editor.x86_64.exe" "_engine_dist\godot.exe"
-          Copy-Item "_engine_source\core\extension\gdextension_interface.h" "_engine_dist\"
           @(
             "repository=$env:GODOT_REPOSITORY"
             "requested_ref=$env:GODOT_REF"
@@ -156,7 +156,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             .\godot.exe --headless --dump-extension-api
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            .\godot.exe --headless --dump-gdextension-interface
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             if (!(Test-Path extension_api.json)) { throw "Missing extension_api.json" }
+            if (!(Test-Path gdextension_interface.h)) { throw "Missing gdextension_interface.h" }
           } finally {
             Pop-Location
           }

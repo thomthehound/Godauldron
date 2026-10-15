@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.showcase-inspection",
+  "display_name": "Showcase / Technical Inspection Stage",
+  "category": "Reusable stage templates",
+  "description": "A neutral technical stage with calibrated lighting, platform, camera and empty subject anchor. Replace placeholder with your own technology.",
+  "entry_scene": "res://scenes/showcase/inspection_stage.tscn",
+  "visualization_path": "godot_scene",
+  "parameters": [
+    {
+      "id": "motion",
+      "label": "Subject anchor motion",
+      "type": "choice",
+      "default": "still",
+      "options": [
+        {
+          "value": "still",
+          "label": "Stationary"
+        },
+        {
+          "value": "turn",
+          "label": "Turn"
+        },
+        {
+          "value": "nod",
+          "label": "Nod"
+        }
+      ]
+    },
+    {
+      "id": "show_placeholder",
+      "label": "Show neutral placeholder",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "id": "background",
+      "label": "Backdrop",
+      "type": "choice",
+      "default": "slate",
+      "options": [
+        {
+          "value": "slate",
+          "label": "Dark slate"
+        },
+        {
+          "value": "light",
+          "label": "Light neutral"
+        },
+        {
+          "value": "warm",
+          "label": "Warm contrast"
+        }
+      ]
+    }
+  ]
+}

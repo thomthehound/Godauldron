@@ -857,6 +857,9 @@ func _update_playback_ui() -> void:
 
 
 func _toggle_playback() -> void:
+	if _active_scene == null or not _active_scene.has_method("godauldron_step"):
+		_status.text = "This experiment does not provide a playback step callback"
+		return
 	if _has_active_run() or _capture_pending:
 		_status.text = "Playback unavailable during benchmark or capture"
 		return
@@ -903,6 +906,9 @@ func _seek_playback(seconds: float) -> void:
 
 func _on_playback_delta_changed(value: float) -> void:
 	if _has_active_run():
+		_playback_delta_control.set_block_signals(true)
+		_playback_delta_control.value = _playback.step_seconds
+		_playback_delta_control.set_block_signals(false)
 		_status.text = "Stop benchmark before changing playback delta"
 		return
 	_playback.bind(_active_scene, _collect_parameters(), value)
@@ -953,7 +959,10 @@ func _process(delta: float) -> void:
 			_playback_accumulator += minf(delta, 0.25)
 			var frames: int = 0
 			while _playback_accumulator >= _playback.step_seconds and frames < MAX_STEPS_PER_FRAME and _playback.playing:
-				_playback.step()
+				if not _playback.step():
+					_playback.pause()
+					_status.text = "Experiment playback ended: step callback unavailable"
+					break
 				_playback_accumulator -= _playback.step_seconds
 				frames += 1
 			if frames > 0:

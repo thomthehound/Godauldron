@@ -25,7 +25,9 @@ Exit gate: current upstream Godot opens the lab, reference runs are exportable a
 - [ ] Automated parameter sweeps, baseline comparisons and regression thresholds (sweeps, dispersion statistics, in-app results and optional engineering guards implemented; reproducible GPU regression policy pending)
 - [ ] Hardware/driver metadata, logs, screenshots, image diff and magnifier (PNG capture, provenance warnings, side-by-side views, background image diff/export, limited-resolution previews and magnification implemented; true pixel magnifier, image alignment and richer hardware data pending)
 - [ ] Host graphics presets, advanced quality controls and showcase/video modes (runtime viewport presets, initial advanced controls and experiment ownership implemented; exhaustive engine/scene settings, render-path negotiation, offline high-quality captures and video pending)
-- [ ] Independently testable host services and portable experiment schemas (runner extracted; catalog/capture pending)
+- [ ] Independently testable host services and portable experiment schemas (runner/playback extracted, native extension preflight and optional diagnostic path metadata added; broader SDK adapters and portable package validation pending)
+- [ ] LoxFX first consumer integration: real native binary smoke test on supported Windows/Linux builds, real groom import, interactive head movement and frame-sequence capture (portable package preflight, procedural hair studio and deterministic untimed controls implemented; native integration and authentic assets require LoxFX builds)
+- [ ] Native GPU interop capabilities, device/queue/barrier handoff and GPU-resident rendering adapter (keep adapter-neutral until production LoxFX integration supplies requirements and hardware evidence)
 
 Exit gate: a third party adds and compares an unrelated experiment without modifying core.
 

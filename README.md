@@ -14,6 +14,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Technical-scene gallery with named scene selections, bundled glTF 2.0 mesh specimen and Godot material study; imported scenes share the existing inspector and run contract.
 - Host graphics presets (Low, Medium, High, Ultra, Showcase), expandable per-setting controls with experiment ownership, and viewport PNG captures with adjacent provenance metadata.
 - Saved-capture comparison window with side-by-side images, magnification, RGB difference maps, channel-error statistics and warnings for mismatched experiment/camera/graphics settings.
+- Drop-in native experiment package preflight for external GDExtensions, plus an animated diagnostic hair studio and untimed fixed-step playback/seek controls.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
@@ -42,6 +43,12 @@ Each artifact contains the editor, `extension_api.json`, `gdextension_interface.
 To exercise a proposed upstream change, select a public Godot fork and feature branch instead. The compiler is a reusable GitHub Actions workflow at [build-godot.yml](.github/workflows/build-godot.yml), with usage documented under [Engine tracking](docs/ENGINE_TRACKING.md).
 
 To **test a particular PR against Godot master HEAD**, add the `ci:godot-head` label. This triggers a one-shot Linux and Windows source build and runs that PR's Godauldron code against the binaries. Ordinary PR builds and subsequent pushes never compile Godot. To re-test a changed PR with a fresh master revision, remove and reapply the label (or rerun the previous workflow if you intentionally want to test its original revision). Create the repository label once under GitHub **Issues → Labels** if it doesn't already exist. See [Engine tracking](docs/ENGINE_TRACKING.md#opt-in-per-pr-master-builds) for details.
+
+## External native experiments / LoxFX
+
+Developers can install an `experiments/<package>/` directory with its manifest, scene, `.gdextension` descriptor, native libraries and runtime dependencies. Godauldron discovers its manifest and checks the native requirements **before** replacing the selected experiment. No SDK or LoxFX headers are linked into the laboratory host. See [External native experiment packages](docs/NATIVE_EXPERIMENTS.md) for a complete layout and manifest example.
+
+The built-in **Hair / Motion Studio (Diagnostic)** is a controllable portrait-stage test fixture with several synthetic grooms, contrasting backgrounds, head movement, seeded geometry and optional provider guide overlays. **It is not LoxFX**, nor a production groom or physics benchmark. Use the Reset, Play/Pause, Step, Fixed Δt and Timeline controls for repeatable visual tests separate from measured experiments. See [LoxFX onboarding acceptance](docs/LOXFX_ONBOARDING.md).
 
 ## Graphics and captures
 

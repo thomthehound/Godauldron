@@ -117,6 +117,8 @@ func _verify() -> void:
 		_fail("Graphic setting or camera pose was not restored")
 		return
 	if not host.get("_inspection_grid_enabled") or not host.get("_inspection_bounds_enabled") or \
+			not (host.get("_inspection_grid_toggle") as CheckButton).button_pressed or \
+			not (host.get("_inspection_bounds_toggle") as CheckButton).button_pressed or \
 			int((host.get("_warmup_steps") as SpinBox).value) != 3 or \
 			int((host.get("_run_steps") as SpinBox).value) != 9:
 		_fail("Session overlays and benchmark settings failed to restore")

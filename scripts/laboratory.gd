@@ -43,6 +43,8 @@ var _camera_inspector: RefCounted = null
 var _inspection_overlay: Node3D
 var _inspection_bounds: AABB
 var _inspection_grid_enabled: bool = false
+var _inspection_grid_toggle: CheckButton
+var _inspection_bounds_toggle: CheckButton
 var _inspection_bounds_enabled: bool = false
 var _inspector_drag: int = 0
 var _camera_manipulated: bool = false
@@ -261,14 +263,14 @@ func _build_ui() -> void:
 	reset_button.text = "Reset camera"
 	reset_button.pressed.connect(_reset_inspection)
 	toolbar.add_child(reset_button)
-	var grid_button := CheckButton.new()
-	grid_button.text = "Grid / axes"
-	grid_button.toggled.connect(_toggle_inspection_grid)
-	toolbar.add_child(grid_button)
-	var bounds_button := CheckButton.new()
-	bounds_button.text = "Bounds"
-	bounds_button.toggled.connect(_toggle_inspection_bounds)
-	toolbar.add_child(bounds_button)
+	_inspection_grid_toggle = CheckButton.new()
+	_inspection_grid_toggle.text = "Grid / axes"
+	_inspection_grid_toggle.toggled.connect(_toggle_inspection_grid)
+	toolbar.add_child(_inspection_grid_toggle)
+	_inspection_bounds_toggle = CheckButton.new()
+	_inspection_bounds_toggle.text = "Bounds"
+	_inspection_bounds_toggle.toggled.connect(_toggle_inspection_bounds)
+	toolbar.add_child(_inspection_bounds_toggle)
 	var quality_label := Label.new()
 	quality_label.text = "Graphics"
 	toolbar.add_child(quality_label)
@@ -497,6 +499,14 @@ func _apply_session(document: Dictionary) -> bool:
 	_apply_graphics()
 	_inspection_grid_enabled = document["inspection"]["grid"]
 	_inspection_bounds_enabled = document["inspection"]["bounds"]
+	# Restoring render state without the UI controls would leave the toolbar
+	# lying about the current scene. Avoid callbacks during this atomic load.
+	_inspection_grid_toggle.set_block_signals(true)
+	_inspection_grid_toggle.button_pressed = _inspection_grid_enabled
+	_inspection_grid_toggle.set_block_signals(false)
+	_inspection_bounds_toggle.set_block_signals(true)
+	_inspection_bounds_toggle.button_pressed = _inspection_bounds_enabled
+	_inspection_bounds_toggle.set_block_signals(false)
 	_refresh_inspection_overlay()
 	var camera_state: Dictionary = document["camera"]
 	var camera: Camera3D = _viewport.get_camera_3d()

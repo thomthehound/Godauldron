@@ -264,8 +264,11 @@ func _build_ui() -> void:
 
 
 func _open_visual_comparison() -> void:
-	# Image analysis can use significant CPU resources. Keep it out of timed
-	# experiment steps, exactly as with GPU readback and capture encoding.
+	# The previous analysis may still be retiring after the modal closes.
+	if _comparison_window.analysis_busy():
+		_status.text = "Previous image analysis is finishing"
+		return
+	# Analysis never overlaps benchmark samples or GPU readbacks.
 	if _capture_pending:
 		_status.text = "Capture in progress; open comparison after it completes"
 		return
@@ -673,6 +676,9 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	if _comparison_window != null and _comparison_window.analysis_busy():
+		_status.text = "Image analysis in progress; campaign cannot start yet"
+		return
 	if _capture_pending:
 		_status.text = "Capture in progress; campaign cannot start yet"
 		return
@@ -768,6 +774,9 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	if _comparison_window != null and _comparison_window.analysis_busy():
+		_status.text = "Image analysis in progress; experiment cannot start yet"
+		return
 	if _capture_pending:
 		_status.text = "Capture in progress; experiment cannot start yet"
 		return

@@ -126,5 +126,45 @@ func _verify() -> void:
 	if bool(Capture.write_image(Image.new(), directory, "empty", {}).get("ok", false)):
 		_fail("Capture accepted an empty image")
 		return
-	print("Godauldron capture/graphics smoke passed: profiles, ownership, cancellation and PNG metadata")
+	# Screenshots may inspect previews before first setup without touching
+	# lifecycle metrics; post-run observation must not duplicate them either.
+	var probe: Node3D = preload("res://tests/fixtures/capture_metadata_probe.gd").new()
+	root.add_child(probe)
+	var preview_state: Dictionary = host.call("_capture_provider_state", probe)
+	if not bool(preview_state.get("preview_ready", false)) or \
+			int(probe.get("metric_calls")) != 0 or int(probe.get("capture_calls")) != 1:
+		_fail("Preview capture incorrectly called benchmark metrics before setup")
+		return
+	var runner = preload("res://scripts/experiment_run.gd").new()
+	runner.begin(probe, {}, 0, 3, 1.0 / 60.0)
+	runner.cancel()
+	var reported: Dictionary = runner.make_report("org.godauldron.capture-probe")
+	if int(probe.get("metric_calls")) != 1 or int(reported["experiment_metrics"]["setup_count"]) != 1:
+		_fail("Run finalization failed to collect exactly one lifecycle metric")
+		return
+	host.call("_capture_provider_state", probe)
+	if int(probe.get("metric_calls")) != 1 or int(probe.get("capture_calls")) != 2:
+		_fail("Post-run screenshot duplicated benchmark metrics")
+		return
+
+	# Pending captures reserve the frame interval synchronously, before await.
+	# Both public run entrypoints must reject the entire interval.
+	host.call("_capture_screenshot")
+	if not bool(host.get("_capture_pending")):
+		_fail("Screenshot did not enter pending capture state")
+		return
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")) or not (host.get("_status") as Label).text.contains("Capture in progress"):
+		_fail("A run was permitted during capture's pending frame")
+		return
+	host.call("_start_campaign")
+	if host.get("_campaign") != null or bool(host.call("_has_active_run")):
+		_fail("A campaign was permitted during pending capture")
+		return
+	host.call("_capture_screenshot")
+	if not bool(host.get("_capture_pending")):
+		_fail("Second screenshot request broke capture exclusion")
+		return
+
+	print("Godauldron capture/graphics smoke passed: profiles, ownership, lifecycle separation, pending-frame exclusion and PNG metadata")
 	quit(0)

@@ -32,6 +32,9 @@ The experiment root may implement:
     godauldron_begin_sample() -> void
     godauldron_step(fixed_delta: float) -> void
     godauldron_metrics() -> Dictionary
+    godauldron_capture_metadata() -> Dictionary  # optional, observation only
+
+The optional `godauldron_capture_metadata()` callback is independent of run metrics. It must be safe before setup and must not mutate simulation state. Screenshots never invoke `godauldron_metrics()` or fabricate a second finalized run.
 
 The `ExperimentRun` service owns the host-side lifecycle independently of the UI. The host calls setup once, then makes the requested number of optional warmup steps before measured steps. `godauldron_begin_sample()` is invoked exactly once at the sampling boundary (immediately after setup when warmup is zero). An adapter can use it to reset SDK statistics, but must not reset simulation state unless that is explicitly part of the experiment. `godauldron_metrics()` runs on completion or cancellation, including cancellation during warmup.
 

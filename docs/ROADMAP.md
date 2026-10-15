@@ -11,8 +11,8 @@ Milestones are defined by demonstrated capabilities rather than time estimates o
 - [x] Python regression tests
 - [x] Rolling published-preview compatibility workflow
 - [x] On-demand upstream source-build workflow
-- [ ] CI-verifiable real Godot import/launch and correct run-result export
-- [ ] Automatic assertions covering experiment lifecycle, not only scene load
+- [x] CI-verifiable real Godot import/launch and correct run-result export
+- [x] Automatic assertions covering experiment lifecycle, not only scene load
 
 Exit gate: current upstream Godot opens the lab, reference runs are exportable and CI reproduces those observations.
 

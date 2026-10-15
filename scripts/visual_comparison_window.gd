@@ -56,6 +56,8 @@ func _build_ui() -> void:
 	_candidate_picker = OptionButton.new()
 	_candidate_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	selectors.add_child(_candidate_picker)
+	_reference_picker.item_selected.connect(_on_source_changed)
+	_candidate_picker.item_selected.connect(_on_source_changed)
 	var refresh := Button.new()
 	refresh.text = "Refresh"
 	refresh.pressed.connect(refresh_captures)
@@ -126,6 +128,19 @@ func open_gallery() -> void:
 	popup_centered(Vector2i(1300, 790))
 
 
+func _on_source_changed(_index: int) -> void:
+	# A saved comparison belongs to the source pair originally evaluated.
+	# A selector change must not allow exporting a stale difference under
+	# newly selected filenames.
+	_comparison.clear()
+	_save_button.disabled = true
+	_status.text = "Capture selection changed; compare again to update results"
+	_metrics.text = ""
+	_warnings.text = ""
+	for i in range(_images.size()):
+		_show_image(i, null)
+
+
 func _selected_stem(picker: OptionButton) -> String:
 	if picker.selected < 0 or picker.selected >= picker.item_count:
 		return ""
@@ -133,6 +148,12 @@ func _selected_stem(picker: OptionButton) -> String:
 
 
 func refresh_captures() -> void:
+	_comparison.clear()
+	_save_button.disabled = true
+	for i in range(_images.size()):
+		_show_image(i, null)
+	_metrics.text = ""
+	_warnings.text = ""
 	var prev_ref: String = _selected_stem(_reference_picker)
 	var prev_candidate: String = _selected_stem(_candidate_picker)
 	_catalog = Comparison.catalog(capture_directory)
@@ -194,6 +215,10 @@ func compare_selection() -> void:
 		return
 	var result: Dictionary = Comparison.compare(reference, candidate)
 	_comparison = result
+	_comparison["reference_stem"] = a
+	_comparison["candidate_stem"] = b
+	_comparison["reference_metadata"] = reference["metadata"].duplicate(true)
+	_comparison["candidate_metadata"] = candidate["metadata"].duplicate(true)
 	_show_image(0, reference["image"])
 	_show_image(1, candidate["image"])
 	var warnings: PackedStringArray = result.get("warnings", PackedStringArray())
@@ -222,8 +247,11 @@ func _save_difference() -> void:
 	]
 	var metadata: Dictionary = {
 		"format_version": 1,
-		"reference_capture": _selected_stem(_reference_picker),
-		"candidate_capture": _selected_stem(_candidate_picker),
+		"reference_capture": _comparison["reference_stem"],
+		"candidate_capture": _comparison["candidate_stem"],
+		"source_capture_directory": capture_directory,
+		"reference_metadata": _comparison["reference_metadata"],
+		"candidate_metadata": _comparison["candidate_metadata"],
 		"method": _comparison["metrics"]["method"],
 		"metrics": _comparison["metrics"],
 		"warnings": Array(_comparison["warnings"]),

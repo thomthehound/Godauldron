@@ -119,7 +119,7 @@ func _verify() -> void:
 	samples_control.value = 4
 	host.call("_start_run")
 	_tick(host, 1)
-	host.call("_select_experiment", 0)
+	_select_reference(host)
 	var switched: Dictionary = _next_report(files)
 	if not _check_report(switched, false, 1, 0):
 		return

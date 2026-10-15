@@ -448,6 +448,12 @@ func _apply_session(document: Dictionary) -> bool:
 	if not bool(native_status.get("ok", false)):
 		_status.text = "Configuration native dependency unavailable: " + String(native_status.get("error", "unknown"))
 		return false
+	# The installed manifest may still reference a scene that was removed or
+	# cannot instantiate after an SDK update. Check it before ending a run.
+	var scene_resource: PackedScene = load(String(_experiments[target_index]["entry_scene"])) as PackedScene
+	if scene_resource == null:
+		_status.text = "Configuration experiment scene cannot be loaded"
+		return false
 	if _has_active_run():
 		_finish_run(false)
 	if _selected_experiment_index != target_index or _active_scene == null:

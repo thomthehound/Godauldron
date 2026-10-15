@@ -87,6 +87,41 @@ func _verify() -> void:
 		_fail("Identical captures produced a spurious difference")
 		return
 
+	# Alpha-only differences must be visible in the diagnostic image even
+	# though RGB error statistics intentionally exclude alpha.
+	var alpha_changed: Image = reference["image"].duplicate()
+	alpha_changed.set_pixel(0, 0, Color(0, 0, 0, 0))
+	var alpha_result: Dictionary = Comparison.compare(reference, {
+		"ok": true,
+		"image": alpha_changed,
+		"metadata": reference["metadata"]
+	})
+	if not bool(alpha_result.get("ok", false)) or \
+			int(alpha_result["metrics"]["alpha_changed_pixels"]) != 1 or \
+			int(alpha_result["metrics"]["changed_pixels"]) != 0 or \
+			int(alpha_result["metrics"]["max_alpha_difference_8bit"]) != 255 or \
+			not is_zero_approx(float(alpha_result["metrics"]["rgb_mae_8bit"])) or \
+			(alpha_result["difference_image"] as Image).get_pixel(0, 0).b < 0.99 or \
+			(alpha_result["difference_image"] as Image).get_pixel(0, 0).r > 0.01:
+		_fail("An alpha-only change is not visible or it corrupted RGB metrics")
+		return
+
+	# Provider state is optional only if BOTH sources omit it. Engine/build
+	# information also matters for interpreting nonzero pixel differences.
+	var state_a: Dictionary = common.duplicate(true)
+	var state_b: Dictionary = common.duplicate(true)
+	state_a["capture_state"] = {"scene_revision": 9}
+	state_a["engine"] = {"version": "Godot A"}
+	state_b["engine"] = {"version": "Godot B"}
+	var context_warning: String = "\n".join(Comparison.provenance_warnings(state_a, state_b))
+	if not context_warning.contains("capture_state") or \
+			not context_warning.contains("Godot engine"):
+		_fail("Missing provider state or differing Godot versions went unreported")
+		return
+	if "\n".join(Comparison.provenance_warnings(common, common)).contains("capture_state"):
+		_fail("An optional state missing from both sources should not be a mismatch")
+		return
+
 	var resized := Image.create(8, 2, false, Image.FORMAT_RGBA8)
 	resized.fill(Color(0, 0, 0, 1))
 	if not bool(Capture.write_image(resized, directory, "different_size", common).get("ok", false)):
@@ -111,6 +146,15 @@ func _verify() -> void:
 	sidecar.close()
 	if bool(Comparison.load_capture(directory, "baseline").get("ok", false)):
 		_fail("Image/metadata dimension disagreement was accepted")
+		return
+	# Malformed numeric fields used to cause invalid Variant-to-int casts.
+	corrupt["width"] = {"not_a_number": true}
+	var malformed: FileAccess = FileAccess.open(directory.path_join("baseline.json"), FileAccess.WRITE)
+	malformed.store_string(JSON.stringify(corrupt))
+	malformed.close()
+	if bool(Comparison.load_capture(directory, "baseline").get("ok", false)) or \
+			Comparison.catalog(directory).size() != 2:
+		_fail("Catalog or loader accepted an invalid dimension type")
 		return
 	# Restore for interactive comparison UI verification.
 	var restored: FileAccess = FileAccess.open(directory.path_join("baseline.json"), FileAccess.WRITE)
@@ -177,6 +221,18 @@ func _verify() -> void:
 	if images != 1 or jsons != 1:
 		_fail("A persisted visual comparison did not produce one PNG/JSON pair")
 		return
+	# Releasing a modal comparison window must drop both CPU-side Images and
+	# GPU-side ImageTexture references before subsequent showcase captures.
+	window.close_requested.emit()
+	if not (window.get("_comparison") as Dictionary).is_empty() or \
+			not (window.get("_save_button") as Button).disabled:
+		_fail("Closing the comparison window retained stale results")
+		return
+	var released_images: Array = window.get("_current_images")
+	for i in range(released_images.size()):
+		if released_images[i] != null or (panes[i] as TextureRect).texture != null:
+			_fail("Closing the comparison retained a large capture image/texture")
+			return
 
-	print("Godauldron visual comparison smoke passed: matching, metrics, provenance, image UI, saved diff")
+	print("Godauldron visual comparison smoke passed: matching, alpha, provenance, metadata validation, UI cleanup, saved diff")
 	quit(0)

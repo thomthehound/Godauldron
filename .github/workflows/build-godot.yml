@@ -91,6 +91,8 @@ jobs:
         run: |
           mkdir -p _engine_dist
           cp _engine_source/bin/godot.linuxbsd.editor.x86_64 _engine_dist/godot
+          cp _engine_source/LICENSE.txt _engine_dist/
+          cp _engine_source/COPYRIGHT.txt _engine_dist/
           chmod +x _engine_dist/godot
           printf 'repository=%s\nrequested_ref=%s\nresolved_revision=%s\n' "$GODOT_REPOSITORY" "$GODOT_REF" "$GODOT_REVISION" > _engine_dist/source.txt
           cd _engine_dist
@@ -145,6 +147,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path _engine_dist | Out-Null
           Copy-Item "_engine_source\bin\godot.windows.editor.x86_64.exe" "_engine_dist\godot.exe"
+          Copy-Item "_engine_source\LICENSE.txt" "_engine_dist\"
+          Copy-Item "_engine_source\COPYRIGHT.txt" "_engine_dist\"
+          Get-ChildItem "_engine_source\bin" -File -Filter "*.dll" | Copy-Item -Destination "_engine_dist\"
+          if (!(Test-Path "_engine_dist\D3D12Core.dll")) { throw "D3D12 Agility runtime missing from build output" }
           @(
             "repository=$env:GODOT_REPOSITORY"
             "requested_ref=$env:GODOT_REF"

@@ -1,6 +1,7 @@
 extends SceneTree
-## Consumer onboarding contract: native package isolation and deterministic,
-## untimed visual reference playback. No LoxFX binary is bundled in CI.
+## Consumer contract: native package failure isolation, editable studio stages,
+## provider attachment points and deterministic untimed stage playback.
+## No LoxFX binaries or synthetic LoxFX hair simulation are shipped.
 
 const NativePackage = preload("res://scripts/native_experiment_package.gd")
 const Playback = preload("res://scripts/experiment_playback.gd")
@@ -15,191 +16,167 @@ func _fail(message: String) -> void:
 	quit(1)
 
 
-func _vertices(scene: Node) -> PackedVector3Array:
-	var head: Node3D = scene.get_node("HeadMotion")
-	var hair: MeshInstance3D = head.get_node("CPUHairRibbons_Diagnostic")
-	return hair.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
-
-
-func _equivalent(a: PackedVector3Array, b: PackedVector3Array, epsilon: float = 0.00001) -> bool:
-	if a.size() != b.size():
-		return false
-	for i in range(a.size()):
-		if a[i].distance_to(b[i]) > epsilon:
-			return false
-	return true
+func _select(host: Node, identifier: String) -> bool:
+	var manifests: Array = host.get("_experiments")
+	for index in range(manifests.size()):
+		if manifests[index].get("id") == identifier:
+			host.call("_select_experiment", index)
+			return true
+	return false
 
 
 func _verify() -> void:
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
-	var manifest_list: Array = host.get("_experiments")
-	var reference_index: int = -1
-	var hair_index: int = -1
-	for i in range(manifest_list.size()):
-		match String(manifest_list[i].get("id", "")):
-			"org.godauldron.reference":
-				reference_index = i
-			"org.godauldron.hair-reference":
-				hair_index = i
-	if reference_index < 0 or hair_index < 0:
-		_fail("Reference and hair experiment packages were not discovered")
+	var manifests: Array = host.get("_experiments")
+	var reference: int = -1
+	for index in range(manifests.size()):
+		if manifests[index].get("id") == "org.godauldron.reference":
+			reference = index
+	if reference < 0:
+		_fail("Baseline experiment was not discovered")
 		return
 
-	# Reject an absent extension BEFORE disrupting a valid active benchmark.
-	host.call("_select_experiment", reference_index)
+	# A bad extension must fail before tearing down a working experiment.
+	host.call("_select_experiment", reference)
 	var working: Node = host.get("_active_scene")
-	var bad: Dictionary = manifest_list[reference_index].duplicate(true)
-	bad["id"] = "org.godauldron.native-missing"
-	bad["display_name"] = "Uninstalled native extension"
-	bad["native_extensions"] = ["res://experiments/native-missing/loxfx.gdextension"]
-	manifest_list.append(bad)
-	(host.get("_list") as ItemList).add_item("Uninstalled native extension")
+	var missing: Dictionary = manifests[reference].duplicate(true)
+	missing["id"] = "org.godauldron.native-missing"
+	missing["display_name"] = "Uninstalled GDExtension"
+	missing["native_extensions"] = ["res://experiments/native-missing/not-installed.gdextension"]
+	manifests.append(missing)
+	(host.get("_list") as ItemList).add_item("Uninstalled GDExtension")
 	var run_steps: SpinBox = host.get("_run_steps")
 	run_steps.value = 6
 	host.call("_start_run")
 	host.call("_process", 1.0 / 60.0)
-	host.call("_select_experiment", manifest_list.size() - 1)
+	host.call("_select_experiment", manifests.size() - 1)
 	if host.get("_active_scene") != working or not bool(host.call("_has_active_run")):
-		_fail("Missing native binary destroyed the working experiment or run")
+		_fail("An unavailable native package stopped/replaced the running experiment")
 		return
 	if not (host.get("_status") as Label).text.contains("descriptor missing"):
-		_fail("Missing native extension did not surface a useful error")
+		_fail("Missing native dependency did not provide a useful error")
 		return
 	host.call("_stop_run")
 
-	if not bool(NativePackage.preflight(manifest_list[hair_index]).get("ok", false)):
-		_fail("Portable visual-only experiments should require no native binaries")
-		return
-	host.call("_select_experiment", hair_index)
-	var stage: Node3D = host.get("_active_scene")
-	if stage == null or not stage.has_method("godauldron_seek"):
-		_fail("Hair studio did not load its deterministic playback interface")
-		return
-	var values: Dictionary = {
-		"groom": "long_waves", "motion": "turn", "seed": 23,
-		"density": 120, "background": "slate", "guides": true
-	}
-	var playback = Playback.new()
-	playback.bind(stage, values, 1.0 / 60.0)
-	if not playback.reset():
-		_fail("Hair reference cannot reset independently of benchmark runs")
-		return
-	var initial: PackedVector3Array = _vertices(stage)
-	var first_context: Dictionary = stage.call("godauldron_capture_metadata")
-	if not String(first_context.get("groom_asset", "")).ends_with("long_waves.json") or 			not String(first_context.get("groom_load_error", "")).is_empty():
-		_fail("Named groom asset failed to load into reference studio")
-		return
-	if initial.size() != 120 * 12 * 6:
-		_fail("Hair fixture density was not applied to generated geometry")
-		return
-	for step in range(90):
-		if not playback.step():
-			_fail("A deterministic hair playback step was rejected")
+	for kind in ["portrait", "inspection"]:
+		var template: String = "res://scenes/showcase/%s_stage.tscn" % kind
+		var scene: PackedScene = load(template) as PackedScene
+		if scene == null:
+			_fail("Cannot edit/instantiate studio template: " + template)
 			return
-	var stepped: PackedVector3Array = _vertices(stage)
-	if _equivalent(initial, stepped):
-		_fail("Moving diagnostic groom did not change between head poses")
-		return
-	if not playback.seek(0):
-		_fail("Rewinding an analytic groom failed")
-		return
-	if not _equivalent(initial, _vertices(stage)):
-		_fail("Returning to timeline origin failed to reproduce original strands")
-		return
-	if not playback.seek(90) or not _equivalent(stepped, _vertices(stage)):
-		_fail("Seeking to an exact step did not reproduce deterministic hair")
-		return
-	playback.bind(stage, values, 1.0 / 60.0)
-	playback.reset()
-	for step in range(90):
-		playback.step()
-	if not _equivalent(stepped, _vertices(stage)):
-		_fail("Repeated fixed-input playback has diverged")
-		return
+		if not _select(host, "org.godauldron.showcase-" + kind):
+			_fail("Studio stage not discoverable through manifest: " + kind)
+			return
+		var stage: Node3D = host.get("_active_scene")
+		var anchor: Node3D = stage.get_node("SubjectMotion/SubjectAnchor")
+		var placeholder: Node3D = stage.get_node("SubjectMotion/NeutralSubject")
+		var camera: Camera3D = stage.get_node("StageCamera")
+		var world: WorldEnvironment = stage.get_node("StageEnvironment")
+		var key_light: DirectionalLight3D = stage.get_node("KeySoft")
+		var fill: OmniLight3D = stage.get_node("FillSoft")
+		var rim: OmniLight3D = stage.get_node("RimBack")
+		if anchor == null or camera == null or not camera.current or world == null or \
+				key_light == null or fill == null or rim == null:
+			_fail("A showcase stage lacks its editable camera/light/attachment rig")
+			return
+		# Adding provider-owned nodes to the anchor must not be disturbed by
+		# stage stepping or by hiding the optional neutral reference subject.
+		var provided := Node3D.new()
+		provided.name = "ProviderOwnedVisual"
+		anchor.add_child(provided)
+		stage.call("godauldron_preview", {
+			"motion": "turn", "show_placeholder": false, "background": "light"
+		})
+		if placeholder.visible or provided.get_parent() != anchor:
+			_fail("Optional placeholder toggle destroyed or displaced provider content")
+			return
+		var clock = Playback.new()
+		var parameters := {"motion": "turn", "show_placeholder": false, "background": "light"}
+		clock.bind(stage, parameters, 1.0 / 60.0)
+		if not clock.reset():
+			_fail("A stage cannot reset its presentation timeline")
+			return
+		var origin: Vector3 = stage.get_node("SubjectMotion").rotation
+		for step in range(90):
+			if not clock.step():
+				_fail("Deterministic stage step unavailable")
+				return
+		var moved: Vector3 = stage.get_node("SubjectMotion").rotation
+		if moved.distance_to(origin) < 0.01:
+			_fail("Moving stage anchor did not animate")
+			return
+		if not clock.seek(0) or stage.get_node("SubjectMotion").rotation.distance_to(origin) > 0.000001:
+			_fail("Stage did not return to its baseline pose")
+			return
+		if not clock.seek(90) or stage.get_node("SubjectMotion").rotation.distance_to(moved) > 0.000001:
+			_fail("Stage did not reproduce the same pose at a specified frame")
+			return
+		stage.call("godauldron_preview", {
+			"motion": "still", "show_placeholder": true, "background": "slate"
+		})
+		clock.bind(stage, {"motion": "still", "show_placeholder": true}, 1.0 / 60.0)
+		clock.reset()
+		var still: Vector3 = stage.get_node("SubjectMotion").rotation
+		if not clock.seek(120) or stage.get_node("SubjectMotion").rotation.distance_to(still) > 0.000001:
+			_fail("Stationary visual reference did not remain stationary")
+			return
+		if stage.get_node("SubjectMotion/SubjectAnchor/ProviderOwnedVisual") != provided:
+			_fail("Presentation resets removed an experiment-owned visual node")
+			return
+		var metadata: Dictionary = stage.call("godauldron_capture_metadata")
+		if metadata.get("stage_kind") != kind or not metadata.has("stage_camera_fov"):
+			_fail("Stage capture metadata omitted presentation conditions")
+			return
+		if bool(stage.call("godauldron_metrics").get("simulation_performance_claimed", true)):
+			_fail("Presentation-stage metrics claim simulation performance")
+			return
 
-	# A second groom is an independently authored preset asset, not just a
-	# UI label mapped back to the same generated vertex data.
-	values["groom"] = "bob"
-	playback.bind(stage, values, 1.0 / 60.0)
-	playback.reset()
-	var bob: PackedVector3Array = _vertices(stage)
-	if _equivalent(initial, bob) or not String(stage.call("godauldron_capture_metadata")["groom_asset"]).ends_with("short_bob.json"):
-		_fail("The short groom asset did not produce distinct geometry")
+	# Confirm the actual host playback UI remains independent of timed runs.
+	if not _select(host, "org.godauldron.showcase-portrait"):
+		_fail("Could not return to portrait stage")
 		return
-	values["groom"] = "long_waves"
-	values["motion"] = "still"
-	playback.bind(stage, values, 1.0 / 60.0)
-	playback.reset()
-	var still: PackedVector3Array = _vertices(stage)
-	if not playback.seek(120) or not _equivalent(still, _vertices(stage)):
-		_fail("Stationary hair comparison changed over timeline")
-		return
-	var camera: Camera3D = stage.get_node("PortraitCamera")
-	if camera == null or not camera.current:
-		_fail("Hair stage did not supply an inspection camera")
-		return
-	var snapshot: Dictionary = stage.call("godauldron_capture_metadata")
-	if snapshot.get("display_path") != "host_cpu_procedural_ribbon_reference":
-		_fail("Diagnostic hair path was mislabeled")
-		return
-
-	# UI playback must not create reports or count performance samples.
 	host.call("_reset_playback")
 	host.call("_step_playback")
-	if host.get("_run") != null or bool(host.call("_has_active_run")):
-		_fail("Manual playback was incorrectly recorded as a measured run")
+	if bool(host.call("_has_active_run")) or host.get("_run") != null:
+		_fail("Interactive stage stepping incorrectly created a benchmark")
 		return
-	var ui: Dictionary = (host.get("_playback")).snapshot()
-	if int(ui.get("steps", -1)) != 1:
-		_fail("Manual single-step did not advance one fixed timestep")
+	if int((host.get("_playback")).snapshot().get("steps", -1)) != 1:
+		_fail("Single-step playback did not advance exactly once")
 		return
 	host.call("_seek_playback", 1.0)
-	if int((host.get("_playback")).snapshot()["steps"]) != 60:
-		_fail("Timeline UI could not seek to a reproducible second")
+	if int((host.get("_playback")).snapshot().get("steps", -1)) != 60:
+		_fail("Timeline UI failed to seek to a reproducible frame")
 		return
-	# Play/Pause advances only the interactive timeline and leaves the
-	# benchmark runner uninstantiated until Run experiment is requested.
 	host.call("_toggle_playback")
-	if not bool((host.get("_playback")).playing):
-		_fail("Interactive play did not start with a fixed-step provider")
-		return
 	host.call("_process", 0.1)
 	host.call("_toggle_playback")
-	var paused_step: int = int((host.get("_playback")).snapshot()["steps"])
-	if paused_step <= 0 or bool((host.get("_playback")).playing):
-		_fail("Play/Pause failed to advance then stop the interactive timeline")
+	var paused: int = (host.get("_playback")).step_index
+	if paused <= 60 or (host.get("_playback")).playing:
+		_fail("Play/Pause failed to advance then stop the unmeasured stage timeline")
 		return
 	host.call("_process", 0.1)
-	if int((host.get("_playback")).snapshot()["steps"]) != paused_step or host.get("_run") != null:
-		_fail("Paused playback kept advancing or fabricated benchmark measurements")
+	if (host.get("_playback")).step_index != paused or host.get("_run") != null:
+		_fail("Paused stage continued moving or fabricated measured samples")
 		return
-
 	run_steps.value = 2
 	host.call("_start_run")
 	host.call("_process", 1.0 / 60.0)
 	host.call("_process", 1.0 / 60.0)
 	if bool(host.call("_has_active_run")):
-		_fail("Measured run did not finish independently of previous playback")
-		return
-	# The visual gallery has setup/preview but no native simulation step;
-	# its playback button must fail closed rather than appearing to play.
-	var gallery_index: int = -1
-	for i in range(manifest_list.size()):
-		if manifest_list[i].get("id") == "org.godauldron.technical-gallery":
-			gallery_index = i
-	if gallery_index < 0:
-		_fail("Missing non-playable technical scene for playback guard test")
-		return
-	host.call("_select_experiment", gallery_index)
-	host.call("_toggle_playback")
-	if bool((host.get("_playback")).playing):
-		_fail("Non-playable gallery incorrectly entered continuous playback")
+		_fail("Measured stage fixture did not finish after interactive playback")
 		return
 
-	var label: Dictionary = NativePackage.display_path(manifest_list[hair_index])
+	var label: Dictionary = NativePackage.display_path({"visualization_path": "diagnostic_cpu_bridge"})
 	if label["kind"] != "diagnostic_cpu_bridge" or not String(label["disclaimer"]).contains("not production"):
-		_fail("Diagnostic display was presented as production simulation performance")
+		_fail("CPU diagnostic display was mislabeled as native production performance")
 		return
-	print("Godauldron native onboarding and animated hair playback smoke passed")
+	if not _select(host, "org.godauldron.technical-gallery"):
+		_fail("Missing negative-control experiment without simulation step")
+		return
+	host.call("_toggle_playback")
+	if (host.get("_playback")).playing:
+		_fail("Experiment without a step callback entered fake playback")
+		return
+	print("Godauldron native package and showcase-stage smoke passed")
 	quit(0)

@@ -122,6 +122,32 @@ func _verify() -> void:
 		if not clock.seek(90) or stage.get_node("SubjectMotion").rotation.distance_to(moved) > 0.000001:
 			_fail("Stage did not reproduce the same pose at a specified frame")
 			return
+		# Pure translational motion is independently reproducible and moves
+		# provider-owned attachments without rotating their transforms.
+		clock.bind(stage, {"motion": "translate", "show_placeholder": false}, 1.0 / 60.0)
+		if not clock.reset():
+			_fail("Cannot reset stage translation fixture")
+			return
+		var authored_origin: Vector3 = stage.get_node("SubjectMotion").position
+		var authored_rotation: Vector3 = stage.get_node("SubjectMotion").rotation
+		if not clock.seek(60):
+			_fail("Translation timeline could not seek to frame 60")
+			return
+		var translated: Vector3 = stage.get_node("SubjectMotion").position
+		if translated.distance_to(authored_origin) < 0.10 or \
+				not stage.get_node("SubjectMotion").rotation.is_equal_approx(authored_rotation):
+			_fail("Generic translation was missing or inadvertently rotated subject")
+			return
+		if not clock.seek(0) or not stage.get_node("SubjectMotion").position.is_equal_approx(authored_origin):
+			_fail("Translation reset did not preserve authored rig origin")
+			return
+		if not clock.seek(60) or stage.get_node("SubjectMotion").position.distance_to(translated) > 0.000001:
+			_fail("Identical fixed input did not reproduce translation")
+			return
+		if provided.get_parent() != anchor:
+			_fail("Translation displaced provider-owned attached node")
+			return
+
 		stage.call("godauldron_preview", {
 			"motion": "still", "show_placeholder": true, "background": "slate"
 		})

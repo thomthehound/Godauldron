@@ -8,6 +8,7 @@ extends Node3D
 var _params: Dictionary = {}
 var _time: float = 0.0
 var _authored_background: Color
+var _authored_subject_position: Vector3
 
 @onready var _subject_motion: Node3D = $SubjectMotion
 @onready var _neutral_subject: Node3D = $SubjectMotion/NeutralSubject
@@ -19,6 +20,7 @@ func _ready() -> void:
 	# Camera transforms and environment resources are editor-authored. The
 	# host should not overwrite a project's composition just by loading it.
 	_authored_background = _environment.environment.background_color
+	_authored_subject_position = _subject_motion.position
 	_camera.current = true
 	godauldron_preview({"motion": "still", "show_placeholder": true, "background": "as_authored"})
 
@@ -60,12 +62,17 @@ func godauldron_seek(seconds: float) -> void:
 func _update_pose() -> void:
 	# Analytic motion of a scene attachment. It is not a simulation of hair.
 	_subject_motion.rotation = Vector3.ZERO
+	_subject_motion.position = _authored_subject_position
 	match String(_params.get("motion", "still")):
 		"turn":
 			_subject_motion.rotation.y = 0.36 * sin(_time * 1.5)
 			_subject_motion.rotation.z = 0.055 * sin(_time * 1.13)
 		"nod":
 			_subject_motion.rotation.x = 0.19 * sin(_time * 1.8)
+		"translate":
+			# Pure translation of the authored subject rig: no head rotation,
+			# hair solver, hidden physics step, or accumulated integration.
+			_subject_motion.position.x += 0.34 * sin(_time * 1.5)
 
 
 func godauldron_inspection_bounds() -> AABB:
@@ -76,6 +83,11 @@ func godauldron_capture_metadata() -> Dictionary:
 	return {
 		"stage_kind": stage_kind,
 		"seconds": _time,
+		"subject_translation": [
+			_subject_motion.position.x - _authored_subject_position.x,
+			_subject_motion.position.y - _authored_subject_position.y,
+			_subject_motion.position.z - _authored_subject_position.z
+		],
 		"motion": String(_params.get("motion", "still")),
 		"background": String(_params.get("background", "slate")),
 		"placeholder_visible": _neutral_subject.visible,

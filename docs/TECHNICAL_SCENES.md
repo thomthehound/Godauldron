@@ -21,7 +21,7 @@ Add a `.gltf`, `.glb`, `.tscn` or `.scn` under the project. Import the project i
 
 The value is a project-local resource path. A choice parameter's default must match one of its options. Other experiments can use the same generic choice control for entirely different categorical settings.
 
-Selecting a scene previews it immediately via the optional `godauldron_preview(parameters)` callback, without producing a measurement report. Starting a run reconstructs that scene inside `godauldron_setup(parameters)`, outside the measured stepping phase. The gallery does not claim GPU duration from trivial host callbacks.
+Selecting a scene previews it immediately via the optional `godauldron_preview(parameters)` callback, without producing a measurement report. **Changing a scene choice during an active run or campaign first cancels and saves the interrupted measurement using its original scene identity, then previews the new selection.** This prevents mixed-asset reports; remaining campaign cases do not proceed after a scene change. Starting a new run reconstructs the chosen scene inside `godauldron_setup(parameters)`, outside the measured stepping phase. The gallery does not claim GPU duration from trivial host callbacks.
 
 A load failure is recorded and a previous valid preview remains visible. The gallery requires a 3D scene root. It does not automatically execute arbitrary non-scene files or introduce a separate glTF implementation.
 

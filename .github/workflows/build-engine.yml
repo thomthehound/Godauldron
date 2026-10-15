@@ -1,86 +1,73 @@
-name: Build upstream Godot
+name: Build Godot master HEAD
 
 on:
   workflow_dispatch:
     inputs:
-      upstream_ref:
-        description: Upstream Godot branch or tag
-        required: true
-        default: master
+      godot_repository:
+        description: Godot source repository (owner/repo; use a fork for upstream work)
         type: string
+        default: godotengine/godot
+        required: true
+      upstream_ref:
+        description: Upstream branch or tag (master resolves to HEAD when run)
+        type: string
+        default: master
+        required: true
+      build_linux:
+        description: Build Linux editor
+        type: boolean
+        default: true
+      build_windows:
+        description: Build Windows editor
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
 
 jobs:
-  linux-editor:
+  build:
+    uses: ./.github/workflows/build-godot.yml
+    with:
+      godot_repository: ${{ inputs.godot_repository }}
+      upstream_ref: ${{ inputs.upstream_ref }}
+      build_linux: ${{ inputs.build_linux }}
+      build_windows: ${{ inputs.build_windows }}
+
+  smoke-linux:
+    name: Godauldron smoke (Linux)
+    needs: build
+    if: inputs.build_linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          repository: godotengine/godot
-          ref: ${{ inputs.upstream_ref }}
-          path: _engine_source
-          fetch-depth: 1
-      - name: Install build dependencies
+          name: godot-linux-editor
+          path: .engine
+      - name: Import and test Godauldron
         run: |
-          sudo apt-get update
-          sudo apt-get install -y scons pkg-config build-essential libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libudev-dev libgl1-mesa-dev
-      - name: Compile Linux editor
-        working-directory: _engine_source
-        run: scons platform=linuxbsd target=editor -j 2
-      - name: Stage editor
-        run: |
-          mkdir -p .engine
-          cp _engine_source/bin/godot.linuxbsd.editor.* .engine/godot
           chmod +x .engine/godot
           .engine/godot --version
-      - name: Smoke test Godauldron
-        run: |
           .engine/godot --headless --path . --editor --import --quit
           .engine/godot --headless --path . --script res://tests/runtime_smoke.gd
-      - uses: actions/upload-artifact@v4
-        with:
-          name: godauldron-upstream-godot-linux-editor
-          path: .engine/godot
-          retention-days: 14
 
-  windows-editor:
-    runs-on: windows-2022
-    timeout-minutes: 180
+  smoke-windows:
+    name: Godauldron smoke (Windows)
+    needs: build
+    if: inputs.build_windows
+    runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          repository: godotengine/godot
-          ref: ${{ inputs.upstream_ref }}
-          path: _engine_source
-          fetch-depth: 1
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Retrieve Windows rendering dependencies
-        shell: pwsh
-        working-directory: _engine_source
-        run: |
-          python misc/scripts/install_d3d12_sdk_windows.py
-          python misc/scripts/install_angle.py
-          python misc/scripts/install_accesskit.py
-      - name: Compile upstream Windows editor
-        shell: pwsh
-        working-directory: _engine_source
-        run: |
-          python -m pip install scons
-          scons platform=windows target=editor -j 2
-      - name: Stage and smoke test editor
+          name: godot-windows-editor
+          path: .engine
+      - name: Import and test Godauldron
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path .engine
-          Copy-Item "_engine_source\bin\godot.windows.editor.x86_64.exe" ".engine\godot.exe"
           .\.engine\godot.exe --version
           .\.engine\godot.exe --headless --path . --editor --import --quit
           .\.engine\godot.exe --headless --path . --script res://tests/runtime_smoke.gd
-      - uses: actions/upload-artifact@v4
-        with:
-          name: godauldron-upstream-godot-windows-editor
-          path: .engine/godot.exe
-          retention-days: 14

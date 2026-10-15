@@ -145,7 +145,10 @@ func _verify() -> void:
 		"warmup_steps": 0,
 		"sample_steps": 5
 	}
-	host.set("_campaign_plans", [plan])
+	# Append to the host's typed Array[Dictionary], rather than assigning an
+	# untyped Array to its typed property through Node.set().
+	var plans: Array = host.get("_campaign_plans")
+	plans.append(plan)
 	var campaign_picker: OptionButton = host.get("_campaign_picker")
 	campaign_picker.clear()
 	campaign_picker.add_item("Synthetic gallery campaign")

@@ -8,6 +8,7 @@ from typing import Any
 
 ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$")
 KINDS = {"int", "float", "bool", "choice"}
+VISUALIZATION_PATHS = {"godot_scene", "diagnostic_cpu_bridge", "provider_native_visual"}
 GRAPHICS_KEYS = {
     "scaling_3d_scale", "msaa_3d", "screen_space_aa",
     "use_taa", "use_debanding", "positional_shadow_atlas_size",
@@ -36,6 +37,32 @@ def validate_manifest(data: Any, root: Path) -> list[str]:
             errors.append(f"entry_scene not found: {scene}")
     else:
         errors.append("entry_scene must reference a .tscn scene")
+    # External GDExtensions are installed as ordinary project resources.
+    # No native code is built, linked or copied by the laboratory.
+    visual_path = data.get("visualization_path", "godot_scene")
+    if visual_path not in VISUALIZATION_PATHS:
+        errors.append("visualization_path must be a supported descriptive label")
+    extensions = data.get("native_extensions", [])
+    package = root / "experiments"
+    if not isinstance(extensions, list):
+        errors.append("native_extensions must be an array")
+    else:
+        for extension in extensions:
+            if not isinstance(extension, str) or not extension.startswith("res://") or not extension.endswith(".gdextension"):
+                errors.append("native_extensions entries must be res:// .gdextension paths")
+                continue
+            file_path = (root / extension[6:]).resolve()
+            if not file_path.is_relative_to(package.resolve()):
+                errors.append("native_extensions must reside under experiments/")
+            elif not file_path.is_file():
+                errors.append(f"native_extensions descriptor not found: {extension}")
+        if len(extensions) != len(set(map(str, extensions))):
+            errors.append("native_extensions entries must be unique")
+    classes = data.get("required_native_classes", [])
+    if not isinstance(classes, list) or any(not isinstance(x, str) or not x.strip() for x in classes):
+        errors.append("required_native_classes must be an array of nonempty names")
+    elif classes and not extensions:
+        errors.append("required_native_classes requires native_extensions")
     owned = data.get("graphics_owned_settings", [])
     if not isinstance(owned, list):
         errors.append("graphics_owned_settings must be an array")

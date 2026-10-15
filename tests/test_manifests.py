@@ -36,6 +36,19 @@ class ManifestTests(unittest.TestCase):
         self.data["parameters"].append(self.data["parameters"][0].copy())
         self.assertIn("duplicated", " ".join(validate_manifest(self.data, self.root)))
 
+    def test_native_package_contract(self):
+        self.data["visualization_path"] = "diagnostic_cpu_bridge"
+        self.assertEqual(validate_manifest(self.data, self.root), [])
+        self.data["native_extensions"] = ["res://experiments/missing/loxfx.gdextension"]
+        self.assertIn("descriptor not found", " ".join(validate_manifest(self.data, self.root)))
+        self.data["native_extensions"] = ["res://../../etc/unsafe.gdextension"]
+        self.assertIn("under experiments", " ".join(validate_manifest(self.data, self.root)))
+        self.data["native_extensions"] = []
+        self.data["required_native_classes"] = ["LoxFXHair"]
+        self.assertIn("requires native_extensions", " ".join(validate_manifest(self.data, self.root)))
+        self.data["visualization_path"] = "fantasy_accelerated"
+        self.assertIn("visualization_path", " ".join(validate_manifest(self.data, self.root)))
+
     def test_graphics_ownership(self):
         self.data["graphics_owned_settings"] = ["msaa_3d", "scaling_3d_scale"]
         self.assertEqual(validate_manifest(self.data, self.root), [])

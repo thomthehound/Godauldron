@@ -13,9 +13,11 @@ const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
+const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
+var _selected_experiment_index: int = -1
 var _controls: Dictionary = {}
 var _active_scene: Node = null
 var _viewport: SubViewport
@@ -416,6 +418,7 @@ func _capture_screenshot() -> void:
 	var metadata := {
 		"format_version": 1,
 		"experiment_id": String(_manifest.get("id", "")),
+		"visualization_path": NativeExperimentPackage.display_path(_manifest),
 		"parameters": _collect_parameters(),
 		"parameter_source": "current_controls_or_preview",
 		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest)),
@@ -471,6 +474,17 @@ func _discover() -> void:
 
 
 func _select_experiment(index: int) -> void:
+	if index < 0 or index >= _experiments.size():
+		return
+	# Native packages are optional and installed alongside their manifest.
+	# Preflight BEFORE tearing down the previous working scene or run.
+	var candidate: Dictionary = _experiments[index]
+	var native_status: Dictionary = NativeExperimentPackage.preflight(candidate)
+	if not bool(native_status.get("ok", false)):
+		_status.text = String(native_status.get("error", "Native package unavailable"))
+		if _selected_experiment_index >= 0:
+			_list.select(_selected_experiment_index)
+		return
 	if _has_active_run():
 		_finish_run(false)
 	# Saved reports survive the switch, but their visual presentation belongs
@@ -522,6 +536,7 @@ func _select_experiment(index: int) -> void:
 			field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			_parameters.add_child(field)
 			_controls[name] = field
+	_selected_experiment_index = index
 	var scene_resource: PackedScene = load(String(_manifest["entry_scene"])) as PackedScene
 	if scene_resource == null:
 		_status.text = "Unable to load experiment scene"
@@ -841,6 +856,8 @@ func _finish_run(completed: bool) -> void:
 		finished_run.cancel()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
 	report["graphics"] = _graphics_run_snapshot.duplicate(true)
+	report["visualization_path"] = NativeExperimentPackage.display_path(_manifest)
+	report["measurement_boundary"] = "host_godauldron_step_callback_cpu_wall_only; excludes native GPU execution, completion and presentation"
 	report["inspection"] = {
 		"grid_overlay": _inspection_grid_enabled,
 		"bounds_overlay": _inspection_bounds_enabled,

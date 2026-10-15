@@ -67,3 +67,5 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/capture_graphics_smoke.gd
       - name: Verify saved image comparisons and visual diff UI
         run: .engine/godot --headless --path . --script res://tests/visual_comparison_smoke.gd
+      - name: Verify native package isolation and deterministic showcase stages
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/loxfx_onboarding_smoke.gd

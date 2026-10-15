@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.showcase-portrait",
+  "display_name": "Showcase / Portrait Studio",
+  "category": "Reusable stage templates",
+  "description": "A well-lit editable portrait studio with a neutral optional head, moving attachment anchor and clear cameras. Supply your own groom, native renderer or character.",
+  "entry_scene": "res://scenes/showcase/portrait_stage.tscn",
+  "visualization_path": "godot_scene",
+  "parameters": [
+    {
+      "id": "motion",
+      "label": "Subject anchor motion",
+      "type": "choice",
+      "default": "still",
+      "options": [
+        {
+          "value": "still",
+          "label": "Stationary"
+        },
+        {
+          "value": "turn",
+          "label": "Turn"
+        },
+        {
+          "value": "nod",
+          "label": "Nod"
+        }
+      ]
+    },
+    {
+      "id": "show_placeholder",
+      "label": "Show neutral placeholder",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "id": "background",
+      "label": "Backdrop",
+      "type": "choice",
+      "default": "as_authored",
+      "options": [
+        {
+          "value": "as_authored",
+          "label": "As authored in scene"
+        },
+        {
+          "value": "slate",
+          "label": "Dark slate"
+        },
+        {
+          "value": "light",
+          "label": "Light neutral"
+        },
+        {
+          "value": "warm",
+          "label": "Warm contrast"
+        }
+      ]
+    }
+  ]
+}

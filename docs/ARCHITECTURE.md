@@ -48,6 +48,16 @@ Camera navigation is a host-level service that works with each experiment's own 
 
 Optional grid, world axes and bounds are drawn in a separate host-owned scene node inside the viewport, not in the experiment subtree. They are off by default and their presence is recorded in run metadata along with whether camera manipulation occurred. They may alter GPU rendering costs when enabled, so comparative rendering tests must control this state. See [Visual inspection](INSPECTION.md).
 
+## Native extension experiments and untimed playback
+
+A package may declare `native_extensions` and `required_native_classes` in its manifest. The host preflights these through Godot's `GDExtensionManager` before destroying a working scene. Native code, dependencies and provider-specific debug visualization remain in the experiment directory; the host does not link a particular SDK. The manifest's descriptive `visualization_path` distinguishes Godot-only display, diagnostic CPU bridging, and provider-native visualization; none implies that Godauldron measures native GPU execution. See [Native experiments](NATIVE_EXPERIMENTS.md).
+
+`ExperimentPlayback` implements untimed reset, pause, fixed-step advance and optional direct seek, separately from `ExperimentRun` which owns warmup/sampled benchmark phases. Native or script providers can expose `godauldron_seek(seconds)` for deterministic absolute-time evaluation; otherwise playback rewinds and replays bounded fixed steps. Interactive stepping is never reported as measured CPU/GPU work. Every measured experiment begins through its own `godauldron_setup` callback, isolating it from prior preview state.
+
+## Editable experiment-owned showcase scenes
+
+Projects author their own Godot `PackedScene` directly or inherit/copy the optional templates in `scenes/showcase/`. Both built-in templates contain editable cameras, key/fill/rim lights, environments, an optional neutral reference object, and a `SubjectMotion/SubjectAnchor` node for attaching native-rendered or custom subjects. Stage animation is strictly presentation-only; it never simulates the experiment's technology. The `experiments/showcase-example/` package demonstrates actual project-owned scene inheritance without modifying host code. The experiment may instead define its entire stage independently. See [Scene authoring](SCENE_AUTHORING.md).
+
 ## Project scene gallery
 
 A generic scene-host experiment can load project-imported `PackedScene` resources without modifying the laboratory core. The technical gallery is one example: named `choice` values select importable `.tscn`, `.scn`, `.gltf` or `.glb` project resources. `godauldron_preview(parameters)` is an optional scene-root callback, invoked on selection and choice changes but never as a measured run. On each timed run, `godauldron_setup` reconstructs the scene so setup/asset import costs cannot be confused with sample-step timing.

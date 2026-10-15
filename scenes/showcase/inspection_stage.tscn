@@ -1,0 +1,119 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://scripts/showcase_stage.gd" id="1"]
+
+[sub_resource type="Environment" id="env"]
+background_mode = 2
+background_color = Color(0.045, 0.058, 0.083, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.7, 0.78, 0.86, 1)
+ambient_light_energy = 0.37
+reflected_light_source = 2
+tonemap_mode = 2
+
+[sub_resource type="SphereMesh" id="head_mesh"]
+radius = 0.72
+height = 1.8
+radial_segments = 48
+rings = 24
+
+[sub_resource type="SphereMesh" id="body_mesh"]
+radius = 1.0
+height = 2.0
+radial_segments = 40
+rings = 22
+
+[sub_resource type="SphereMesh" id="nose_mesh"]
+radius = 0.17
+height = 0.34
+
+[sub_resource type="BoxMesh" id="floor_mesh"]
+size = Vector3(12, 0.16, 12)
+
+[sub_resource type="CylinderMesh" id="platform_mesh"]
+top_radius = 1.18
+bottom_radius = 1.23
+height = 0.14
+radial_segments = 64
+
+[sub_resource type="StandardMaterial3D" id="skin"]
+albedo_color = Color(0.72, 0.67, 0.62, 1)
+roughness = 0.78
+
+[sub_resource type="StandardMaterial3D" id="body"]
+albedo_color = Color(0.19, 0.235, 0.285, 1)
+roughness = 0.78
+metallic = 0.08
+
+[sub_resource type="StandardMaterial3D" id="floor"]
+albedo_color = Color(0.18, 0.215, 0.27, 1)
+roughness = 0.72
+
+[sub_resource type="StandardMaterial3D" id="platform"]
+albedo_color = Color(0.34, 0.40, 0.47, 1)
+roughness = 0.29
+metallic = 0.45
+
+[node name="ShowcaseStage" type="Node3D"]
+script = ExtResource("1")
+stage_kind = "inspection"
+
+[node name="StageEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="StageCamera" type="Camera3D" parent="."]
+position = Vector3(3.40, 2.45, 6.8)
+rotation_degrees = Vector3(-17.5, -26.6, 0)
+fov = 43.0
+current = true
+
+[node name="KeySoft" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-42, -33, 0)
+light_color = Color(1, 0.94, 0.84, 1)
+light_energy = 1.15
+shadow_enabled = true
+
+[node name="RimBack" type="OmniLight3D" parent="."]
+position = Vector3(0.8, 3.3, -2.6)
+light_color = Color(1, 0.80, 0.60, 1)
+light_energy = 1.65
+omni_range = 11.0
+
+[node name="FillSoft" type="OmniLight3D" parent="."]
+position = Vector3(-3.1, 2.9, 3.0)
+light_color = Color(0.62, 0.75, 1, 1)
+light_energy = 0.9
+omni_range = 12.0
+
+[node name="Floor" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.85, 0)
+mesh = SubResource("floor_mesh")
+surface_material_override/0 = SubResource("floor")
+
+[node name="Platform" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.69, 0)
+mesh = SubResource("platform_mesh")
+surface_material_override/0 = SubResource("platform")
+
+[node name="SubjectMotion" type="Node3D" parent="."]
+position = Vector3(0, 0.00, 0)
+
+[node name="NeutralSubject" type="Node3D" parent="SubjectMotion"]
+
+[node name="PlaceholderHead" type="MeshInstance3D" parent="SubjectMotion/NeutralSubject"]
+mesh = SubResource("head_mesh")
+surface_material_override/0 = SubResource("skin")
+
+[node name="PlaceholderNose" type="MeshInstance3D" parent="SubjectMotion/NeutralSubject"]
+position = Vector3(0, -0.13, 0.66)
+scale = Vector3(0.77, 1.0, 1.1)
+mesh = SubResource("nose_mesh")
+surface_material_override/0 = SubResource("skin")
+
+[node name="PlaceholderBody" type="MeshInstance3D" parent="SubjectMotion/NeutralSubject"]
+position = Vector3(0, -1.15, 0)
+scale = Vector3(1.05, 0.47, 0.56)
+mesh = SubResource("body_mesh")
+surface_material_override/0 = SubResource("body")
+
+[node name="SubjectAnchor" type="Node3D" parent="SubjectMotion"]

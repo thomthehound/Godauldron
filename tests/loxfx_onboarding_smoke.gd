@@ -184,6 +184,56 @@ func _verify() -> void:
 		_fail("Stage motion displaced externally authored content")
 		return
 
+	# The optional portrait reference must be a real imported textured
+	# MakeHuman GLB rather than another group of procedural spheres.
+	if not _select(host, "org.godauldron.portrait-reference-head"):
+		_fail("Bundled CC0 portrait head is not discoverable")
+		return
+	var portrait: Node3D = host.get("_active_scene")
+	var human_root: Node = portrait.get_node_or_null(
+		"SubjectMotion/SubjectAnchor/MakeHumanBodyOrigin/MakeHumanReference"
+	)
+	if human_root == null:
+		_fail("CC0 reference model did not load into portrait stage")
+		return
+	var nodes: Array[Node] = [human_root]
+	var meshes: int = 0
+	var vertices: int = 0
+	while not nodes.is_empty():
+		var node: Node = nodes.pop_back()
+		if node is MeshInstance3D:
+			var item: MeshInstance3D = node
+			if item.mesh != null:
+				meshes += 1
+				vertices += item.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX].size()
+		for child in node.get_children():
+			nodes.append(child)
+	if meshes == 0 or vertices < 4000:
+		_fail("Imported reference lacks substantive human mesh detail")
+		return
+	var markers: Node3D = portrait.get_node("SubjectMotion/SubjectAnchor/ScalpLandmarks_PROVISIONAL")
+	if markers.visible or markers.get_child_count() < 5:
+		_fail("Provisional scalp locations must be available but hidden by default")
+		return
+	var human_origin: Node3D = portrait.get_node("SubjectMotion/SubjectAnchor/MakeHumanBodyOrigin")
+	if not is_equal_approx(human_origin.position.y, -1.55):
+		_fail("Reference character scale/rig origin changed unexpectedly")
+		return
+	var portrait_playback = Playback.new()
+	portrait_playback.bind(portrait, {
+		"motion": "translate", "show_placeholder": false, "background": "as_authored"
+	}, 1.0 / 60.0)
+	portrait_playback.reset()
+	var portrait_root_origin: Vector3 = human_root.global_position
+	if not portrait_playback.seek(60) or human_root.global_position.distance_to(portrait_root_origin) < 0.10:
+		_fail("Reference portrait did not follow generic attachment translation")
+		return
+	if not portrait_playback.seek(0) or human_root.global_position.distance_to(portrait_root_origin) > 0.000001:
+		_fail("Imported reference changed position after translation rewind")
+		return
+	# This validates Godot import and scene composition only; image quality
+	# and vertex-accurate scalp attachment remain hardware visual checks.
+
 	# Confirm the actual host playback UI remains independent of timed runs.
 	if not _select(host, "org.godauldron.showcase-portrait"):
 		_fail("Could not return to portrait stage")

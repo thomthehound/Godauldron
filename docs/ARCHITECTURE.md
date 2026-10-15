@@ -54,6 +54,10 @@ A package may declare `native_extensions` and `required_native_classes` in its m
 
 `ExperimentPlayback` implements untimed reset, pause, fixed-step advance and optional direct seek, separately from `ExperimentRun` which owns warmup/sampled benchmark phases. Native or script providers can expose `godauldron_seek(seconds)` for deterministic absolute-time evaluation; otherwise playback rewinds and replays bounded fixed steps. Interactive stepping is never reported as measured CPU/GPU work. Every measured experiment begins through its own `godauldron_setup` callback, isolating it from prior preview state.
 
+## Editable experiment-owned showcase scenes
+
+Projects author their own Godot `PackedScene` directly or inherit/copy the optional templates in `scenes/showcase/`. Both built-in templates contain editable cameras, key/fill/rim lights, environments, an optional neutral reference object, and a `SubjectMotion/SubjectAnchor` node for attaching native-rendered or custom subjects. Stage animation is strictly presentation-only; it never simulates the experiment's technology. The `experiments/showcase-example/` package demonstrates actual project-owned scene inheritance without modifying host code. The experiment may instead define its entire stage independently. See [Scene authoring](SCENE_AUTHORING.md).
+
 ## Project scene gallery
 
 A generic scene-host experiment can load project-imported `PackedScene` resources without modifying the laboratory core. The technical gallery is one example: named `choice` values select importable `.tscn`, `.scn`, `.gltf` or `.glb` project resources. `godauldron_preview(parameters)` is an optional scene-root callback, invoked on selection and choice changes but never as a measured run. On each timed run, `godauldron_setup` reconstructs the scene so setup/asset import costs cannot be confused with sample-step timing.

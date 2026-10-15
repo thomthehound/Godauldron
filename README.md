@@ -14,7 +14,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Technical-scene gallery with named scene selections, bundled glTF 2.0 mesh specimen and Godot material study; imported scenes share the existing inspector and run contract.
 - Host graphics presets (Low, Medium, High, Ultra, Showcase), expandable per-setting controls with experiment ownership, and viewport PNG captures with adjacent provenance metadata.
 - Saved-capture comparison window with side-by-side images, magnification, RGB difference maps, channel-error statistics and warnings for mismatched experiment/camera/graphics settings.
-- Drop-in native experiment package preflight for external GDExtensions, plus an animated diagnostic hair studio and untimed fixed-step playback/seek controls.
+- Drop-in native experiment package preflight for external GDExtensions, plus reusable, editable showcase stages and untimed fixed-step playback/seek controls.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
@@ -48,7 +48,9 @@ To **test a particular PR against Godot master HEAD**, add the `ci:godot-head` l
 
 Developers can install an `experiments/<package>/` directory with its manifest, scene, `.gdextension` descriptor, native libraries and runtime dependencies. Godauldron discovers its manifest and checks the native requirements **before** replacing the selected experiment. No SDK or LoxFX headers are linked into the laboratory host. See [External native experiment packages](docs/NATIVE_EXPERIMENTS.md) for a complete layout and manifest example.
 
-The built-in **Hair / Motion Studio (Diagnostic)** is a controllable portrait-stage test fixture with several synthetic grooms, contrasting backgrounds, head movement, seeded geometry and optional provider guide overlays. **It is not LoxFX**, nor a production groom or physics benchmark. Use the Reset, Play/Pause, Step, Fixed Δt and Timeline controls for repeatable visual tests separate from measured experiments. See [LoxFX onboarding acceptance](docs/LOXFX_ONBOARDING.md).
+Godauldron supplies **Portrait Studio** and **Technical Inspection Stage** scene templates with editable lighting, backdrop, cameras, optional neutral placeholders, and a `SubjectMotion/SubjectAnchor` attachment point. **Neither contains fake hair or a substitute technology implementation.** A project can make an entirely new scene or inherit a stage template and add its own native nodes, models, visualization and controls. The sample `experiments/showcase-example/` demonstrates a project-owned inherited scene. Use Godot's scene editor; no additional authoring tool is necessary. See [Authoring showcase scenes](docs/SCENE_AUTHORING.md) and [LoxFX onboarding acceptance](docs/LOXFX_ONBOARDING.md).
+
+The host's Reset, Play/Pause, Step, fixed Δt, and timeline controls support reproducible **stage presentation** separately from measured simulation. Provider-specific physics determinism, timing and rendering remain the provider's responsibility.
 
 ## Graphics and captures
 

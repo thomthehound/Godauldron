@@ -76,7 +76,14 @@ func godauldron_capture_metadata() -> Dictionary:
 		"motion": String(_params.get("motion", "still")),
 		"background": String(_params.get("background", "slate")),
 		"placeholder_visible": _neutral_subject.visible,
-		"stage_camera_transform": _camera.global_transform,
+		"stage_camera_position": [
+			_camera.global_position.x, _camera.global_position.y, _camera.global_position.z
+		],
+		"stage_camera_rotation_degrees": [
+			_camera.global_rotation_degrees.x,
+			_camera.global_rotation_degrees.y,
+			_camera.global_rotation_degrees.z
+		],
 		"stage_camera_fov": _camera.fov,
 		"stage_lighting": "editable Godot stage nodes",
 		"stage_role": "scene presentation only; experiment owns algorithms/rendering"

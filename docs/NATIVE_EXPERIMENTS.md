@@ -63,6 +63,8 @@ Illustrative manifest (adjust ID, paths and native classes to the actual adapter
 }
 ```
 
+You may author `scenes/hair_test.tscn` completely from scratch, or inherit `res://scenes/showcase/portrait_stage.tscn` and put LoxFX's own subject and diagnostic nodes beneath `SubjectMotion/SubjectAnchor`. The optional `NeutralSubject` is just a scale/attachment placeholder (toggle `show_placeholder` off). The camera, lights and WorldEnvironment are ordinary, editable Godot scene nodes—no rendering magic or fake hair is inserted by the host. See [Scene authoring](SCENE_AUTHORING.md) and the working `experiments/showcase-example/` inherited-scene demonstration.
+
 The package's `.gdextension` descriptor provides OS/architecture-specific native library paths using Godot's ordinary GDExtension format; dependencies belong to the provider and are resolved by the platform loader / descriptor. Do not put placeholder `.gdextension` files in the live project—Godot's editor importer may attempt to load them. The lab does not build a GDExtension, modify Godot source, pin the project's Godot installation, or edit any file in the LoxFX SDK.
 
 ## Discovery and safe failure

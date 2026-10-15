@@ -19,7 +19,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
 
-The timing measures **CPU wall time inside host step calls**, not asynchronous GPU execution, frame latency, or complete frame performance. Setup, warmup, sample-boundary callbacks and measured stepping are accounted for separately. When an experiment supplies its own counters, it can reset them through the optional `godauldron_begin_sample()` hook. Warmup defaults to zero for interactive demonstrations. The reference fixture validates the harness; it is not a performance benchmark. Native SDK integration, GPU interoperability, reference image comparison, captures and advanced profiling are planned, not yet implemented.
+The timing measures **CPU wall time inside host step calls**, not asynchronous GPU execution, frame latency, or complete frame performance. Setup, warmup, sample-boundary callbacks and measured stepping are accounted for separately. When an experiment supplies its own counters, it can reset them through the optional `godauldron_begin_sample()` hook. Warmup defaults to zero for interactive demonstrations. The reference fixture validates the harness; it is not a performance benchmark. Basic PNG capture, SDR visual comparisons and external native-package preflight are implemented. Hardware-validated native SDK integration, actual GPU interoperability, frame sequences and advanced GPU profiling remain future work.
 
 ## Getting started
 

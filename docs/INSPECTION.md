@@ -12,11 +12,11 @@ Godauldron inspects a technology's output inside the Godot SubViewport. It uses 
 | Fit experiment bounds | **Frame** toolbar button, or **F** when the viewport has focus |
 | Return to original experiment camera | **Reset camera** toolbar button |
 
-The initial authored camera transform and orthographic size are retained for reset. Orbit pitch and dolly distance are bounded to prevent invalid camera positions. When a scene has no Camera3D, the host does not invent a camera; navigation remains unavailable until that provider supplies one.
+The framing and panning math follows Godot's camera aspect mode: KEEP_WIDTH defines horizontal FOV/size, while KEEP_HEIGHT defines vertical FOV/size. The initial authored camera transform and orthographic size are retained for reset. Orbit pitch and dolly distance are bounded to prevent invalid camera positions. When a scene has no Camera3D, the host does not invent a camera; navigation remains unavailable until that provider supplies one.
 
 ## Optional scene bounds
 
-An experiment scene can implement `godauldron_inspection_bounds() -> AABB` returning world-space axis-aligned bounds. The host uses this when available, otherwise it computes a bounding box from mesh instances beneath that scene. Host overlays are excluded from this computation. This avoids assuming a particular rig, technology or source mesh.
+An experiment scene can implement `godauldron_inspection_bounds() -> AABB` returning world-space axis-aligned bounds. The host uses this when available, otherwise it computes a bounding box from mesh instances beneath that scene. Host overlays are excluded from this computation. Planar and linear authored AABBs are accepted without inventing volume. Overlay bounds are refreshed after each run setup, including campaign cases. This avoids assuming a particular rig, technology or source mesh.
 
 ## Diagnostic overlays
 

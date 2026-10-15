@@ -46,15 +46,28 @@ func orbit(relative: Vector2) -> void:
 	_apply()
 
 
-func pan(relative: Vector2, viewport_height: float) -> void:
+func _aspect_ratio(viewport_size: Vector2) -> float:
+	return maxf(1.0, viewport_size.x) / maxf(1.0, viewport_size.y)
+
+
+func _vertical_half_fov(aspect: float) -> float:
+	var authored_half: float = deg_to_rad(camera.fov) * 0.5
+	# In KEEP_WIDTH Godot's fov is horizontal; in KEEP_HEIGHT it is vertical.
+	return atan(tan(authored_half) / aspect) if camera.keep_aspect == Camera3D.KEEP_WIDTH else authored_half
+
+
+func pan(relative: Vector2, viewport_size: Vector2) -> void:
 	if not is_instance_valid(camera):
 		return
-	var span: float = camera.size if camera.projection == Camera3D.PROJECTION_ORTHOGONAL else \
-		2.0 * distance * tan(deg_to_rad(camera.fov) * 0.5)
-	var scale: float = span / maxf(1.0, viewport_height)
+	var aspect: float = _aspect_ratio(viewport_size)
+	var vertical_span: float
+	if camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
+		vertical_span = camera.size / aspect if camera.keep_aspect == Camera3D.KEEP_WIDTH else camera.size
+	else:
+		vertical_span = 2.0 * distance * tan(_vertical_half_fov(aspect))
+	var scale: float = vertical_span / maxf(1.0, viewport_size.y)
 	target += (-camera.global_basis.x * relative.x + camera.global_basis.y * relative.y) * scale
 	_apply()
-
 
 func dolly(steps: float) -> void:
 	if not is_instance_valid(camera):
@@ -72,15 +85,17 @@ func frame(bounds: AABB, viewport_size: Vector2i) -> void:
 		return
 	target = bounds.get_center()
 	var radius: float = maxf(0.25, bounds.size.length() * 0.5)
+	var aspect: float = _aspect_ratio(Vector2(viewport_size))
 	if camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
-		camera.size = maxf(0.5, radius * 2.6)
+		# Godot's size is horizontal in KEEP_WIDTH and vertical in KEEP_HEIGHT.
+		var required_span: float = radius * 2.6
+		var ratio: float = maxf(1.0, aspect) if camera.keep_aspect == Camera3D.KEEP_WIDTH else maxf(1.0, 1.0 / aspect)
+		camera.size = maxf(0.5, required_span * ratio)
 	else:
-		var half_fov: float = deg_to_rad(camera.fov) * 0.5
-		var aspect: float = float(maxi(1, viewport_size.x)) / float(maxi(1, viewport_size.y))
-		var horizontal_half_fov: float = atan(tan(half_fov) * aspect)
-		distance = clampf(radius / sin(minf(half_fov, horizontal_half_fov)) * 1.15, MIN_DISTANCE, MAX_DISTANCE)
+		var vertical_half: float = _vertical_half_fov(aspect)
+		var horizontal_half: float = atan(tan(vertical_half) * aspect)
+		distance = clampf(radius / sin(minf(vertical_half, horizontal_half)) * 1.15, MIN_DISTANCE, MAX_DISTANCE)
 	_apply()
-
 
 func reset() -> void:
 	if not is_instance_valid(camera):
@@ -94,8 +109,11 @@ func reset() -> void:
 static func scene_bounds(scene: Node) -> AABB:
 	if scene.has_method("godauldron_inspection_bounds"):
 		var authored: Variant = scene.call("godauldron_inspection_bounds")
-		if typeof(authored) == TYPE_AABB and (authored as AABB).has_volume():
-			return authored
+		if typeof(authored) == TYPE_AABB:
+			var box: AABB = authored
+			# Surface/line bounds are valid even with one or two zero dimensions.
+			if box.has_surface() and box.position.is_finite() and box.size.is_finite() and 					box.size.x >= 0.0 and box.size.y >= 0.0 and box.size.z >= 0.0:
+				return box
 	# Use only the experiment subtree, never the host's diagnostic geometry.
 	var nodes: Array[Node] = [scene]
 	var minimum := Vector3(INF, INF, INF)

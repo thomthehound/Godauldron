@@ -82,7 +82,8 @@ func godauldron_metrics() -> Dictionary:
 
 func godauldron_inspection_bounds() -> AABB:
 	# World-space bounds with enough headroom for the animated geometry.
-	var half_width: float = float(_grid_dimension - 1) * 1.65 * 0.5 + 0.5
+	# Each unit cube rotates about Y; its maximum X/Z half-width is sqrt(0.5).
+	var half_width: float = float(_grid_dimension - 1) * 1.65 * 0.5 + sqrt(0.5)
 	var half_height: float = maxf(0.75, _amplitude + 0.5)
 	return AABB(
 		global_position - Vector3(half_width, half_height, half_width),

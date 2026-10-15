@@ -306,6 +306,14 @@ func _bind_inspection() -> void:
 	_camera_inspector.bind(view_camera, _inspection_bounds)
 
 
+func _update_inspection_bounds() -> void:
+	if _active_scene == null:
+		return
+	_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
+	if _inspection_bounds_enabled:
+		_refresh_inspection_overlay()
+
+
 func _refresh_inspection_overlay() -> void:
 	if _inspection_overlay != null:
 		_inspection_overlay.call("configure", _inspection_bounds, _inspection_grid_enabled, _inspection_bounds_enabled)
@@ -367,7 +375,7 @@ func _on_inspection_input(event: InputEvent) -> void:
 		if _inspector_drag == 1:
 			_camera_inspector.orbit(motion.relative)
 		else:
-			_camera_inspector.pan(motion.relative, float(_viewport.size.y))
+			_camera_inspector.pan(motion.relative, _viewport_container.size)
 		_camera_manipulated = true
 		_viewport_container.accept_event()
 	elif event is InputEventKey:
@@ -425,6 +433,8 @@ func _begin_campaign_case() -> void:
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
+	# Setup can change scene bounds between campaign cases.
+	_update_inspection_bounds()
 	_accumulator = 0.0
 	_status.text = "Campaign case %d, repetition %d" % [
 		int(next_case["case_index"]) + 1, int(next_case["repetition"]) + 1
@@ -497,6 +507,7 @@ func _start_run() -> void:
 		_active_scene, _collect_parameters(),
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
+	_update_inspection_bounds()
 	_accumulator = 0.0
 	_status.text = "Running %s" % String(_manifest["display_name"])
 	_update_telemetry()

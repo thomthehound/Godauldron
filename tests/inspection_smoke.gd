@@ -46,7 +46,7 @@ func _verify() -> void:
 		_fail("Orbit failed to move the camera")
 		return
 	var frame_target: Vector3 = inspector.get("target")
-	inspector.pan(Vector2(70, -25), 720.0)
+	inspector.pan(Vector2(70, -25), Vector2(960, 720))
 	if (inspector.get("target") as Vector3).is_equal_approx(frame_target):
 		_fail("Pan did not move the target")
 		return

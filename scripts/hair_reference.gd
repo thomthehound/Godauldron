@@ -14,6 +14,14 @@ var _background: WorldEnvironment
 var _strands: int = 260
 var _material: StandardMaterial3D
 var _initialized: bool = false
+var _groom_asset: Dictionary = {}
+var _groom_load_error: String = ""
+
+const GROOM_ASSETS := {
+	"long_waves": "res://assets/hair/grooms/long_waves.json",
+	"bob": "res://assets/hair/grooms/short_bob.json",
+	"curls": "res://assets/hair/grooms/soft_curls.json"
+}
 
 
 func _ready() -> void:
@@ -127,6 +135,15 @@ func _background_color(name: String) -> Color:
 func _apply_settings(parameters: Dictionary) -> void:
 	_parameters = parameters.duplicate(true)
 	_strands = clampi(int(_parameters.get("density", 260)), 40, 700)
+	var asset_path: String = String(GROOM_ASSETS.get(String(_parameters.get("groom", "long_waves")), ""))
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(asset_path)) if FileAccess.file_exists(asset_path) else null
+	_groom_load_error = ""
+	if typeof(parsed) != TYPE_DICTIONARY:
+		_groom_load_error = "Groom preset asset could not load: " + asset_path
+		push_warning(_groom_load_error)
+		_groom_asset = {"length": 1.8, "curl_cycles": 8.0, "curl_amplitude": 0.05}
+	else:
+		_groom_asset = parsed
 	_background.environment.background_color = _background_color(String(_parameters.get("background", "slate")))
 	_guide_lines.visible = bool(_parameters.get("guides", false))
 	_material.albedo_color = Color(0.38, 0.22, 0.14) if String(_parameters.get("background", "slate")) == "light" else Color(0.66, 0.40, 0.24)
@@ -164,11 +181,10 @@ func _strand_sample(index: int, fraction: float) -> Vector3:
 	var root_height: float = 0.95 * sqrt(maxf(0.0, 1.0 - radial * radial / 0.78 / 0.78))
 	var x: float = radial * cos(azimuth)
 	var z: float = radial * sin(azimuth)
-	var groom: String = String(_parameters.get("groom", "long_waves"))
-	var length: float = 1.18 if groom == "bob" else (1.83 if groom == "curls" else 2.10)
-	var spread: float = 0.09 + 0.36 * fraction
-	var curl_phase: float = fraction * (19.0 if groom == "curls" else 8.0) + azimuth * 2.2
-	var curl_amount: float = (0.18 if groom == "curls" else 0.045) * sin(curl_phase)
+	var length: float = float(_groom_asset.get("length", 1.8))
+	var spread: float = 0.09 + float(_groom_asset.get("splay", 0.36)) * fraction
+	var curl_phase: float = fraction * float(_groom_asset.get("curl_cycles", 8.0)) + azimuth * 2.2
+	var curl_amount: float = float(_groom_asset.get("curl_amplitude", 0.05)) * sin(curl_phase)
 	var curve_radius: float = radial + spread * fraction + curl_amount * fraction
 	var activity: bool = String(_parameters.get("motion", "turn")) != "still"
 	var sway: float = 0.0
@@ -176,7 +192,7 @@ func _strand_sample(index: int, fraction: float) -> Vector3:
 		sway = 0.15 * fraction * fraction * sin(_time * 2.3 - fraction * 3.2 + azimuth * 1.5)
 	return Vector3(
 		curve_radius * cos(azimuth) + sway,
-		root_height - 0.10 - length * fraction + (0.08 * sin(curl_phase) * fraction if groom == "curls" else 0.0),
+		root_height - 0.10 - length * fraction + float(_groom_asset.get("vertical_curl", 0.0)) * sin(curl_phase) * fraction,
 		curve_radius * sin(azimuth) - 0.06 * fraction
 	)
 
@@ -238,7 +254,9 @@ func godauldron_capture_metadata() -> Dictionary:
 		"motion": _parameters.get("motion", "still"),
 		"groom": _parameters.get("groom", "long_waves"),
 		"seed": _parameters.get("seed", 7),
-		"display_path": "host_cpu_procedural_ribbon_reference"
+		"display_path": "host_cpu_procedural_ribbon_reference",
+		"groom_asset": GROOM_ASSETS.get(String(_parameters.get("groom", "long_waves")), ""),
+		"groom_load_error": _groom_load_error
 	}
 
 
@@ -247,5 +265,7 @@ func godauldron_metrics() -> Dictionary:
 		"time_seconds": _time, "strand_count": _strands,
 		"scene_role": "diagnostic reference fixture; not a physics or GPU hair benchmark",
 		"native_gpu_simulation_time": null,
-		"diagnostic_host_cpu_mesh_bridge": true
+		"diagnostic_host_cpu_mesh_bridge": true,
+		"groom_asset": GROOM_ASSETS.get(String(_parameters.get("groom", "long_waves")), ""),
+		"groom_load_error": _groom_load_error
 	}

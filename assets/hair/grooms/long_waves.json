@@ -1,0 +1,8 @@
+{
+  "name": "Long Waves / Diagnostic",
+  "length": 2.1,
+  "splay": 0.36,
+  "curl_cycles": 8,
+  "curl_amplitude": 0.055,
+  "vertical_curl": 0
+}

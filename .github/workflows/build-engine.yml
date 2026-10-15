@@ -58,6 +58,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Retrieve Windows rendering dependencies
+        shell: pwsh
+        working-directory: _engine_source
+        run: |
+          python misc/scripts/install_d3d12_sdk_windows.py
+          python misc/scripts/install_angle.py
+          python misc/scripts/install_accesskit.py
       - name: Compile upstream Windows editor
         shell: pwsh
         working-directory: _engine_source

@@ -199,6 +199,10 @@ func _verify() -> void:
 	var nodes: Array[Node] = [human_root]
 	var meshes: int = 0
 	var vertices: int = 0
+	var textured_surfaces: int = 0
+	if portrait.get_node("SubjectMotion/NeutralSubject").visible:
+		_fail("Primitive mannequin overlaps the real reference head")
+		return
 	while not nodes.is_empty():
 		var node: Node = nodes.pop_back()
 		if node is MeshInstance3D:
@@ -206,10 +210,14 @@ func _verify() -> void:
 			if item.mesh != null:
 				meshes += 1
 				vertices += item.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX].size()
+				for surface in range(item.mesh.get_surface_count()):
+					var material: Material = item.get_active_material(surface)
+					if material is BaseMaterial3D and (material as BaseMaterial3D).albedo_texture != null:
+						textured_surfaces += 1
 		for child in node.get_children():
 			nodes.append(child)
-	if meshes == 0 or vertices < 4000:
-		_fail("Imported reference lacks substantive human mesh detail")
+	if meshes == 0 or vertices < 4000 or textured_surfaces == 0:
+		_fail("Imported reference lacks substantive textured human geometry")
 		return
 	var markers: Node3D = portrait.get_node("SubjectMotion/SubjectAnchor/ScalpLandmarks_PROVISIONAL")
 	if markers.visible or markers.get_child_count() < 5:

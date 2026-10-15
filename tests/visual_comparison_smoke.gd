@@ -233,6 +233,9 @@ func _verify() -> void:
 		if released_images[i] != null or (panes[i] as TextureRect).texture != null:
 			_fail("Closing the comparison retained a large capture image/texture")
 			return
+		if not (panes[i] as TextureRect).custom_minimum_size.is_equal_approx(Vector2(330, 250)):
+			_fail("Closing the comparison left stale magnified scroll extents")
+			return
 
 	print("Godauldron visual comparison smoke passed: matching, alpha, provenance, metadata validation, UI cleanup, saved diff")
 	quit(0)

@@ -4,10 +4,10 @@ extends Node3D
 ## optional NeutralSubject and attach provider nodes under SubjectAnchor.
 
 @export_enum("portrait", "inspection") var stage_kind: String = "portrait"
-@export var camera_look_at: Vector3 = Vector3(0, 1.55, 0)
 
 var _params: Dictionary = {}
 var _time: float = 0.0
+var _authored_background: Color
 
 @onready var _subject_motion: Node3D = $SubjectMotion
 @onready var _neutral_subject: Node3D = $SubjectMotion/NeutralSubject
@@ -16,9 +16,11 @@ var _time: float = 0.0
 
 
 func _ready() -> void:
-	_camera.look_at(camera_look_at, Vector3.UP)
+	# Camera transforms and environment resources are editor-authored. The
+	# host should not overwrite a project's composition just by loading it.
+	_authored_background = _environment.environment.background_color
 	_camera.current = true
-	godauldron_preview({"motion": "still", "show_placeholder": true, "background": "slate"})
+	godauldron_preview({"motion": "still", "show_placeholder": true, "background": "as_authored"})
 
 
 func _background_color(theme: String) -> Color:
@@ -35,7 +37,8 @@ func godauldron_preview(parameters: Dictionary) -> void:
 	_params = parameters.duplicate(true)
 	_time = 0.0
 	_neutral_subject.visible = bool(_params.get("show_placeholder", true))
-	_environment.environment.background_color = _background_color(String(_params.get("background", "slate")))
+	var backdrop: String = String(_params.get("background", "as_authored"))
+	_environment.environment.background_color = _authored_background if backdrop == "as_authored" else _background_color(backdrop)
 	_update_pose()
 
 

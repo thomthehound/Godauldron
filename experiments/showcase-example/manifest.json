@@ -37,8 +37,12 @@
       "id": "background",
       "label": "Backdrop",
       "type": "choice",
-      "default": "slate",
+      "default": "as_authored",
       "options": [
+        {
+          "value": "as_authored",
+          "label": "As authored in scene"
+        },
         {
           "value": "slate",
           "label": "Dark slate"

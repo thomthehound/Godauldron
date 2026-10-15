@@ -57,13 +57,13 @@ metallic = 0.45
 [node name="ShowcaseStage" type="Node3D"]
 script = ExtResource("1")
 stage_kind = "inspection"
-camera_look_at = Vector3(0, 0.05, 0)
 
 [node name="StageEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("env")
 
 [node name="StageCamera" type="Camera3D" parent="."]
 position = Vector3(3.40, 2.45, 6.8)
+rotation_degrees = Vector3(-17.5, -26.6, 0)
 fov = 43.0
 current = true
 

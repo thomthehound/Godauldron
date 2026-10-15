@@ -80,6 +80,16 @@ func _verify() -> void:
 				key_light == null or fill == null or rim == null:
 			_fail("A showcase stage lacks its editable camera/light/attachment rig")
 			return
+		# Scene-authoring authority: default preview must preserve camera
+		# rotations and the editor-authored environment.
+		var authored_rotation: Vector3 = camera.rotation_degrees
+		var authored_background: Color = world.environment.background_color
+		stage.call("godauldron_preview", {
+			"motion": "still", "show_placeholder": true, "background": "as_authored"
+		})
+		if not camera.rotation_degrees.is_equal_approx(authored_rotation) or 				not world.environment.background_color.is_equal_approx(authored_background):
+			_fail("Stage startup/preview replaced Godot-authored camera or backdrop")
+			return
 		# Adding provider-owned nodes to the anchor must not be disturbed by
 		# stage stepping or by hiding the optional neutral reference subject.
 		var provided := Node3D.new()

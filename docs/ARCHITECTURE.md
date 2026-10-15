@@ -51,6 +51,12 @@ A generic scene-host experiment can load project-imported `PackedScene` resource
 
 Scene staging is separated from native technology adapters. Asset source, load status and scene node/mesh counts are reported as scene-defined metrics; these do not measure GPU workload. Asset loading is not a substitute for GPU capture or verified shader execution. See [Technical scenes](TECHNICAL_SCENES.md).
 
+## Rendering ownership and visual capture
+
+Host viewport graphics presets are independent of an experiment's simulation/technology parameters. Optional manifest `graphics_owned_settings` claims and the scene callback `godauldron_graphics_owned_settings()` give the experiment first authority over individual host-adjustable viewport properties or all of them via `"*"`. A claimed control becomes read-only in the host; unclaimed controls remain available. Rendered output is still the experiment's ordinary Godot viewport, not a shadow pipeline.
+
+Run reports snapshot the effective viewport graphics configuration immediately after experiment setup. Changing host graphics controls cancels an active run or campaign before applying new values. Interactive PNG captures use the viewport texture after a completed render, and store a sidecar with the capture context. Image readback is not part of measured run steps: capturing stops active measurements first. These measures preserve attribution, but do not yet establish deterministic pixel reproduction, HDR correctness or GPU execution time. See [Graphics and capture design](GRAPHICS_AND_CAPTURE.md).
+
 ## Measurements and reports
 
 Reports are JSON files stored in user://results and include identity, parameters, completed/requested step count, fixed delta, timestamps, engine version, OS and scene-defined metrics.

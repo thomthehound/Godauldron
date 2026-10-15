@@ -12,6 +12,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Versioned campaign presets with sequential parameter sweeps, per-run reports, and a comparison table showing dispersion and optional engineering guard limits.
 - Optional world grid, axis indicators, and experiment bounds overlays, disabled by default.
 - Technical-scene gallery with named scene selections, bundled glTF 2.0 mesh specimen and Godot material study; imported scenes share the existing inspector and run contract.
+- Host graphics presets (Low, Medium, High, Ultra, Showcase), expandable per-setting controls with experiment ownership, and viewport PNG captures with adjacent provenance metadata.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
@@ -40,6 +41,12 @@ Each artifact contains the editor, `extension_api.json`, `gdextension_interface.
 To exercise a proposed upstream change, select a public Godot fork and feature branch instead. The compiler is a reusable GitHub Actions workflow at [build-godot.yml](.github/workflows/build-godot.yml), with usage documented under [Engine tracking](docs/ENGINE_TRACKING.md).
 
 To **test a particular PR against Godot master HEAD**, add the `ci:godot-head` label. This triggers a one-shot Linux and Windows source build and runs that PR's Godauldron code against the binaries. Ordinary PR builds and subsequent pushes never compile Godot. To re-test a changed PR with a fresh master revision, remove and reapply the label (or rerun the previous workflow if you intentionally want to test its original revision). Create the repository label once under GitHub **Issues → Labels** if it doesn't already exist. See [Engine tracking](docs/ENGINE_TRACKING.md#opt-in-per-pr-master-builds) for details.
+
+## Graphics and captures
+
+The viewport toolbar has **Graphics** presets (Low, Medium, High, Ultra, Showcase) and an **Advanced…** panel for the currently implemented per-viewport settings. An experiment can reserve specific graphics properties so the host cannot overwrite what it is testing. **Capture PNG** saves the rendered experiment viewport—without the surrounding laboratory UI—to `user://captures` with a JSON metadata file recording the scene, settings, camera and engine version.
+
+Showcase is deliberately expensive and is not a performance baseline. Capturing while a benchmark is active cancels and preserves that run first, avoiding readback/encoding contamination. See [Graphics and capture design](docs/GRAPHICS_AND_CAPTURE.md) for supported controls, ownership, limitations and the video/visual comparison roadmap.
 
 ## Technical scene gallery
 

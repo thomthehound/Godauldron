@@ -24,6 +24,10 @@ The toolbar toggles a planar world grid plus RGB world axes and an outline of th
 
 Run reports include an `inspection` section recording the enabled overlay flags and whether the camera was manipulated since the scene was loaded or last reset. These flags provide context, **not** GPU timing. Native integrations may implement their own richer debug views later.
 
+## Graphics profiles and capture
+
+Use the **Graphics** menu in the viewport toolbar to select quality presets, including intentionally expensive **Showcase**, or expand **Advanced…** to edit the currently supported renderer settings. Experiments can reserve individual settings they control. **Capture PNG** records the experiment viewport rather than the full laboratory window and emits a JSON sidecar with reproducibility context. Capturing an active run cancels and saves it before GPU readback. See [Graphics and capture design](GRAPHICS_AND_CAPTURE.md).
+
 ## Verification
 
 `tests/inspection_smoke.gd` exercises the math behind orbit, pan, zoom and reset; provider-authored and inferred bounds; grid and bounds toggles; and independence from the reference experiment's measured callback behavior. Headless tests cannot establish actual graphics output or mouse-event capture on a physical display. Those require interactive validation when graphics-backed experiment integrations are developed.

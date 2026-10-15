@@ -1,0 +1,44 @@
+name: Build Godot master HEAD
+
+on:
+  workflow_dispatch:
+    inputs:
+      godot_repository:
+        description: Godot source repository (owner/repo; use a fork for upstream work)
+        type: string
+        default: godotengine/godot
+        required: true
+      upstream_ref:
+        description: Upstream branch or tag (master resolves to HEAD when run)
+        type: string
+        default: master
+        required: true
+      build_linux:
+        description: Build Linux editor
+        type: boolean
+        default: true
+      build_windows:
+        description: Build Windows editor
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-godot.yml
+    with:
+      godot_repository: ${{ inputs.godot_repository }}
+      upstream_ref: ${{ inputs.upstream_ref }}
+      build_linux: ${{ inputs.build_linux }}
+      build_windows: ${{ inputs.build_windows }}
+
+  smoke:
+    name: Test Godauldron against compiled Godot
+    needs: build
+    uses: ./.github/workflows/smoke-built-godot.yml
+    with:
+      build_linux: ${{ inputs.build_linux }}
+      build_windows: ${{ inputs.build_windows }}
+      resolved_revision: ${{ needs.build.outputs.resolved_revision }}

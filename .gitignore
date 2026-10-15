@@ -1,0 +1,24 @@
+# Godot-generated state
+.godot/
+.import/
+
+# Native and engine builds
+bin/
+build/
+.engine/
+godot-cpp/bin/
+godot-cpp/gen/
+*.obj
+*.o
+*.so
+*.dll
+*.dylib
+*.pdb
+
+# Python tooling
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local experiment captures
+results/

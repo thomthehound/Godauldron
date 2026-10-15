@@ -11,7 +11,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Fixed-step host experiment execution, per-run setup and result reporting.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
-- Rolling upstream Godot preview smoke test, plus optional on-demand build of upstream source.
+- Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus optional on-demand build of upstream source.
 
 The initial timing measures **CPU wall time inside host step calls**, not asynchronous GPU execution, frame latency, or complete frame performance. The reference fixture validates the harness; it is not a performance benchmark. Native SDK integration, GPU interoperability, reference image comparison, captures and advanced profiling are planned, not yet implemented.
 
@@ -25,7 +25,7 @@ To run manifest tests:
     python -m unittest discover -s tests -v
     .engine/godot --headless --path . --script res://tests/runtime_smoke.gd
 
-On Linux, the preview fetch helper downloads the latest published upstream Godot 4 build to .engine/godot:
+On Linux, the preview fetch helper downloads the newest published upstream Godot build (of any major) to .engine/godot. Pass `--major 4` to test the Godot 4 compatibility line instead:
 
     python tools/fetch_preview.py
     .engine/godot --path . --editor

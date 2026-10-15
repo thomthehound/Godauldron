@@ -21,13 +21,22 @@ jobs:
   godot-preview-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        track: [edge, godot4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Download newest published Godot 4 build
-        run: python tools/fetch_preview.py
+      - name: Download Godot for selected track
+        run: |
+          if [ "${{ matrix.track }}" = "godot4" ]; then
+            python tools/fetch_preview.py --major 4
+          else
+            python tools/fetch_preview.py
+          fi
       - name: Import project
         run: .engine/godot --headless --path . --editor --import --quit
       - name: Verify scene and script loading

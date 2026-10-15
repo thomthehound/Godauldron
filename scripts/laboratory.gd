@@ -23,6 +23,7 @@ var _step_count: int = 0
 var _target_steps: int = 0
 var _step_cpu_usec: int = 0
 var _run_parameters: Dictionary = {}
+var _report_sequence: int = 0
 
 
 func _ready() -> void:
@@ -141,7 +142,8 @@ func _discover() -> void:
 
 
 func _select_experiment(index: int) -> void:
-	_running = false
+	if _running:
+		_finish_run(false)
 	if _active_scene != null:
 		_viewport.remove_child(_active_scene)
 		_active_scene.queue_free()
@@ -197,7 +199,8 @@ func _collect_parameters() -> Dictionary:
 func _start_run() -> void:
 	if _active_scene == null:
 		return
-	_running = false
+	if _running:
+		_finish_run(false)
 	_run_parameters = _collect_parameters()
 	if _active_scene.has_method("godauldron_setup"):
 		_active_scene.call("godauldron_setup", _run_parameters)
@@ -258,8 +261,16 @@ func _finish_run(completed: bool) -> void:
 	}
 	var result_dir: String = ProjectSettings.globalize_path("user://results")
 	DirAccess.make_dir_recursive_absolute(result_dir)
-	var filename: String = "%s_%s.json" % [String(_manifest["id"]), Time.get_datetime_string_from_system().replace(":", "-")]
-	var result_path: String = result_dir.path_join(filename)
+	# Preserve every run, including repeated starts/stops in the same second.
+	# Process identity avoids collisions between independent host instances;
+	# the sequence and existence check handle rapid runs and restarts.
+	var prefix: String = "%s_%s_p%d" % [String(_manifest["id"]), Time.get_datetime_string_from_system().replace(":", "-"), OS.get_process_id()]
+	var result_path: String = ""
+	while true:
+		_report_sequence += 1
+		result_path = result_dir.path_join("%s_%d.json" % [prefix, _report_sequence])
+		if not FileAccess.file_exists(result_path):
+			break
 	var output := FileAccess.open(result_path, FileAccess.WRITE)
 	if output == null:
 		_status.text = "Could not write results to " + result_path

@@ -1,6 +1,7 @@
-"""Retrieve the newest published Godot 4 build, independent of SDK versions.
+"""Retrieve the newest published Godot build, optionally limited to one major.
 
-For upstream master, use the on-demand source-build workflow instead.
+Unrestricted selection tracks bleeding-edge published releases. Use --major 4
+for a separate stable compatibility lane. Build upstream master on demand.
 """
 from __future__ import annotations
 import argparse
@@ -23,10 +24,13 @@ def order(tag: str) -> tuple[int, ...]:
     phase = 3 if stage == "stable" else 2 if rc else 1 if beta else 0
     return int(major), int(minor), int(patch or 0), phase, int(rc or beta or dev or 0)
 
-def choose_asset(releases: list[dict], platform: str) -> tuple[str, str]:
+def choose_asset(releases: list[dict], platform: str, major: int | None = None) -> tuple[str, str]:
     for release in sorted(releases, key=lambda r: order(r.get("tag_name", "")), reverse=True):
         tag = release.get("tag_name", "")
-        if order(tag) == (-1,) or release.get("draft"):
+        parsed = TAG.fullmatch(tag)
+        if parsed is None or release.get("draft"):
+            continue
+        if major is not None and int(parsed.group(1)) != major:
             continue
         for asset in release.get("assets", []):
             name = asset.get("name", "")
@@ -43,11 +47,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path(".engine"))
     parser.add_argument("--platform", default="linux.x86_64")
+    parser.add_argument("--major", type=int, default=None,
+                        help="Limit to a specific Godot major; omit to follow the latest")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     with request(RELEASES) as response:
         releases = json.load(response)
-    tag, url = choose_asset(releases, args.platform)
+    tag, url = choose_asset(releases, args.platform, major=args.major)
     archive = args.output / "upstream-preview.zip"
     with request(url) as response, archive.open("wb") as output:
         shutil.copyfileobj(response, output)

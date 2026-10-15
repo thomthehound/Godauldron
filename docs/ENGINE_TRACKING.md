@@ -2,9 +2,9 @@
 
 ## Target and compatibility
 
-Godauldron develops against upstream godotengine/godot master, while regularly smoke-testing the newest officially published Godot 4 build. There is no permanent release pin. As of 2026-10-15, the latest confirmed public development snapshot is 4.8-dev7 and upstream master has begun its 4.8 beta transition.
+Godauldron develops against upstream godotengine/godot master. CI tests both the newest published Godot release across major versions (edge track) and the newest published Godot 4 release (compatibility track). There is no permanent major or minor release pin. As of 2026-10-15, the latest confirmed public development snapshot is 4.8-dev7 and upstream master has begun its 4.8 beta transition.
 
-The CI preview helper queries GitHub releases dynamically at run time. A manual workflow fetches a requested upstream ref (default master), compiles Linux and Windows editors with SCons, smoke-tests the project and uploads short-lived build artifacts. The manual workflow is an opt-in source build; it does not silently distribute experimental engines. The Windows and Linux source-build jobs are configured but have not yet been executed successfully on CI.
+The CI preview helper queries GitHub releases dynamically at run time. Its default follows the newest major; `--major 4` limits selection to the Godot 4 compatibility track. Keeping both tests preserves the bleeding-edge target without abruptly discarding compatibility coverage. A manual workflow fetches a requested upstream ref (default master), compiles Linux and Windows editors with SCons, smoke-tests the project and uploads short-lived build artifacts. The manual workflow is an opt-in source build; it does not silently distribute experimental engines. The Windows and Linux source-build jobs are configured but have not yet been executed successfully on CI.
 
 ## What the smoke test means
 

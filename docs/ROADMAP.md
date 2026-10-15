@@ -18,7 +18,7 @@ Exit gate: current upstream Godot opens the lab, reference runs are exportable a
 
 ## M1 — Cauldron-class user experience
 
-- [ ] Searchable/categorized experiment catalog and reusable parameter presets
+- [ ] Searchable/categorized experiment catalog and reusable parameter presets (search by name/category/ID/description and named configuration save/restore implemented; true category grouping, sharing/import, provider-owned setting descriptors and migration pending)
 - [ ] Scene loading and curated glTF technical scenes (generic project PackedScene gallery and initial glTF/material fixtures implemented; representative production scenes pending)
 - [ ] Camera controllers, debug overlays and common visual inspection tools (orbit/pan/zoom/frame/reset and optional grid, axes and bounds implemented; deeper inspection and captures pending)
 - [x] Host run phases: setup, warmup, sample, final reporting and cancellation (measured CPU callback time only)
@@ -31,6 +31,17 @@ Exit gate: current upstream Godot opens the lab, reference runs are exportable a
 - [ ] Native GPU interop capabilities, device/queue/barrier handoff and GPU-resident rendering adapter (keep adapter-neutral until production LoxFX integration supplies requirements and hardware evidence)
 
 Exit gate: a third party adds and compares an unrelated experiment without modifying core.
+
+## Near-term Cauldron parity gaps (recorded, not included in the session PR)
+
+The baseline is the independently authored native experiment workflow, not an obligation to reimplement a second rendering engine. See [Session and parity acceptance](EXPERIMENT_SESSIONS.md).
+
+- [ ] **Observable performance**: rolling per-frame CPU main-thread, callback and integration counters; GPU timers only where provider/backend supplies correctly synchronized timestamps; clear host vs provider costs, frame pacing, stable baseline and export
+- [ ] **Visual inspection**: scene-owned camera chooser/bookmarks, free-fly controls, pixel-coordinate magnifier and capability-aware wireframe/debug overlays
+- [ ] **Rendering workstation**: full applicable lighting/environment/GI/exposure/quality controls with ownership and runtime/reload/restart capability declarations; freeze/reproduce camera, light, exposure, render size and environment
+- [ ] **Capture**: deterministic numbered-frame PNG/EXR sequences from fixed-step timelines, source sidecars and comparisons across animation; offline encode to video and explicit realtime recorder backend
+- [ ] **Experiment workflow**: share/import portable session configurations, report differences when available renderers/providers/settings differ, named provider-defined custom settings and scene templates
+- [ ] **Native graphics work**: actual consumer-provided adapter and GPU synchronization, resource handoff, queue/barrier ownership and GPU-resident path; do not invent a general compute API prematurely
 
 ## M2 — Native extension ecosystem
 

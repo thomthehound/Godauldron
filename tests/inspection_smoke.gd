@@ -68,6 +68,36 @@ func _verify() -> void:
 		_fail("Camera reset did not update inspection state")
 		return
 
+	# Exercise the actual GUI input signal path, not just camera service methods.
+	var viewport_gui: SubViewportContainer = host.get("_viewport_container") as SubViewportContainer
+	if viewport_gui == null:
+		_fail("Viewport GUI is not exposed for interaction")
+		return
+	var scroll := InputEventMouseButton.new()
+	scroll.button_index = MOUSE_BUTTON_WHEEL_UP
+	scroll.pressed = true
+	var wheel_distance: float = inspector.get("distance")
+	viewport_gui.gui_input.emit(scroll)
+	if float(inspector.get("distance")) >= wheel_distance or not bool(host.get("_camera_manipulated")):
+		_fail("Viewport wheel event did not reach the inspection camera")
+		return
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_RIGHT
+	press.pressed = true
+	viewport_gui.gui_input.emit(press)
+	var origin_before_drag: Vector3 = camera.global_position
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(30, 12)
+	viewport_gui.gui_input.emit(motion)
+	if camera.global_position.is_equal_approx(origin_before_drag):
+		_fail("Right-drag event did not orbit the camera")
+		return
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_RIGHT
+	release.pressed = false
+	viewport_gui.gui_input.emit(release)
+	host.call("_reset_inspection")
+
 	var overlay: Node3D = host.get("_inspection_overlay")
 	var lines: MeshInstance3D = overlay.get_node("InspectionLines")
 	if lines.mesh != null:

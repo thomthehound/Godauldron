@@ -22,9 +22,9 @@ static func preflight(manifest: Dictionary) -> Dictionary:
 					"ok": false,
 					"error": "GDExtension failed to load (%s; status %d). Check platform/arch, native dependencies, Godot ABI and extension configuration." % [descriptor, status]
 				}
-	for class_name in manifest.get("required_native_classes", []):
-		if not ClassDB.class_exists(String(class_name)):
-			return {"ok": false, "error": "Required native class unavailable: " + str(class_name)}
+	for native_class in manifest.get("required_native_classes", []):
+		if not ClassDB.class_exists(String(native_class)):
+			return {"ok": false, "error": "Required native class unavailable: " + str(native_class)}
 	return {"ok": true, "paths": extension_paths.duplicate(true)}
 
 

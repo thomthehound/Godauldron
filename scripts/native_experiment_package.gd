@@ -14,9 +14,8 @@ static func preflight(manifest: Dictionary) -> Dictionary:
 		if not FileAccess.file_exists(descriptor):
 			return {"ok": false, "error": "GDExtension descriptor missing: " + descriptor}
 		var path: String = ProjectSettings.globalize_path(descriptor)
-		var manager: GDExtensionManager = GDExtensionManager
-		if not manager.is_extension_loaded(path) and not manager.is_extension_loaded(descriptor):
-			var status: GDExtensionManager.LoadStatus = manager.load_extension(path)
+		if not GDExtensionManager.is_extension_loaded(path) and not GDExtensionManager.is_extension_loaded(descriptor):
+			var status: int = GDExtensionManager.load_extension(path)
 			if status != GDExtensionManager.LOAD_STATUS_OK and \
 					status != GDExtensionManager.LOAD_STATUS_ALREADY_LOADED:
 				return {

@@ -101,7 +101,7 @@ func configure(plan: Dictionary, manifest: Dictionary) -> PackedStringArray:
 	_next_index = 0
 	var defaults := {}
 	for spec in manifest.get("parameters", []):
-		defaults[String(spec["id"])] = spec.get("default")
+		defaults[String(spec["id"])] = int(spec.get("default")) if String(spec.get("type", "")) == "int" else spec.get("default")
 	var specs: Dictionary = {}
 	for spec in manifest.get("parameters", []):
 		specs[String(spec["id"])] = spec

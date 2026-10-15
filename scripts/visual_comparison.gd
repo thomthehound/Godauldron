@@ -127,10 +127,15 @@ static func compare(reference: Dictionary, candidate: Dictionary) -> Dictionary:
 	var height: int = a.get_height()
 	if width <= 0 or height <= 0:
 		return {"ok": false, "error": "Images must have positive dimensions"}
-	var rgba_a: Image = a.duplicate()
-	var rgba_b: Image = b.duplicate()
-	rgba_a.convert(Image.FORMAT_RGBA8)
-	rgba_b.convert(Image.FORMAT_RGBA8)
+	# PNG captures are often already RGBA8: avoid two needless large copies.
+	var rgba_a: Image = a
+	var rgba_b: Image = b
+	if a.get_format() != Image.FORMAT_RGBA8:
+		rgba_a = a.duplicate()
+		rgba_a.convert(Image.FORMAT_RGBA8)
+	if b.get_format() != Image.FORMAT_RGBA8:
+		rgba_b = b.duplicate()
+		rgba_b.convert(Image.FORMAT_RGBA8)
 	var source_a: PackedByteArray = rgba_a.get_data()
 	var source_b: PackedByteArray = rgba_b.get_data()
 	if source_a.size() != width * height * 4 or source_b.size() != source_a.size():

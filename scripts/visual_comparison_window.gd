@@ -22,7 +22,7 @@ var _current_images: Array[Image] = []
 var _catalog: Array[Dictionary] = []
 var _comparison: Dictionary = {}
 var _save_sequence: int = 0
-var _worker: RefCounted
+var _worker: Variant = null
 var _operation: String = ""
 var _discard_result: bool = false
 

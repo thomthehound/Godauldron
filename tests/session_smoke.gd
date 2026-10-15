@@ -93,6 +93,19 @@ func _verify() -> void:
 	if bool(host.call("_apply_session", invalid)) or not bool(host.call("_has_active_run")):
 		_fail("Missing experiment destroyed active benchmark")
 		return
+	# Manifest exists and parameters are compatible, but the actual scene
+	# asset disappeared. This must fail before cancelling the live run.
+	var stale_manifest: Dictionary = manifests[gallery].duplicate(true)
+	stale_manifest["id"] = "org.godauldron.stale-scene"
+	stale_manifest["entry_scene"] = "res://scenes/missing_uninstalled_scene.tscn"
+	manifests.append(stale_manifest)
+	invalid = loaded["record"].duplicate(true)
+	invalid["experiment_id"] = "org.godauldron.stale-scene"
+	if bool(host.call("_apply_session", invalid)) or not bool(host.call("_has_active_run")) or \
+			host.get("_active_scene") != previous_scene:
+		_fail("An installed manifest with a removed scene interrupted an active run")
+		return
+	manifests.pop_back()
 	invalid = loaded["record"].duplicate(true)
 	invalid["graphics"]["scaling_3d_scale"] = 99.0
 	if bool(host.call("_apply_session", invalid)) or not bool(host.call("_has_active_run")):

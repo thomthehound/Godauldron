@@ -12,6 +12,7 @@ const InspectionCamera = preload("res://scripts/inspection_camera.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
+const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
@@ -28,6 +29,7 @@ var _graphics_run_snapshot: Dictionary = {}
 var _capture_sequence: int = 0
 var _capture_pending: bool = false
 var _capture_directory: String = "user://captures"
+var _comparison_window: Window
 var _camera_inspector: RefCounted = null
 var _inspection_overlay: Node3D
 var _inspection_bounds: AABB
@@ -197,6 +199,10 @@ func _build_ui() -> void:
 	capture_button.text = "Capture PNG"
 	capture_button.pressed.connect(_capture_screenshot)
 	toolbar.add_child(capture_button)
+	var compare_button := Button.new()
+	compare_button.text = "Compare images…"
+	compare_button.pressed.connect(_open_visual_comparison)
+	toolbar.add_child(compare_button)
 
 	_graphics_advanced = GridContainer.new()
 	_graphics_advanced.columns = 2
@@ -248,6 +254,24 @@ func _build_ui() -> void:
 	_telemetry = Label.new()
 	_telemetry.text = "Host stepping: idle"
 	root.add_child(_telemetry)
+
+	_comparison_window = VisualComparisonWindow.new()
+	_comparison_window.capture_directory = _capture_directory
+	_comparison_window.visible = false
+	_comparison_window.transient = true
+	_comparison_window.exclusive = true
+	add_child(_comparison_window)
+
+
+func _open_visual_comparison() -> void:
+	# Image analysis can use significant CPU resources. Keep it out of timed
+	# experiment steps, exactly as with GPU readback and capture encoding.
+	if _capture_pending:
+		_status.text = "Capture in progress; open comparison after it completes"
+		return
+	if _has_active_run():
+		_finish_run(false)
+	_comparison_window.call("open_gallery")
 
 
 func _add_quality_number(key: String, label_text: String, minimum: float, maximum: float, step: float) -> void:

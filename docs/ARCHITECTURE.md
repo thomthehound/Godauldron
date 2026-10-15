@@ -60,6 +60,10 @@ Host viewport graphics presets are independent of an experiment's simulation/tec
 
 Run reports snapshot the effective viewport graphics configuration immediately after experiment setup. Changing host graphics controls cancels an active run or campaign before applying new values. Interactive PNG captures use the viewport texture after a completed render, and store a sidecar with the capture context. Image readback is not part of measured run steps: capturing stops active measurements first. These measures preserve attribution, but do not yet establish deterministic pixel reproduction, HDR correctness or GPU execution time. See [Graphics and capture design](GRAPHICS_AND_CAPTURE.md).
 
+## Saved-image comparisons
+
+The image comparison service consumes PNG/JSON pairs produced by the capture service. It validates source filename/dimensions against the actual image and refuses direct pixel differences across incompatible dimensions. Independent provenance warnings flag mismatched experiment IDs, parameters, camera states and graphics configurations, while preserving intentionally different images for visual inspection. Unaligned encoded 8-bit RGB absolute differences are descriptive, not perceptual/HDR/GPU measurements. Source/candidate PNG and JSON remain untouched; optional differential exports include both original metadata records and the analysis. See [Visual comparisons](VISUAL_COMPARISON.md).
+
 ## Measurements and reports
 
 Reports are JSON files stored in user://results and include identity, parameters, completed/requested step count, fixed delta, timestamps, engine version, OS and scene-defined metrics.

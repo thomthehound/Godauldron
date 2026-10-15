@@ -1,0 +1,23 @@
+# Visual comparisons
+
+**Compare images…** in the main viewport toolbar opens the saved-capture comparison window. Select a **Reference** and **Candidate** capture, press **Compare**, then inspect the two images and a diagnostic difference map. You can enlarge previews with the magnification slider and scroll each pane for detailed inspection. **Save difference** exports a PNG plus JSON metadata to `user://comparisons`.
+
+## Source integrity and conditions
+
+Only complete `.png` plus same-stem `.json` capture pairs with structurally valid filename, dimensions and declared format are listed. The source loader verifies recorded filename and dimensions against the decoded PNG. Invalid or missing metadata is rejected. Two images with different dimensions can be viewed side by side, but Godauldron **will not** resample, register, crop or fabricate a pixel-level comparison between them.
+
+Comparison warnings identify mismatched experiment identity, parameters, camera, graphics settings, inspection overlays, engine/build and OS, and provider capture state. Provider state missing on only one side is warned about; absence in both is allowed. These differences can be intentional—for example, changing MSAA or a shader under test. They are surfaced to the user instead of declaring the captures equivalent. Missing camera or graphics metadata is also called out. Outputs store both original metadata records for later audit.
+
+## What the current numbers mean
+
+Reference and candidate PNGs are decoded to RGBA8, compared by their **stored 8-bit RGB channels**, without resizing. For each pixel and each RGB channel, absolute byte differences feed the mean absolute error (MAE) and root mean square error (RMSE), both in 0–255 units. A pixel is counted as changed if any channel differs by **more than 8 byte values**. The difference map displays the maximum RGB channel difference in amplified red/yellow, with 4× red contrast. **Alpha-channel differences appear independently in blue**, including alpha-only changes; the UI shows their count. Alpha is excluded from RGB MAE/RMSE. RGB bytes under transparent pixels are still compared; this is not appearance-aware compositing.
+
+This is a low-level SDR diagnostic, **not** a perceptual score, a measure of scene fidelity, a linear-light color-space comparison, an HDR comparison, a GPU timing measurement or evidence of an actual performance regression. A metric can be nonzero because of AA jitter, exposure, camera movement, dynamic geometry, tone mapping or platform differences. The default threshold is descriptive and not a universal acceptance criterion.
+
+## Measurement boundaries
+
+Opening the comparison window finalizes a currently running benchmark or campaign before potentially expensive image analysis. Closing the window releases the loaded images and textures. The window is an exclusive modal window while comparing. It reads only saved captures and never changes the active experiment scene, camera or graphics settings.
+
+Headless CI uses deterministic synthetic PNGs to verify known RGB and alpha-only differences, sidecar integrity, malformed metadata, provenance warnings, dimension rejection, UI cleanup and exports. These tests do **not** demonstrate the appearance of rendered Godot scenes on real graphics hardware. Very large captures are currently decoded and compared on the UI thread; profiling and responsive processing will be needed before bulk 4K/8K showcase comparison.
+
+Future improvements: synchronized pan/zoom, cursor-coordinate magnifier, alpha policies, region masks, precise scene/camera matching and registered comparisons, linear HDR/EXR sources, tolerance policies, and eventually automated visual baselines and video frame comparisons.

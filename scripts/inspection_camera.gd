@@ -117,5 +117,5 @@ static func scene_bounds(scene: Node) -> AABB:
 			nodes.append(child)
 	if is_finite(minimum.x) and is_finite(maximum.x) and minimum.distance_to(maximum) > 0.0:
 		return AABB(minimum, maximum - minimum)
-	var center := scene.global_position if scene is Node3D else Vector3.ZERO
+	var center: Vector3 = (scene as Node3D).global_position if scene is Node3D else Vector3.ZERO
 	return AABB(center - Vector3.ONE, Vector3.ONE * 2.0)

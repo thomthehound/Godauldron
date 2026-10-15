@@ -39,3 +39,21 @@ The case mean averages each completed repetition's **host-step CPU wall-time mea
 A ratio of 1.25 means the host callback took 25% more CPU wall time, on that system, than the designated baseline. It says nothing about GPU execution time or statistical significance. Increasing reference geometry grid size changes workload and is not a same-work comparison between implementations.
 
 Credible GPU performance tests will also need hardware and driver metadata, comparable workloads, synchronization with actual GPU completion, and adequate sampling and variability analysis. Arbitrary results from different machines cannot be used interchangeably.
+
+## Descriptive statistics and optional engineering guard
+
+Each case includes mean, median, minimum, maximum, population standard deviation and coefficient of variation across completed repetition-level host callback CPU means. Missing values stay null. The host displays a comparison table; JSON remains the exportable authoritative result.
+
+By default, campaigns have no regression verdict. Authors comparing genuinely equivalent workloads may opt into an engineering limit:
+
+```json
+"regression_guard": {
+  "max_ratio": 1.1,
+  "min_repetitions": 5,
+  "max_coefficient_of_variation": 0.15
+}
+```
+
+A nonbaseline case is `within_limit` or `over_limit` only when it and its baseline completed all requested repetitions, each has enough independent runs, the baseline mean is positive, and both satisfy the configured coefficient-of-variation limit. Otherwise status is `insufficient_data`, `unavailable`, or `unstable`. The baseline reports `baseline`. Without a configured guard, other cases report `not_configured`.
+
+This is a descriptive *engineering observation*, not a statistical confidence interval, hypothesis test, CI build failure or proof of a performance regression. The reference grid campaign intentionally contains no limit because its cases represent different workloads.

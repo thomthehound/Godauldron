@@ -9,7 +9,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Interactive Godot host with experiment discovery and a parameter inspector.
 - Namespace-based manifest v1 with scalar integer, floating-point and boolean options.
 - UI-independent experiment execution with optional warmup, isolated measured steps, per-run setup, cancellation and result reporting.
-- Versioned campaign presets with sequential parameter sweeps, repetitions and descriptive baseline comparisons.
+- Versioned campaign presets with sequential parameter sweeps, per-run reports, and a comparison table showing dispersion and optional engineering guard limits.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.

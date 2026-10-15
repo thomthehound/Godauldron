@@ -22,6 +22,7 @@ var _run_steps: SpinBox
 var _warmup_steps: SpinBox
 var _campaign_picker: OptionButton
 var _campaign_button: Button
+var _comparison_table: Tree
 var _campaign_plans: Array[Dictionary] = []
 var _campaign: RefCounted = null
 var _last_campaign_report_path: String = ""
@@ -147,6 +148,21 @@ func _build_ui() -> void:
 	content.add_child(viewport_container)
 	viewport_container.add_child(_viewport)
 
+	var comparison_panel := VBoxContainer.new()
+	root.add_child(comparison_panel)
+	var comparison_title := Label.new()
+	comparison_title.text = "Campaign results  |  Host callback CPU time (descriptive only)"
+	comparison_panel.add_child(comparison_title)
+	_comparison_table = Tree.new()
+	_comparison_table.columns = 8
+	_comparison_table.hide_root = true
+	_comparison_table.column_titles_visible = true
+	_comparison_table.custom_minimum_size = Vector2(0, 145)
+	var column_names := ["Sweep value", "Runs", "Mean (ms)", "Median (ms)", "Range (ms)", "CV", "Ratio", "Guard"]
+	for i in range(column_names.size()):
+		_comparison_table.set_column_title(i, column_names[i])
+	comparison_panel.add_child(_comparison_table)
+
 	_telemetry = Label.new()
 	_telemetry.text = "Host stepping: idle"
 	root.add_child(_telemetry)
@@ -176,6 +192,11 @@ func _discover() -> void:
 func _select_experiment(index: int) -> void:
 	if _has_active_run():
 		_finish_run(false)
+	# Saved reports survive the switch, but their visual presentation belongs
+	# to the previous experiment and must not be attributed to the new one.
+	_comparison_table.clear()
+	_last_campaign_report_path = ""
+	_last_campaign_summary.clear()
 	if _active_scene != null:
 		_viewport.remove_child(_active_scene)
 		_active_scene.queue_free()
@@ -247,6 +268,7 @@ func _start_campaign() -> void:
 	_campaign = ExperimentCampaign.new()
 	_last_campaign_report_path = ""
 	_last_campaign_summary.clear()
+	_comparison_table.clear()
 	var errors: PackedStringArray = _campaign.configure(
 		_campaign_plans[_campaign_picker.selected], _manifest
 	)
@@ -271,6 +293,7 @@ func _begin_campaign_case() -> void:
 
 func _finish_campaign(completed: bool) -> void:
 	_last_campaign_summary = _campaign.summary(completed)
+	_show_comparison(_last_campaign_summary)
 	var path: String = _save_report(_last_campaign_summary, "campaign_" + String(_last_campaign_summary["campaign_id"]))
 	_last_campaign_report_path = path
 	_campaign = null
@@ -279,6 +302,29 @@ func _finish_campaign(completed: bool) -> void:
 		_status.text = "Campaign summary NOT saved: " + _status.text
 		return
 	_status.text = ("Campaign complete" if completed else "Campaign cancelled") + ": " + path
+
+
+func _show_comparison(summary: Dictionary) -> void:
+	_comparison_table.clear()
+	var root_item: TreeItem = _comparison_table.create_item()
+	for entry in summary.get("case_summaries", []):
+		var item: TreeItem = _comparison_table.create_item(root_item)
+		item.set_text(0, str(entry["axis_value"]))
+		item.set_text(1, "%d/%d" % [int(entry["completed_repetitions"]), int(entry["requested_repetitions"])])
+		for column in [2, 3]:
+			var field: String = "mean_host_step_cpu_usec" if column == 2 else "median_host_step_cpu_usec"
+			var value: Variant = entry[field]
+			item.set_text(column, "—" if value == null else "%.4f" % [float(value) / 1000.0])
+		var minimum: Variant = entry["minimum_host_step_cpu_usec"]
+		var maximum: Variant = entry["maximum_host_step_cpu_usec"]
+		item.set_text(4, "—" if minimum == null or maximum == null else \
+			"%.4f–%.4f" % [float(minimum) / 1000.0, float(maximum) / 1000.0])
+		var variation: Variant = entry["coefficient_of_variation"]
+		item.set_text(5, "—" if variation == null else "%.1f%%" % [float(variation) * 100.0])
+		var ratio: Variant = entry["relative_to_baseline"]
+		item.set_text(6, "—" if ratio == null else "%.3fx" % float(ratio))
+		var status: String = String(entry["guard_status"])
+		item.set_text(7, "Descriptive" if status == "not_configured" else status.replace("_", " ").capitalize())
 
 
 func _collect_parameters() -> Dictionary:

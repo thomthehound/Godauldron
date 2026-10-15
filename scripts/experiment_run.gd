@@ -10,6 +10,7 @@ var requested_steps: int = 0
 var warmup_steps_completed: int = 0
 var sample_steps_completed: int = 0
 var setup_cpu_usec: int = 0
+var sample_begin_cpu_usec: int = 0
 var warmup_cpu_usec_total: int = 0
 var sample_cpu_usec_total: int = 0
 
@@ -33,7 +34,18 @@ func begin(scene: Node, parameters: Dictionary, warmup_steps: int, sample_steps:
 	if _scene.has_method("godauldron_setup"):
 		_scene.call("godauldron_setup", _parameters.duplicate(true))
 	setup_cpu_usec = Time.get_ticks_usec() - began
-	phase = Phase.WARMUP if warmup_steps > 0 else Phase.SAMPLE
+	if warmup_steps > 0:
+		phase = Phase.WARMUP
+	else:
+		_begin_sampling()
+
+
+func _begin_sampling() -> void:
+	var began: int = Time.get_ticks_usec()
+	if _scene.has_method("godauldron_begin_sample"):
+		_scene.call("godauldron_begin_sample")
+	sample_begin_cpu_usec = Time.get_ticks_usec() - began
+	phase = Phase.SAMPLE
 
 
 func is_active() -> bool:
@@ -66,7 +78,7 @@ func advance() -> void:
 		warmup_cpu_usec_total += elapsed
 		warmup_steps_completed += 1
 		if warmup_steps_completed == requested_warmup_steps:
-			phase = Phase.SAMPLE
+			_begin_sampling()
 	else:
 		sample_cpu_usec_total += elapsed
 		sample_steps_completed += 1
@@ -98,6 +110,7 @@ func make_report(experiment_id: String) -> Dictionary:
 		"requested_steps": requested_steps,
 		"parameters": _parameters.duplicate(true),
 		"setup_host_cpu_wall_usec": setup_cpu_usec,
+		"sample_begin_host_cpu_wall_usec": sample_begin_cpu_usec,
 		"warmup_host_step_cpu_wall_usec_total": warmup_cpu_usec_total,
 		"warmup_host_step_cpu_wall_usec_mean": float(warmup_cpu_usec_total) / float(maxi(1, warmup_steps_completed)),
 		"host_step_cpu_wall_usec_total": sample_cpu_usec_total,

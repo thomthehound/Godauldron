@@ -65,11 +65,11 @@ func _verify() -> void:
 	var folder := "user://sessions-smoke-%d" % OS.get_process_id()
 	if not bool(Session.save(folder, "one", doc).get("ok", false)) or \
 			bool(Session.save(folder, "one", doc).get("ok", false)) or \
-			bool(Session.load(folder, "../one").get("ok", false)) or \
+			bool(Session.read_session(folder, "../one").get("ok", false)) or \
 			Session.catalog(folder).size() != 1:
 		_fail("Session disk persistence, overwrite or path guard failed")
 		return
-	var loaded: Dictionary = Session.load(folder, "one")
+	var loaded: Dictionary = Session.read_session(folder, "one")
 	if not bool(loaded.get("ok", false)):
 		_fail("Could not reload session")
 		return

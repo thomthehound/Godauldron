@@ -126,7 +126,7 @@ static func validate(record: Variant, manifests: Array[Dictionary]) -> String:
 	return ""
 
 
-static func load(root: String, stem: String) -> Dictionary:
+static func read_session(root: String, stem: String) -> Dictionary:
 	if stem.is_empty() or not stem.is_valid_filename() or stem.contains(".."):
 		return {"ok": false, "error": "Invalid session identifier"}
 	var path: String = ProjectSettings.globalize_path(root).path_join(stem + ".json")
@@ -172,7 +172,7 @@ static func catalog(root: String) -> Array[Dictionary]:
 		if not name.ends_with(".json"):
 			continue
 		var stem: String = name.trim_suffix(".json")
-		var result: Dictionary = load(root, stem)
+		var result: Dictionary = read_session(root, stem)
 		if not bool(result.get("ok", false)):
 			continue
 		var doc: Dictionary = result["record"]

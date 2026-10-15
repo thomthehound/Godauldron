@@ -420,7 +420,7 @@ func _load_selected_session() -> void:
 		_status.text = "Select a saved configuration"
 		return
 	var stem: String = _session_entries[_session_picker.selected]["stem"]
-	var read: Dictionary = LabSession.load(_session_root, stem)
+	var read: Dictionary = LabSession.read_session(_session_root, stem)
 	if not bool(read.get("ok", false)):
 		_status.text = "Configuration load failed: " + String(read.get("error", "Unknown error"))
 		return

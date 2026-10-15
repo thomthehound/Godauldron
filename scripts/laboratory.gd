@@ -324,14 +324,17 @@ func _apply_graphics() -> void:
 	for key in _graphics_inputs:
 		var input: Control = _graphics_inputs[key]
 		input.set_block_signals(true)
-		input.disabled = GraphicsSettings.is_owned(key, _graphics_owned)
-		input.tooltip_text = "Controlled by the experiment" if input.disabled else ""
+		var is_claimed: bool = GraphicsSettings.is_owned(key, _graphics_owned)
+		input.tooltip_text = "Controlled by the experiment" if is_claimed else ""
 		var current: Variant = _viewport.get(key)
 		if input is SpinBox:
+			(input as SpinBox).editable = not is_claimed
 			(input as SpinBox).value = float(current)
 		elif input is OptionButton:
+			(input as OptionButton).disabled = is_claimed
 			(input as OptionButton).select(int(current))
 		else:
+			(input as CheckBox).disabled = is_claimed
 			(input as CheckBox).button_pressed = bool(current)
 		input.set_block_signals(false)
 

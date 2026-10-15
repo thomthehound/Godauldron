@@ -34,40 +34,11 @@ jobs:
       build_linux: ${{ inputs.build_linux }}
       build_windows: ${{ inputs.build_windows }}
 
-  smoke-linux:
-    name: Godauldron smoke (Linux)
+  smoke:
+    name: Test Godauldron against compiled Godot
     needs: build
-    if: inputs.build_linux
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: godot-linux-editor
-          path: .engine
-      - name: Import and test Godauldron
-        run: |
-          chmod +x .engine/godot
-          .engine/godot --version
-          .engine/godot --headless --path . --editor --import --quit
-          .engine/godot --headless --path . --script res://tests/runtime_smoke.gd
-
-  smoke-windows:
-    name: Godauldron smoke (Windows)
-    needs: build
-    if: inputs.build_windows
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: godot-windows-editor
-          path: .engine
-      - name: Import and test Godauldron
-        shell: pwsh
-        run: |
-          .\.engine\godot.exe --version
-          .\.engine\godot.exe --headless --path . --editor --import --quit
-          .\.engine\godot.exe --headless --path . --script res://tests/runtime_smoke.gd
+    uses: ./.github/workflows/smoke-built-godot.yml
+    with:
+      build_linux: ${{ inputs.build_linux }}
+      build_windows: ${{ inputs.build_windows }}
+      resolved_revision: ${{ needs.build.outputs.resolved_revision }}

@@ -1,0 +1,35 @@
+name: Godot master HEAD (PR opt-in)
+
+# No pushes or routine PR updates: only applying the label requests this
+# expensive source build. To request it again, remove and reapply the label.
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+# Re-labeling while a build is underway queues rather than discards that run.
+concurrency:
+  group: godot-head-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build upstream master for labeled PR
+    if: github.event.label.name == 'ci:godot-head'
+    uses: ./.github/workflows/build-godot.yml
+    with:
+      godot_repository: godotengine/godot
+      upstream_ref: master
+      build_linux: true
+      build_windows: true
+
+  smoke:
+    name: Test PR against compiled Godot
+    needs: build
+    uses: ./.github/workflows/smoke-built-godot.yml
+    with:
+      build_linux: true
+      build_windows: true
+      resolved_revision: ${{ needs.build.outputs.resolved_revision }}

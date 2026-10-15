@@ -1,0 +1,69 @@
+name: Smoke-test compiled Godot (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      build_linux:
+        type: boolean
+        required: false
+        default: true
+      build_windows:
+        type: boolean
+        required: false
+        default: true
+      resolved_revision:
+        description: Exact Godot revision produced by the source builder
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Godauldron smoke (Linux)
+    if: inputs.build_linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: godot-linux-editor
+          path: .engine
+      - name: Verify source and run Godauldron
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ inputs.resolved_revision }}
+        run: |
+          grep -Fx "resolved_revision=$EXPECTED_REVISION" .engine/source.txt
+          chmod +x .engine/godot
+          .engine/godot --version
+          .engine/godot --headless --path . --editor --import --quit
+          .engine/godot --headless --path . --script res://tests/runtime_smoke.gd
+
+  windows:
+    name: Godauldron smoke (Windows)
+    if: inputs.build_windows
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: godot-windows-editor
+          path: .engine
+      - name: Verify source and run Godauldron
+        shell: pwsh
+        env:
+          EXPECTED_REVISION: ${{ inputs.resolved_revision }}
+        run: |
+          if (-not (Select-String -Path ".engine/source.txt" -Pattern "resolved_revision=$env:EXPECTED_REVISION" -SimpleMatch -Quiet)) {
+            throw "Godot build artifact revision does not match the requested revision."
+          }
+          .\.engine\godot.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\.engine\godot.exe --headless --path . --editor --import --quit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\.engine\godot.exe --headless --path . --script res://tests/runtime_smoke.gd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

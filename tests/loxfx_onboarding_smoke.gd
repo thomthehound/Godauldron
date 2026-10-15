@@ -158,6 +158,23 @@ func _verify() -> void:
 	if int((host.get("_playback")).snapshot()["steps"]) != 60:
 		_fail("Timeline UI could not seek to a reproducible second")
 		return
+	# Play/Pause advances only the interactive timeline and leaves the
+	# benchmark runner uninstantiated until Run experiment is requested.
+	host.call("_toggle_playback")
+	if not bool((host.get("_playback")).playing):
+		_fail("Interactive play did not start with a fixed-step provider")
+		return
+	host.call("_process", 0.1)
+	host.call("_toggle_playback")
+	var paused_step: int = int((host.get("_playback")).snapshot()["steps"])
+	if paused_step <= 0 or bool((host.get("_playback")).playing):
+		_fail("Play/Pause failed to advance then stop the interactive timeline")
+		return
+	host.call("_process", 0.1)
+	if int((host.get("_playback")).snapshot()["steps"]) != paused_step or host.get("_run") != null:
+		_fail("Paused playback kept advancing or fabricated benchmark measurements")
+		return
+
 	run_steps.value = 2
 	host.call("_start_run")
 	host.call("_process", 1.0 / 60.0)
@@ -165,6 +182,21 @@ func _verify() -> void:
 	if bool(host.call("_has_active_run")):
 		_fail("Measured run did not finish independently of previous playback")
 		return
+	# The visual gallery has setup/preview but no native simulation step;
+	# its playback button must fail closed rather than appearing to play.
+	var gallery_index: int = -1
+	for i in range(manifest_list.size()):
+		if manifest_list[i].get("id") == "org.godauldron.technical-gallery":
+			gallery_index = i
+	if gallery_index < 0:
+		_fail("Missing non-playable technical scene for playback guard test")
+		return
+	host.call("_select_experiment", gallery_index)
+	host.call("_toggle_playback")
+	if bool((host.get("_playback")).playing):
+		_fail("Non-playable gallery incorrectly entered continuous playback")
+		return
+
 	var label: Dictionary = NativePackage.display_path(manifest_list[hair_index])
 	if label["kind"] != "diagnostic_cpu_bridge" or not String(label["disclaimer"]).contains("not production"):
 		_fail("Diagnostic display was presented as production simulation performance")

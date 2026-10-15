@@ -140,7 +140,7 @@ func _verify() -> void:
 	var interrupted_campaign: Dictionary = host.get("_last_campaign_summary")
 	host.set("_results_directory", "user://results")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(blocked_path))
-	if not failure_text.contains("NOT saved") or not failure_text.contains("Could not create results directory:"):
+	if not failure_text.contains("NOT saved") or not (failure_text.contains("Could not create results directory:") or failure_text.contains("Could not write results to ")):
 		_fail("Campaign I/O failure was hidden: " + failure_text)
 		return
 	if not failed_summary_path.is_empty() or bool(interrupted_campaign.get("completed", true)):

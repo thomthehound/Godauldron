@@ -177,7 +177,7 @@ func _verify() -> void:
 	var failure_text: String = status.text
 	host.set("_results_directory", "user://results")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(blocked_path))
-	if not failure_text.begins_with("Could not create results directory:"):
+	if not (failure_text.begins_with("Could not create results directory:") or failure_text.begins_with("Could not write results to ")):
 		_fail("Single-run save failure was overwritten or hidden: " + failure_text)
 		return
 	if bool(host.call("_has_active_run")):

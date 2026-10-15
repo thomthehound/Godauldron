@@ -82,6 +82,22 @@ func finish_on_shutdown() -> void:
 	_metadata.clear()
 
 
+static func preview_image(image: Image, maximum_edge: int = 1536) -> Image:
+	# Keep the full original for exact metrics and exported diff, but avoid
+	# uploading multiple 4K/8K textures to the viewer just for previews.
+	if image == null or image.is_empty():
+		return null
+	var source_size: Vector2i = image.get_size()
+	var largest: int = maxi(source_size.x, source_size.y)
+	if largest <= maximum_edge:
+		return image
+	var factor: float = float(maximum_edge) / float(largest)
+	var preview: Image = image.duplicate()
+	preview.resize(maxi(1, roundi(float(source_size.x) * factor)),
+		maxi(1, roundi(float(source_size.y) * factor)), Image.INTERPOLATE_BILINEAR)
+	return preview
+
+
 func _execute() -> Dictionary:
 	if _kind == "export":
 		return ImageCapture.write_image(_image, _root, _stem, _metadata)
@@ -94,11 +110,18 @@ func _execute() -> Dictionary:
 				String(reference.get("error", "")), String(candidate.get("error", ""))
 			]
 		}
+	var comparison: Dictionary = Comparison.compare(reference, candidate)
+	var difference: Image = comparison.get("difference_image")
 	return {
 		"ok": true,
 		"reference": reference,
 		"candidate": candidate,
-		"comparison": Comparison.compare(reference, candidate),
+		"comparison": comparison,
+		"previews": [
+			preview_image(reference["image"]),
+			preview_image(candidate["image"]),
+			preview_image(difference)
+		],
 		"reference_stem": _reference,
 		"candidate_stem": _candidate
 	}

@@ -26,7 +26,7 @@ func _ready() -> void:
 	title = "Godauldron  |  Visual comparison"
 	size = Vector2i(1300, 790)
 	min_size = Vector2i(940, 600)
-	close_requested.connect(hide)
+	close_requested.connect(_close_gallery)
 	_build_ui()
 	refresh_captures()
 
@@ -86,13 +86,13 @@ func _build_ui() -> void:
 	_zoom.value_changed.connect(_update_zoom)
 	zoom_row.add_child(_zoom)
 	var caption := Label.new()
-	caption.text = "Scroll each pane to inspect detail; no image alignment or scaling is applied to the comparison"
+	caption.text = "Scroll to inspect detail; same-size pixels are compared without alignment or resampling"
 	zoom_row.add_child(caption)
 
 	var panels := HBoxContainer.new()
 	panels.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(panels)
-	for heading in ["Reference capture", "Candidate capture", "RGB difference  ×4 contrast"]:
+	for heading in ["Reference capture", "Candidate capture", "Difference: RGB red/yellow · alpha blue"]:
 		var column := VBoxContainer.new()
 		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		panels.add_child(column)
@@ -128,17 +128,28 @@ func open_gallery() -> void:
 	popup_centered(Vector2i(1300, 790))
 
 
-func _on_source_changed(_index: int) -> void:
-	# A saved comparison belongs to the source pair originally evaluated.
-	# A selector change must not allow exporting a stale difference under
-	# newly selected filenames.
+func _clear_comparison() -> void:
+	# Image+texture copies can be hundreds of megabytes at showcase quality.
+	# A hidden window should not keep that memory resident indefinitely.
 	_comparison.clear()
 	_save_button.disabled = true
-	_status.text = "Capture selection changed; compare again to update results"
 	_metrics.text = ""
 	_warnings.text = ""
 	for i in range(_images.size()):
 		_show_image(i, null)
+
+
+func _close_gallery() -> void:
+	hide()
+	_clear_comparison()
+
+
+func _on_source_changed(_index: int) -> void:
+	# A saved comparison belongs to the source pair originally evaluated.
+	# A selector change must not allow exporting a stale difference under
+	# newly selected filenames.
+	_clear_comparison()
+	_status.text = "Capture selection changed; compare again to update results"
 
 
 func _selected_stem(picker: OptionButton) -> String:
@@ -148,12 +159,7 @@ func _selected_stem(picker: OptionButton) -> String:
 
 
 func refresh_captures() -> void:
-	_comparison.clear()
-	_save_button.disabled = true
-	for i in range(_images.size()):
-		_show_image(i, null)
-	_metrics.text = ""
-	_warnings.text = ""
+	_clear_comparison()
 	var prev_ref: String = _selected_stem(_reference_picker)
 	var prev_candidate: String = _selected_stem(_candidate_picker)
 	_catalog = Comparison.catalog(capture_directory)
@@ -195,12 +201,7 @@ func _update_zoom(scale: float) -> void:
 
 
 func compare_selection() -> void:
-	_comparison.clear()
-	_save_button.disabled = true
-	_metrics.text = ""
-	_warnings.text = ""
-	for i in range(_images.size()):
-		_show_image(i, null)
+	_clear_comparison()
 	var a: String = _selected_stem(_reference_picker)
 	var b: String = _selected_stem(_candidate_picker)
 	if a.is_empty() or b.is_empty():
@@ -228,10 +229,11 @@ func compare_selection() -> void:
 		return
 	_show_image(2, result["difference_image"])
 	var metrics: Dictionary = result["metrics"]
-	_metrics.text = "RGB MAE %.3f /255   •   RGB RMSE %.3f /255   •   changed pixels (>8): %d / %d (%.2f%%)   •   max channel Δ %d" % [
+	_metrics.text = "RGB MAE %.3f /255   •   RGB RMSE %.3f /255   •   changed (>8): %d / %d (%.2f%%)   •   max RGB Δ %d   •   alpha changed: %d" % [
 		float(metrics["rgb_mae_8bit"]), float(metrics["rgb_rmse_8bit"]),
 		int(metrics["changed_pixels"]), int(metrics["width"]) * int(metrics["height"]),
-		float(metrics["changed_fraction"]) * 100.0, int(metrics["max_channel_difference_8bit"])
+		float(metrics["changed_fraction"]) * 100.0, int(metrics["max_channel_difference_8bit"]),
+		int(metrics["alpha_changed_pixels"])
 	]
 	_status.text = "Compared %s → %s (encoded SDR RGB; not perceptual or HDR)" % [a, b]
 	_save_button.disabled = false

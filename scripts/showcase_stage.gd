@@ -4,11 +4,14 @@ extends Node3D
 ## optional NeutralSubject and attach provider nodes under SubjectAnchor.
 
 @export_enum("portrait", "inspection") var stage_kind: String = "portrait"
+@export var translation_amplitude_m: float = 0.34
 
 var _params: Dictionary = {}
 var _time: float = 0.0
 var _authored_background: Color
 var _authored_subject_position: Vector3
+var _authored_subject_rotation: Vector3
+var _authored_placeholder_visible: bool
 
 @onready var _subject_motion: Node3D = $SubjectMotion
 @onready var _neutral_subject: Node3D = $SubjectMotion/NeutralSubject
@@ -21,8 +24,10 @@ func _ready() -> void:
 	# host should not overwrite a project's composition just by loading it.
 	_authored_background = _environment.environment.background_color
 	_authored_subject_position = _subject_motion.position
+	_authored_subject_rotation = _subject_motion.rotation
+	_authored_placeholder_visible = _neutral_subject.visible
 	_camera.current = true
-	godauldron_preview({"motion": "still", "show_placeholder": true, "background": "as_authored"})
+	godauldron_preview({"motion": "still", "background": "as_authored"})
 
 
 func _background_color(theme: String) -> Color:
@@ -38,7 +43,7 @@ func _background_color(theme: String) -> Color:
 func godauldron_preview(parameters: Dictionary) -> void:
 	_params = parameters.duplicate(true)
 	_time = 0.0
-	_neutral_subject.visible = bool(_params.get("show_placeholder", true))
+	_neutral_subject.visible = bool(_params.get("show_placeholder", _authored_placeholder_visible))
 	var backdrop: String = String(_params.get("background", "as_authored"))
 	_environment.environment.background_color = _authored_background if backdrop == "as_authored" else _background_color(backdrop)
 	_update_pose()
@@ -61,18 +66,18 @@ func godauldron_seek(seconds: float) -> void:
 
 func _update_pose() -> void:
 	# Analytic motion of a scene attachment. It is not a simulation of hair.
-	_subject_motion.rotation = Vector3.ZERO
+	_subject_motion.rotation = _authored_subject_rotation
 	_subject_motion.position = _authored_subject_position
 	match String(_params.get("motion", "still")):
 		"turn":
-			_subject_motion.rotation.y = 0.36 * sin(_time * 1.5)
-			_subject_motion.rotation.z = 0.055 * sin(_time * 1.13)
+			_subject_motion.rotation.y += 0.36 * sin(_time * 1.5)
+			_subject_motion.rotation.z += 0.055 * sin(_time * 1.13)
 		"nod":
-			_subject_motion.rotation.x = 0.19 * sin(_time * 1.8)
+			_subject_motion.rotation.x += 0.19 * sin(_time * 1.8)
 		"translate":
 			# Pure translation of the authored subject rig: no head rotation,
 			# hair solver, hidden physics step, or accumulated integration.
-			_subject_motion.position.x += 0.34 * sin(_time * 1.5)
+			_subject_motion.position.x += translation_amplitude_m * sin(_time * 1.5)
 
 
 func godauldron_inspection_bounds() -> AABB:
@@ -83,6 +88,7 @@ func godauldron_capture_metadata() -> Dictionary:
 	return {
 		"stage_kind": stage_kind,
 		"seconds": _time,
+		"translation_amplitude_m": translation_amplitude_m,
 		"subject_translation": [
 			_subject_motion.position.x - _authored_subject_position.x,
 			_subject_motion.position.y - _authored_subject_position.y,

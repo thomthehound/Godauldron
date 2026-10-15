@@ -61,6 +61,15 @@ func _tick(host: Node, count: int) -> void:
 		host.call("_process", 1.0 / 60.0)
 
 
+func _select_reference(host: Node) -> bool:
+	var catalog: Array = host.get("_experiments")
+	for i in range(catalog.size()):
+		if String(catalog[i].get("id", "")) == "org.godauldron.reference":
+			host.call("_select_experiment", i)
+			return true
+	return false
+
+
 func _verify() -> void:
 	var scene: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	if scene == null:
@@ -69,8 +78,8 @@ func _verify() -> void:
 	var host: Node = scene.instantiate()
 	root.add_child(host)
 	var catalog: Array = host.get("_experiments")
-	if catalog.is_empty():
-		_fail("No experiments discovered")
+	if catalog.is_empty() or not _select_reference(host):
+		_fail("Reference experiment not discovered")
 		return
 	var samples_control: SpinBox = host.get("_run_steps") as SpinBox
 	var warmup_control: SpinBox = host.get("_warmup_steps") as SpinBox

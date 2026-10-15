@@ -14,6 +14,15 @@ func _fail(reason: String) -> void:
 	quit(1)
 
 
+func _select_reference(host: Node) -> bool:
+	var catalog: Array = host.get("_experiments")
+	for i in range(catalog.size()):
+		if String(catalog[i].get("id", "")) == "org.godauldron.reference":
+			host.call("_select_experiment", i)
+			return true
+	return false
+
+
 func _verify() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	if packed == null:
@@ -21,6 +30,9 @@ func _verify() -> void:
 		return
 	var host: Node = packed.instantiate()
 	root.add_child(host)
+	if not _select_reference(host):
+		_fail("Reference experiment not discovered")
+		return
 	var inspector: RefCounted = host.get("_camera_inspector")
 	if inspector == null or not is_instance_valid(inspector.get("camera")):
 		_fail("No camera was bound to the reference experiment")

@@ -28,7 +28,7 @@ func _ready() -> void:
 	_build_stage()
 	godauldron_preview({
 		"groom": "long_waves", "motion": "turn", "seed": 7, "density": 260,
-		"background": "slate", "guides": false, "collisions": false
+		"background": "slate", "guides": false
 	})
 
 

@@ -90,12 +90,6 @@
       "label": "Provider guide overlay",
       "type": "bool",
       "default": false
-    },
-    {
-      "id": "collisions",
-      "label": "Collision overlay (reserved)",
-      "type": "bool",
-      "default": false
     }
   ]
 }

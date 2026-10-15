@@ -86,6 +86,10 @@ func _verify() -> void:
 		_fail("Hair reference cannot reset independently of benchmark runs")
 		return
 	var initial: PackedVector3Array = _vertices(stage)
+	var first_context: Dictionary = stage.call("godauldron_capture_metadata")
+	if not String(first_context.get("groom_asset", "")).ends_with("long_waves.json") or 			not String(first_context.get("groom_load_error", "")).is_empty():
+		_fail("Named groom asset failed to load into reference studio")
+		return
 	if initial.size() != 120 * 12 * 6:
 		_fail("Hair fixture density was not applied to generated geometry")
 		return
@@ -114,6 +118,16 @@ func _verify() -> void:
 		_fail("Repeated fixed-input playback has diverged")
 		return
 
+	# A second groom is an independently authored preset asset, not just a
+	# UI label mapped back to the same generated vertex data.
+	values["groom"] = "bob"
+	playback.bind(stage, values, 1.0 / 60.0)
+	playback.reset()
+	var bob: PackedVector3Array = _vertices(stage)
+	if _equivalent(initial, bob) or not String(stage.call("godauldron_capture_metadata")["groom_asset"]).ends_with("short_bob.json"):
+		_fail("The short groom asset did not produce distinct geometry")
+		return
+	values["groom"] = "long_waves"
 	values["motion"] = "still"
 	playback.bind(stage, values, 1.0 / 60.0)
 	playback.reset()

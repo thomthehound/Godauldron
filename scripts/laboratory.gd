@@ -192,6 +192,11 @@ func _discover() -> void:
 func _select_experiment(index: int) -> void:
 	if _has_active_run():
 		_finish_run(false)
+	# Saved reports survive the switch, but their visual presentation belongs
+	# to the previous experiment and must not be attributed to the new one.
+	_comparison_table.clear()
+	_last_campaign_report_path = ""
+	_last_campaign_summary.clear()
 	if _active_scene != null:
 		_viewport.remove_child(_active_scene)
 		_active_scene.queue_free()

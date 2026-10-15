@@ -377,6 +377,12 @@ func _capture_screenshot() -> void:
 		"os": OS.get_name(),
 		"timestamp": Time.get_datetime_string_from_system()
 	}
+	# The controls express user intent, not necessarily the scene's achieved
+	# state. Keep provider-reported actual metrics independently attributable.
+	if _active_scene.has_method("godauldron_metrics"):
+		var actual: Variant = _active_scene.call("godauldron_metrics")
+		if typeof(actual) == TYPE_DICTIONARY:
+			metadata["experiment_metrics"] = actual.duplicate(true)
 	var camera: Camera3D = _viewport.get_camera_3d()
 	if camera != null:
 		metadata["camera"] = {

@@ -30,6 +30,8 @@ var _last_campaign_summary: Dictionary = {}
 var _run: ExperimentRun = null
 var _accumulator: float = 0.0
 var _report_sequence: int = 0
+# Configurable result location also allows integration tests to simulate I/O failure.
+var _results_directory: String = "user://results"
 
 
 func _ready() -> void:
@@ -272,7 +274,11 @@ func _finish_campaign(completed: bool) -> void:
 	var path: String = _save_report(_last_campaign_summary, "campaign_" + String(_last_campaign_summary["campaign_id"]))
 	_last_campaign_report_path = path
 	_campaign = null
-	_status.text = ("Campaign complete" if completed else "Campaign cancelled") + (": " + path if not path.is_empty() else ": unable to save summary")
+	if path.is_empty():
+		# _save_report set the concrete I/O error. Never replace it with success.
+		_status.text = "Campaign summary NOT saved: " + _status.text
+		return
+	_status.text = ("Campaign complete" if completed else "Campaign cancelled") + ": " + path
 
 
 func _collect_parameters() -> Dictionary:
@@ -364,6 +370,9 @@ func _finish_run(completed: bool) -> void:
 		else:
 			_finish_campaign(completed)
 		return
+	if result_path.is_empty():
+		# Keep _save_report's error; this run executed but its data was NOT saved.
+		return
 	_status.text = "%s: %d measured steps, %d warmup steps. Report: %s" % [
 		"Complete" if completed else "Stopped",
 		int(report["steps"]), int(report["warmup_steps"]), result_path
@@ -371,7 +380,7 @@ func _finish_run(completed: bool) -> void:
 
 
 func _save_report(report: Dictionary, identifier: String) -> String:
-	var result_dir: String = ProjectSettings.globalize_path("user://results")
+	var result_dir: String = ProjectSettings.globalize_path(_results_directory)
 	if DirAccess.make_dir_recursive_absolute(result_dir) != OK:
 		_status.text = "Could not create results directory: " + result_dir
 		return ""

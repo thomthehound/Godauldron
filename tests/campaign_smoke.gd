@@ -122,5 +122,30 @@ func _verify() -> void:
 		_fail("Cancelled campaign summary was not saved")
 		return
 
-	print("Godauldron campaign smoke passed: validation, sweeps, baselines and cancellation")
+
+	# An unsuccessful campaign result/summary write must remain visibly an
+	# I/O failure, not be described as a successfully saved campaign.
+	var blocked_path: String = "user://campaign-results-blocked-%d" % OS.get_process_id()
+	var blocker: FileAccess = FileAccess.open(blocked_path, FileAccess.WRITE)
+	if blocker == null:
+		_fail("Could not prepare blocked campaign results directory")
+		return
+	blocker.store_string("not a directory")
+	blocker.close()
+	host.set("_results_directory", blocked_path)
+	host.call("_start_campaign")
+	_tick(host, 15)
+	var failure_text: String = (host.get("_status") as Label).text
+	var failed_summary_path: String = host.get("_last_campaign_report_path")
+	var interrupted_campaign: Dictionary = host.get("_last_campaign_summary")
+	host.set("_results_directory", "user://results")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(blocked_path))
+	if not failure_text.contains("NOT saved") or not failure_text.contains("Could not create results directory:"):
+		_fail("Campaign I/O failure was hidden: " + failure_text)
+		return
+	if not failed_summary_path.is_empty() or bool(interrupted_campaign.get("completed", true)):
+		_fail("Failed campaign write was reported as a successful campaign")
+		return
+
+	print("Godauldron campaign smoke passed: validation, sweeps, baselines, cancellation, and I/O failure")
 	quit(0)

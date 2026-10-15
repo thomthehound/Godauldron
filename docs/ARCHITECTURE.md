@@ -29,10 +29,13 @@ The manifest intentionally describes a technology experiment, not a particular G
 The experiment root may implement:
 
     godauldron_setup(parameters: Dictionary) -> void
+    godauldron_begin_sample() -> void
     godauldron_step(fixed_delta: float) -> void
     godauldron_metrics() -> Dictionary
 
-The host calls setup once at each run, then step repeatedly, and metrics at completion or cancellation. The current host uses a fixed 1/60-second step and caps catch-up at eight steps per display frame. It does not claim identical wall-clock pacing or bitwise reproducibility across hardware. Experiment setup must reset the state for repeated runs.
+The `ExperimentRun` service owns the host-side lifecycle independently of the UI. The host calls setup once, then makes the requested number of optional warmup steps before measured steps. `godauldron_begin_sample()` is invoked exactly once at the sampling boundary (immediately after setup when warmup is zero). An adapter can use it to reset SDK statistics, but must not reset simulation state unless that is explicitly part of the experiment. `godauldron_metrics()` runs on completion or cancellation, including cancellation during warmup.
+
+The UI exposes separate nonnegative warmup and positive measurement step counts; zero warmup is the default. The host uses a fixed 1/60-second step and caps catch-up at eight steps per display frame. It does not promise identical wall-clock pacing or bitwise reproducibility across hardware. Experiment setup must reset state for repeated runs.
 
 The first implementation runs these callbacks on the Godot main thread and keeps the experiment scene loaded until a different experiment is selected. An experiment may perform its actual work asynchronously; its reported metrics must clearly distinguish submitted work from completed work.
 
@@ -40,7 +43,9 @@ The first implementation runs these callbacks on the Godot main thread and keeps
 
 Reports are JSON files stored in user://results and include identity, parameters, completed/requested step count, fixed delta, timestamps, engine version, OS and scene-defined metrics.
 
-The current host_step_cpu_wall_usec_mean/total fields measure elapsed CPU time around the optional step callback. This excludes deferred GPU execution, memory transfers performed later, renderer timing, and presentation. No GPU profiling claim is made.
+The `host_step_cpu_wall_usec_mean/total` fields now describe the **sample phase only**. `setup_host_cpu_wall_usec`, `sample_begin_host_cpu_wall_usec`, and `warmup_host_step_cpu_wall_usec_mean/total` are recorded separately. Reports retain format version 1 and the prior measured-step keys while adding phase counts and `run_status`. The experiment's own metrics are not automatically separated: its adapter must use `godauldron_begin_sample()` where appropriate.
+
+All timings measure elapsed CPU time enclosing the synchronous Godot callback. They exclude deferred GPU execution, memory transfers performed later, renderer timing, and presentation. No GPU profiling claim is made.
 
 Later reports will include independent clocks/metrics with clear ownership and synchronization semantics, such as GPU timestamps, CPU submission durations, queue waits, DMA/copy costs, allocations, frame time and display latency. Accurate integration overhead requires comparing like workloads and explicitly accounting for asynchronous work.
 

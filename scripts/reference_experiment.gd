@@ -5,6 +5,7 @@ var _instances: Array[MeshInstance3D] = []
 var _phase: float = 0.0
 var _amplitude: float = 0.65
 var _speed: float = 1.0
+var _sample_start_phase: float = -1.0
 
 
 func _ready() -> void:
@@ -34,6 +35,7 @@ func godauldron_setup(parameters: Dictionary) -> void:
 		instance.queue_free()
 	_instances.clear()
 	_phase = 0.0
+	_sample_start_phase = -1.0
 	_amplitude = float(parameters.get("amplitude", 0.65))
 	_speed = float(parameters.get("speed", 1.0))
 	var grid: int = int(parameters.get("grid", 8))
@@ -54,6 +56,10 @@ func godauldron_setup(parameters: Dictionary) -> void:
 		_instances.append(item)
 
 
+func godauldron_begin_sample() -> void:
+	_sample_start_phase = _phase
+
+
 func godauldron_step(delta: float) -> void:
 	_phase += delta * _speed
 	for i in range(_instances.size()):
@@ -63,4 +69,8 @@ func godauldron_step(delta: float) -> void:
 
 
 func godauldron_metrics() -> Dictionary:
-	return {"instances": _instances.size(), "phase": _phase}
+	return {
+		"instances": _instances.size(),
+		"phase": _phase,
+		"sample_phase": _phase - _sample_start_phase if _sample_start_phase >= 0.0 else 0.0
+	}

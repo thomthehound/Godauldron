@@ -5,6 +5,7 @@ extends Control
 const MANIFEST_ROOT := "res://experiments"
 const FIXED_STEP := 1.0 / 60.0
 const MAX_STEPS_PER_FRAME := 8
+const ExperimentRun = preload("res://scripts/experiment_run.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
@@ -16,13 +17,10 @@ var _parameters: VBoxContainer
 var _status: Label
 var _telemetry: Label
 var _run_steps: SpinBox
+var _warmup_steps: SpinBox
 
-var _running: bool = false
+var _run: ExperimentRun = null
 var _accumulator: float = 0.0
-var _step_count: int = 0
-var _target_steps: int = 0
-var _step_cpu_usec: int = 0
-var _run_parameters: Dictionary = {}
 var _report_sequence: int = 0
 
 
@@ -73,6 +71,19 @@ func _build_ui() -> void:
 	_parameters = VBoxContainer.new()
 	_parameters.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_parameters)
+
+	var warmup_row := HBoxContainer.new()
+	sidebar.add_child(warmup_row)
+	var warmup_label := Label.new()
+	warmup_label.text = "Warmup steps"
+	warmup_row.add_child(warmup_label)
+	_warmup_steps = SpinBox.new()
+	_warmup_steps.min_value = 0
+	_warmup_steps.max_value = 1000000
+	_warmup_steps.step = 1
+	_warmup_steps.value = 0
+	_warmup_steps.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	warmup_row.add_child(_warmup_steps)
 
 	var steps_row := HBoxContainer.new()
 	sidebar.add_child(steps_row)
@@ -142,7 +153,7 @@ func _discover() -> void:
 
 
 func _select_experiment(index: int) -> void:
-	if _running:
+	if _has_active_run():
 		_finish_run(false)
 	if _active_scene != null:
 		_viewport.remove_child(_active_scene)
@@ -196,69 +207,64 @@ func _collect_parameters() -> Dictionary:
 	return result
 
 
+func _has_active_run() -> bool:
+	return _run != null and _run.is_active()
+
+
 func _start_run() -> void:
 	if _active_scene == null:
 		return
-	if _running:
+	if _has_active_run():
 		_finish_run(false)
-	_run_parameters = _collect_parameters()
-	if _active_scene.has_method("godauldron_setup"):
-		_active_scene.call("godauldron_setup", _run_parameters)
-	_target_steps = int(_run_steps.value)
-	_step_count = 0
-	_step_cpu_usec = 0
+	_run = ExperimentRun.new()
+	_run.begin(
+		_active_scene, _collect_parameters(),
+		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
+	)
 	_accumulator = 0.0
-	_running = true
 	_status.text = "Running %s" % String(_manifest["display_name"])
+	_update_telemetry()
 
 
 func _stop_run() -> void:
-	if _running:
+	if _has_active_run():
 		_finish_run(false)
 
 
 func _process(delta: float) -> void:
-	if not _running:
+	if not _has_active_run():
 		return
 	_accumulator += minf(delta, 0.25)
 	var steps_this_frame := 0
-	while _accumulator >= FIXED_STEP and _step_count < _target_steps and steps_this_frame < MAX_STEPS_PER_FRAME:
-		var started: int = Time.get_ticks_usec()
-		if _active_scene != null and _active_scene.has_method("godauldron_step"):
-			_active_scene.call("godauldron_step", FIXED_STEP)
-		_step_cpu_usec += Time.get_ticks_usec() - started
+	while _accumulator >= FIXED_STEP and steps_this_frame < MAX_STEPS_PER_FRAME and _has_active_run():
+		_run.advance()
 		_accumulator -= FIXED_STEP
-		_step_count += 1
 		steps_this_frame += 1
-	if _step_count % 30 == 0 or _step_count >= _target_steps:
-		var average_usec: float = float(_step_cpu_usec) / float(maxi(1, _step_count))
-		_telemetry.text = "Host-step CPU wall time: %.3f ms avg  |  steps: %d/%d  |  display FPS: %.1f" % [average_usec / 1000.0, _step_count, _target_steps, Engine.get_frames_per_second()]
-	if _step_count >= _target_steps:
+	if steps_this_frame > 0:
+		_update_telemetry()
+	if _run != null and _run.phase == ExperimentRun.Phase.COMPLETED:
 		_finish_run(true)
 
 
+func _update_telemetry() -> void:
+	if _run == null:
+		return
+	var sampled: int = _run.sample_steps_completed
+	var mean_usec: float = _run.sample_cpu_usec_total / float(maxi(1, sampled))
+	_telemetry.text = "Phase: %s  |  warmup: %d/%d  |  sampled: %d/%d  |  sample host-step CPU: %.3f ms avg  |  display FPS: %.1f" % [
+		_run.phase_label(), _run.warmup_steps_completed, _run.requested_warmup_steps,
+		sampled, _run.requested_steps, mean_usec / 1000.0, Engine.get_frames_per_second()
+	]
+
+
 func _finish_run(completed: bool) -> void:
-	_running = false
-	var metrics := {}
-	if _active_scene != null and _active_scene.has_method("godauldron_metrics"):
-		var reported: Variant = _active_scene.call("godauldron_metrics")
-		if typeof(reported) == TYPE_DICTIONARY:
-			metrics = reported
-	var report := {
-		"format_version": 1,
-		"experiment_id": String(_manifest["id"]),
-		"completed": completed,
-		"fixed_step_seconds": FIXED_STEP,
-		"steps": _step_count,
-		"requested_steps": _target_steps,
-		"parameters": _run_parameters.duplicate(true),
-		"host_step_cpu_wall_usec_total": _step_cpu_usec,
-		"host_step_cpu_wall_usec_mean": float(_step_cpu_usec) / float(maxi(1, _step_count)),
-		"experiment_metrics": metrics,
-		"engine": Engine.get_version_info(),
-		"os": OS.get_name(),
-		"timestamp": Time.get_datetime_string_from_system()
-	}
+	if _run == null:
+		return
+	var finished_run: ExperimentRun = _run
+	_run = null
+	if not completed:
+		finished_run.cancel()
+	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
 	var result_dir: String = ProjectSettings.globalize_path("user://results")
 	DirAccess.make_dir_recursive_absolute(result_dir)
 	# Preserve every run, including repeated starts/stops in the same second.
@@ -277,4 +283,7 @@ func _finish_run(completed: bool) -> void:
 		return
 	output.store_string(JSON.stringify(report, "\t") + "\n")
 	output.close()
-	_status.text = "%s: %d steps. Report: %s" % ["Complete" if completed else "Stopped", _step_count, result_path]
+	_status.text = "%s: %d measured steps, %d warmup steps. Report: %s" % [
+		"Complete" if completed else "Stopped",
+		int(report["steps"]), int(report["warmup_steps"]), result_path
+	]

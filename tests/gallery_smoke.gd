@@ -59,6 +59,10 @@ func _verify() -> void:
 		_fail("Invalid scene path was silently accepted")
 		return
 	stage.call("godauldron_preview", {"scene": "res://scenes/technical/material_study.tscn"})
+	var restored: Dictionary = stage.call("godauldron_metrics")
+	if not String(restored.get("load_error", "")).is_empty() or 			not bool(restored.get("asset_loaded", false)):
+		_fail("Returning to a valid displayed scene retained a stale load failure")
+		return
 	var steps: SpinBox = host.get("_run_steps")
 	steps.value = 2
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://results"))

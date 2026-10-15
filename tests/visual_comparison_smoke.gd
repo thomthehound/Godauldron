@@ -91,6 +91,14 @@ func _verify() -> void:
 		_fail("The comparison omitted mismatched provenance warnings")
 		return
 
+	# Cooperative cancellation must stop pixel iteration before completing
+	# even for a mathematically valid source pair.
+	var stopped: Dictionary = Comparison.compare(reference, candidate, func() -> bool: return true)
+	if bool(stopped.get("ok", true)) or not bool(stopped.get("cancelled", false)) or \
+			stopped.has("difference_image"):
+		_fail("The comparison algorithm ignored cancellation requests")
+		return
+
 	var identical: Dictionary = Comparison.compare(reference, reference)
 	if not bool(identical.get("ok", false)) or \
 			int(identical["metrics"]["changed_pixels"]) != 0 or \
@@ -197,6 +205,22 @@ func _verify() -> void:
 	window.set("capture_directory", directory)
 	window.set("comparison_directory", "user://comparison-results-smoke-%d" % OS.get_process_id())
 	window.call("refresh_captures")
+	# An open viewer consumes its own UI/graphics resources even when idle.
+	# Block runs and captures for the whole visible session, not only workers.
+	window.visible = true
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")):
+		_fail("An open comparison window allowed a benchmark to start")
+		return
+	host.call("_start_campaign")
+	if host.get("_campaign") != null:
+		_fail("An open comparison window allowed a campaign to start")
+		return
+	host.call("_capture_screenshot")
+	if bool(host.get("_capture_pending")):
+		_fail("An open comparison window allowed a new GPU readback")
+		return
+	window.visible = false
 	var picker_a: OptionButton = window.get("_reference_picker")
 	var picker_b: OptionButton = window.get("_candidate_picker")
 	if picker_a.item_count != 3 or picker_b.item_count != 3:

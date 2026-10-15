@@ -93,7 +93,7 @@ func _verify() -> void:
 	var displayed_item: TreeItem = results_tree.get_root().get_first_child()
 	while displayed_item != null:
 		displayed += 1
-		if displayed_item.get_text(2).is_empty() or displayed_item.get_text(5).is_empty():
+		if displayed_item.get_text(2).is_empty() or displayed_item.get_text(5).is_empty() or displayed_item.get_text(6).is_empty():
 			_fail("Displayed results contain empty values")
 			return
 		displayed_item = displayed_item.get_next()

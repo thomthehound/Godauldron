@@ -154,11 +154,11 @@ func _build_ui() -> void:
 	comparison_title.text = "Campaign results  |  Host callback CPU time (descriptive only)"
 	comparison_panel.add_child(comparison_title)
 	_comparison_table = Tree.new()
-	_comparison_table.columns = 7
+	_comparison_table.columns = 8
 	_comparison_table.hide_root = true
 	_comparison_table.column_titles_visible = true
 	_comparison_table.custom_minimum_size = Vector2(0, 145)
-	var column_names := ["Sweep value", "Runs", "Mean (ms)", "Median (ms)", "Range (ms)", "Ratio", "Guard"]
+	var column_names := ["Sweep value", "Runs", "Mean (ms)", "Median (ms)", "Range (ms)", "CV", "Ratio", "Guard"]
 	for i in range(column_names.size()):
 		_comparison_table.set_column_title(i, column_names[i])
 	comparison_panel.add_child(_comparison_table)
@@ -314,10 +314,12 @@ func _show_comparison(summary: Dictionary) -> void:
 		var maximum: Variant = entry["maximum_host_step_cpu_usec"]
 		item.set_text(4, "—" if minimum == null or maximum == null else \
 			"%.4f–%.4f" % [float(minimum) / 1000.0, float(maximum) / 1000.0])
+		var variation: Variant = entry["coefficient_of_variation"]
+		item.set_text(5, "—" if variation == null else "%.1f%%" % [float(variation) * 100.0])
 		var ratio: Variant = entry["relative_to_baseline"]
-		item.set_text(5, "—" if ratio == null else "%.3fx" % float(ratio))
+		item.set_text(6, "—" if ratio == null else "%.3fx" % float(ratio))
 		var status: String = String(entry["guard_status"])
-		item.set_text(6, "Descriptive" if status == "not_configured" else status.replace("_", " ").capitalize())
+		item.set_text(7, "Descriptive" if status == "not_configured" else status.replace("_", " ").capitalize())
 
 
 func _collect_parameters() -> Dictionary:

@@ -399,5 +399,10 @@ func _save_report(report: Dictionary, identifier: String) -> String:
 		_status.text = "Could not write results to " + result_path
 		return ""
 	output.store_string(JSON.stringify(report, "\t") + "\n")
+	output.flush()
+	var write_error: Error = output.get_error()
 	output.close()
+	if write_error != OK:
+		_status.text = "Could not finish writing results to %s (error %d)" % [result_path, int(write_error)]
+		return ""
 	return result_path

@@ -32,6 +32,9 @@ The experiment root may implement:
     godauldron_begin_sample() -> void
     godauldron_step(fixed_delta: float) -> void
     godauldron_metrics() -> Dictionary
+    godauldron_capture_metadata() -> Dictionary  # optional, observation only
+
+The optional `godauldron_capture_metadata()` callback is independent of run metrics. It must be safe before setup and must not mutate simulation state. Screenshots never invoke `godauldron_metrics()` or fabricate a second finalized run.
 
 The `ExperimentRun` service owns the host-side lifecycle independently of the UI. The host calls setup once, then makes the requested number of optional warmup steps before measured steps. `godauldron_begin_sample()` is invoked exactly once at the sampling boundary (immediately after setup when warmup is zero). An adapter can use it to reset SDK statistics, but must not reset simulation state unless that is explicitly part of the experiment. `godauldron_metrics()` runs on completion or cancellation, including cancellation during warmup.
 
@@ -50,6 +53,12 @@ Optional grid, world axes and bounds are drawn in a separate host-owned scene no
 A generic scene-host experiment can load project-imported `PackedScene` resources without modifying the laboratory core. The technical gallery is one example: named `choice` values select importable `.tscn`, `.scn`, `.gltf` or `.glb` project resources. `godauldron_preview(parameters)` is an optional scene-root callback, invoked on selection and choice changes but never as a measured run. On each timed run, `godauldron_setup` reconstructs the scene so setup/asset import costs cannot be confused with sample-step timing.
 
 Scene staging is separated from native technology adapters. Asset source, load status and scene node/mesh counts are reported as scene-defined metrics; these do not measure GPU workload. Asset loading is not a substitute for GPU capture or verified shader execution. See [Technical scenes](TECHNICAL_SCENES.md).
+
+## Rendering ownership and visual capture
+
+Host viewport graphics presets are independent of an experiment's simulation/technology parameters. Optional manifest `graphics_owned_settings` claims and the scene callback `godauldron_graphics_owned_settings()` give the experiment first authority over individual host-adjustable viewport properties or all of them via `"*"`. A claimed control becomes read-only in the host; unclaimed controls remain available. Rendered output is still the experiment's ordinary Godot viewport, not a shadow pipeline.
+
+Run reports snapshot the effective viewport graphics configuration immediately after experiment setup. Changing host graphics controls cancels an active run or campaign before applying new values. Interactive PNG captures use the viewport texture after a completed render, and store a sidecar with the capture context. Image readback is not part of measured run steps: capturing stops active measurements first. These measures preserve attribution, but do not yet establish deterministic pixel reproduction, HDR correctness or GPU execution time. See [Graphics and capture design](GRAPHICS_AND_CAPTURE.md).
 
 ## Measurements and reports
 

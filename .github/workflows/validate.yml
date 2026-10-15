@@ -63,3 +63,5 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/inspection_smoke.gd
       - name: Verify technical gallery imports, previews, and report isolation
         run: .engine/godot --headless --path . --script res://tests/gallery_smoke.gd
+      - name: Verify graphics ownership, presets and image persistence
+        run: .engine/godot --headless --path . --script res://tests/capture_graphics_smoke.gd

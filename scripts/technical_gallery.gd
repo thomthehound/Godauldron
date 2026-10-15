@@ -88,6 +88,15 @@ func godauldron_inspection_bounds() -> AABB:
 	return preload("res://scripts/inspection_camera.gd").scene_bounds(_loaded)
 
 
+func godauldron_capture_metadata() -> Dictionary:
+	# Preview is valid even without a measured run/setup.
+	return {
+		"asset_scene": _asset_path,
+		"asset_loaded": _loaded != null and _load_error.is_empty(),
+		"load_error": _load_error
+	}
+
+
 func godauldron_metrics() -> Dictionary:
 	var node_count: int = 0
 	var mesh_count: int = 0

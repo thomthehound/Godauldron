@@ -10,6 +10,8 @@ const ExperimentCampaign = preload("res://scripts/experiment_campaign.gd")
 const CAMPAIGN_ROOT := "res://campaigns"
 const InspectionCamera = preload("res://scripts/inspection_camera.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
+const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
+const ImageCapture = preload("res://scripts/image_capture.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
@@ -17,6 +19,15 @@ var _controls: Dictionary = {}
 var _active_scene: Node = null
 var _viewport: SubViewport
 var _viewport_container: SubViewportContainer
+var _quality_picker: OptionButton
+var _graphics_advanced: GridContainer
+var _graphics_inputs: Dictionary = {}
+var _graphics_values: Dictionary = GraphicsSettings.PROFILES["High"].duplicate(true)
+var _graphics_owned: PackedStringArray = PackedStringArray()
+var _graphics_run_snapshot: Dictionary = {}
+var _capture_sequence: int = 0
+var _capture_pending: bool = false
+var _capture_directory: String = "user://captures"
 var _camera_inspector: RefCounted = null
 var _inspection_overlay: Node3D
 var _inspection_bounds: AABB
@@ -169,6 +180,34 @@ func _build_ui() -> void:
 	bounds_button.text = "Bounds"
 	bounds_button.toggled.connect(_toggle_inspection_bounds)
 	toolbar.add_child(bounds_button)
+	var quality_label := Label.new()
+	quality_label.text = "Graphics"
+	toolbar.add_child(quality_label)
+	_quality_picker = OptionButton.new()
+	for preset in ["Low", "Medium", "High", "Ultra", "Showcase", "Custom"]:
+		_quality_picker.add_item(preset)
+	_quality_picker.select(2)
+	_quality_picker.item_selected.connect(_on_quality_selected)
+	toolbar.add_child(_quality_picker)
+	var advanced_button := Button.new()
+	advanced_button.text = "Advanced…"
+	advanced_button.pressed.connect(func() -> void: _graphics_advanced.visible = not _graphics_advanced.visible)
+	toolbar.add_child(advanced_button)
+	var capture_button := Button.new()
+	capture_button.text = "Capture PNG"
+	capture_button.pressed.connect(_capture_screenshot)
+	toolbar.add_child(capture_button)
+
+	_graphics_advanced = GridContainer.new()
+	_graphics_advanced.columns = 2
+	_graphics_advanced.visible = false
+	viewer.add_child(_graphics_advanced)
+	_add_quality_number("scaling_3d_scale", "3D render scale", 0.5, 2.0, 0.05)
+	_add_quality_choice("msaa_3d", "Geometry MSAA", ["Off", "2×", "4×", "8×"])
+	_add_quality_choice("screen_space_aa", "Screen-space AA", ["Off", "FXAA"])
+	_add_quality_boolean("use_taa", "Temporal AA")
+	_add_quality_boolean("use_debanding", "Debanding")
+	_add_quality_number("positional_shadow_atlas_size", "Local shadow atlas", 0, 16384, 1024)
 
 	_viewport = SubViewport.new()
 	_viewport.size = Vector2i(960, 720)
@@ -186,6 +225,7 @@ func _build_ui() -> void:
 	_inspection_overlay = InspectionOverlay.new()
 	_inspection_overlay.name = "InspectionOverlay"
 	_viewport.add_child(_inspection_overlay)
+	_apply_graphics()
 	var hint := Label.new()
 	hint.text = "Right drag: orbit   |   Middle drag: pan   |   Wheel: zoom   |   F: frame"
 	viewer.add_child(hint)
@@ -208,6 +248,175 @@ func _build_ui() -> void:
 	_telemetry = Label.new()
 	_telemetry.text = "Host stepping: idle"
 	root.add_child(_telemetry)
+
+
+func _add_quality_number(key: String, label_text: String, minimum: float, maximum: float, step: float) -> void:
+	var label := Label.new()
+	label.text = label_text
+	_graphics_advanced.add_child(label)
+	var input := SpinBox.new()
+	input.min_value = minimum
+	input.max_value = maximum
+	input.step = step
+	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	input.value_changed.connect(_on_quality_number_changed.bind(key))
+	_graphics_advanced.add_child(input)
+	_graphics_inputs[key] = input
+
+
+func _add_quality_choice(key: String, label_text: String, options: Array[String]) -> void:
+	var label := Label.new()
+	label.text = label_text
+	_graphics_advanced.add_child(label)
+	var input := OptionButton.new()
+	for text_value in options:
+		input.add_item(text_value)
+	input.item_selected.connect(_on_quality_option_changed.bind(key))
+	_graphics_advanced.add_child(input)
+	_graphics_inputs[key] = input
+
+
+func _add_quality_boolean(key: String, label_text: String) -> void:
+	var label := Label.new()
+	label.text = label_text
+	_graphics_advanced.add_child(label)
+	var input := CheckBox.new()
+	input.toggled.connect(_on_quality_boolean_changed.bind(key))
+	_graphics_advanced.add_child(input)
+	_graphics_inputs[key] = input
+
+
+func _on_quality_selected(index: int) -> void:
+	if index >= GraphicsSettings.PROFILES.size():
+		return
+	if _has_active_run():
+		_finish_run(false)
+	_graphics_values = GraphicsSettings.PROFILES[_quality_picker.get_item_text(index)].duplicate(true)
+	_apply_graphics()
+
+
+func _on_quality_number_changed(value: float, key: String) -> void:
+	_change_graphics_value(key, value if key == "scaling_3d_scale" else int(value))
+
+
+func _on_quality_option_changed(value: int, key: String) -> void:
+	_change_graphics_value(key, value)
+
+
+func _on_quality_boolean_changed(value: bool, key: String) -> void:
+	_change_graphics_value(key, value)
+
+
+func _change_graphics_value(key: String, value: Variant) -> void:
+	if GraphicsSettings.is_owned(key, _graphics_owned):
+		return
+	if _has_active_run():
+		_finish_run(false)
+	_graphics_values[key] = value
+	_quality_picker.select(5)
+	_apply_graphics()
+
+
+func _apply_graphics() -> void:
+	if _viewport == null:
+		return
+	_graphics_owned = GraphicsSettings.owned_keys(_active_scene, _manifest)
+	GraphicsSettings.apply(_viewport, _graphics_values, _graphics_owned)
+	for key in _graphics_inputs:
+		var input: Control = _graphics_inputs[key]
+		input.set_block_signals(true)
+		var is_claimed: bool = GraphicsSettings.is_owned(key, _graphics_owned)
+		input.tooltip_text = "Controlled by the experiment" if is_claimed else ""
+		var current: Variant = _viewport.get(key)
+		if input is SpinBox:
+			(input as SpinBox).editable = not is_claimed
+			(input as SpinBox).value = float(current)
+		elif input is OptionButton:
+			(input as OptionButton).disabled = is_claimed
+			(input as OptionButton).select(int(current))
+		else:
+			(input as CheckBox).disabled = is_claimed
+			(input as CheckBox).button_pressed = bool(current)
+		input.set_block_signals(false)
+
+
+func _capture_provider_state(scene: Node) -> Dictionary:
+	# Run metrics belong exclusively to ExperimentRun.make_report(); this
+	# optional observation hook is safe even before the first setup.
+	if scene == null or not scene.has_method("godauldron_capture_metadata"):
+		return {}
+	var observed: Variant = scene.call("godauldron_capture_metadata")
+	return observed.duplicate(true) if typeof(observed) == TYPE_DICTIONARY else {}
+
+
+func _capture_screenshot() -> void:
+	if _capture_pending:
+		_status.text = "Capture already in progress"
+		return
+	if _active_scene == null:
+		return
+	# Readback and PNG encoding can stall the device; don't contaminate a
+	# measured run with capture overhead.
+	if _has_active_run():
+		_finish_run(false)
+	# Reserve the entire asynchronous interval: starting a new run while the
+	# frame is pending would make its measurements overlap GPU readback.
+	_capture_pending = true
+	var source_scene: Node = _active_scene
+	# Godot's viewport texture can be empty/stale before rendering completes.
+	await RenderingServer.frame_post_draw
+	if not is_instance_valid(source_scene) or _active_scene != source_scene:
+		_capture_pending = false
+		_status.text = "Capture cancelled: scene changed"
+		return
+	# Defense in depth against any future bypass of the public run entrypoints.
+	if _has_active_run():
+		_finish_run(false)
+	var view_texture: ViewportTexture = _viewport.get_texture()
+	if view_texture == null:
+		_capture_pending = false
+		_status.text = "Capture failed: viewport has no texture"
+		return
+	var rendered: Image = view_texture.get_image()
+	_capture_sequence += 1
+	var stem: String = "capture_%s_p%d_%d" % [
+		Time.get_datetime_string_from_system().replace(":", "-"),
+		OS.get_process_id(), _capture_sequence
+	]
+	var metadata := {
+		"format_version": 1,
+		"experiment_id": String(_manifest.get("id", "")),
+		"parameters": _collect_parameters(),
+		"parameter_source": "current_controls_or_preview",
+		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest)),
+		"inspection": {
+			"grid_overlay": _inspection_grid_enabled,
+			"bounds_overlay": _inspection_bounds_enabled,
+			"camera_manipulated": _camera_manipulated
+		},
+		"engine": Engine.get_version_info(),
+		"os": OS.get_name(),
+		"timestamp": Time.get_datetime_string_from_system()
+	}
+	# A preview may not have run setup. Never call the lifecycle metrics hook
+	# from capture, and never collect a second copy after run finalization.
+	var observed: Dictionary = _capture_provider_state(source_scene)
+	if not observed.is_empty():
+		metadata["capture_state"] = observed
+	var camera: Camera3D = _viewport.get_camera_3d()
+	if camera != null:
+		metadata["camera"] = {
+			"position": [camera.global_position.x, camera.global_position.y, camera.global_position.z],
+			"rotation_degrees": [camera.global_rotation_degrees.x, camera.global_rotation_degrees.y, camera.global_rotation_degrees.z],
+			"projection": camera.projection,
+			"fov": camera.fov
+		}
+	var result: Dictionary = ImageCapture.write_image(rendered, _capture_directory, stem, metadata)
+	_capture_pending = false
+	if not bool(result["ok"]):
+		_status.text = "Capture failed: " + String(result["error"])
+	else:
+		_status.text = "Image captured: " + String(result["image"])
 
 
 func _discover() -> void:
@@ -291,6 +500,7 @@ func _select_experiment(index: int) -> void:
 	_viewport.add_child(_active_scene)
 	_preview_active_scene()
 	_bind_inspection()
+	_apply_graphics()
 	_status.text = String(_manifest.get("description", _manifest["display_name"]))
 	_discover_campaigns()
 
@@ -306,6 +516,7 @@ func _preview_active_scene() -> void:
 	if _active_scene != null and _active_scene.has_method("godauldron_preview"):
 		_active_scene.call("godauldron_preview", _collect_parameters())
 		_update_inspection_bounds()
+		_apply_graphics()
 		if _camera_inspector != null:
 			_frame_inspection()
 
@@ -438,6 +649,9 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	if _capture_pending:
+		_status.text = "Capture in progress; campaign cannot start yet"
+		return
 	if _active_scene == null or _campaign_plans.is_empty():
 		return
 	if _has_active_run():
@@ -461,8 +675,10 @@ func _begin_campaign_case() -> void:
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
-	# Setup can change scene bounds between campaign cases.
+	# Setup may change render settings and ownership between campaign cases.
 	_update_inspection_bounds()
+	_apply_graphics()
+	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
 	_status.text = "Campaign case %d, repetition %d" % [
 		int(next_case["case_index"]) + 1, int(next_case["repetition"]) + 1
@@ -528,6 +744,9 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	if _capture_pending:
+		_status.text = "Capture in progress; experiment cannot start yet"
+		return
 	if _active_scene == null:
 		return
 	if _has_active_run():
@@ -539,6 +758,8 @@ func _start_run() -> void:
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
 	_update_inspection_bounds()
+	_apply_graphics()
+	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
 	_status.text = "Running %s" % String(_manifest["display_name"])
 	_update_telemetry()
@@ -583,6 +804,7 @@ func _finish_run(completed: bool) -> void:
 	if not completed:
 		finished_run.cancel()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
+	report["graphics"] = _graphics_run_snapshot.duplicate(true)
 	report["inspection"] = {
 		"grid_overlay": _inspection_grid_enabled,
 		"bounds_overlay": _inspection_bounds_enabled,

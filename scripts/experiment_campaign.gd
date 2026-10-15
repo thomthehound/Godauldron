@@ -43,8 +43,11 @@ static func validate(plan: Dictionary, manifest: Dictionary) -> PackedStringArra
 	var errors := PackedStringArray()
 	if not _json_integer(plan.get("schema_version")) or int(plan.get("schema_version", 0)) != 1:
 		errors.append("Campaign schema_version must be integer 1")
-	if not plan.get("id") is String or String(plan.get("id", "")).is_empty():
-		errors.append("Campaign id must be a non-empty string")
+	var identifier: Variant = plan.get("id")
+	var identifier_pattern := RegEx.new()
+	identifier_pattern.compile("^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$")
+	if typeof(identifier) != TYPE_STRING or identifier_pattern.search(str(identifier)) == null:
+		errors.append("Campaign id must be a safe namespaced lowercase identifier")
 	if plan.get("experiment_id") != manifest.get("id"):
 		errors.append("Campaign experiment_id does not match selected experiment")
 	var parameters: Dictionary = {}

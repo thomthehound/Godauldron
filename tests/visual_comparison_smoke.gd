@@ -173,6 +173,22 @@ func _verify() -> void:
 	restored.store_string(JSON.stringify(reference["metadata"]))
 	restored.close()
 
+	# Display downsampling must never change the full-resolution source,
+	# resulting difference image, or the pixel statistics.
+	var full := Image.create(2048, 1024, false, Image.FORMAT_RGBA8)
+	full.fill(Color(0.25, 0.5, 0.75, 1))
+	var VisualAnalysisJob = preload("res://scripts/visual_analysis_job.gd")
+	var preview: Image = VisualAnalysisJob.preview_image(full)
+	if preview.get_size() != Vector2i(1536, 768) or \
+			full.get_size() != Vector2i(2048, 1024) or \
+			preview == full:
+		_fail("Large-image preview exceeded its budget or modified the source")
+		return
+	var small: Image = VisualAnalysisJob.preview_image(reference["image"])
+	if small != reference["image"]:
+		_fail("Small images were needlessly resized")
+		return
+
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
 	var window: Window = host.get("_comparison_window")

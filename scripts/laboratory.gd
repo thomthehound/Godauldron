@@ -296,7 +296,13 @@ func _select_experiment(index: int) -> void:
 
 
 func _preview_active_scene() -> void:
-	# Scene preview is separate from timed setup and cannot create a run report.
+	# Choice changes affect live scene content. Finalize the current run and
+	# capture its original metrics BEFORE swapping any experiment asset.
+	# This also cancels active campaigns, which must not continue with a new asset.
+	if _has_active_run():
+		_finish_run(false)
+		_status.text = "Scene choice changed; active run cancelled. " + _status.text
+	# Preview itself does not create a measured run.
 	if _active_scene != null and _active_scene.has_method("godauldron_preview"):
 		_active_scene.call("godauldron_preview", _collect_parameters())
 		_update_inspection_bounds()

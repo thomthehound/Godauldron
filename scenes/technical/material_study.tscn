@@ -1,0 +1,61 @@
+[gd_scene load_steps=8 format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_satin"]
+albedo_color = Color(0.18, 0.61, 0.92, 1)
+metallic = 0.35
+roughness = 0.42
+
+[sub_resource type="StandardMaterial3D" id="mat_polished"]
+albedo_color = Color(0.82, 0.35, 0.15, 1)
+metallic = 0.85
+roughness = 0.12
+
+[sub_resource type="StandardMaterial3D" id="mat_rough"]
+albedo_color = Color(0.72, 0.74, 0.77, 1)
+metallic = 0.0
+roughness = 0.91
+
+[sub_resource type="SphereMesh" id="sphere_mesh"]
+radius = 1.0
+height = 2.0
+radial_segments = 32
+rings = 16
+
+[sub_resource type="BoxMesh" id="box_mesh"]
+size = Vector3(1.9, 1.9, 1.9)
+
+[sub_resource type="CylinderMesh" id="cylinder_mesh"]
+top_radius = 0.45
+bottom_radius = 1.0
+height = 2.2
+radial_segments = 32
+
+[sub_resource type="TorusMesh" id="torus_mesh"]
+inner_radius = 0.38
+outer_radius = 0.9
+rings = 32
+ring_segments = 18
+
+[node name="MaterialStudy" type="Node3D"]
+
+[node name="SatinSphere" type="MeshInstance3D" parent="."]
+position = Vector3(-3.2, 0.5, 0)
+mesh = SubResource("sphere_mesh")
+material_override = SubResource("mat_satin")
+
+[node name="PolishedBox" type="MeshInstance3D" parent="."]
+position = Vector3(-1.1, 0.5, 0)
+rotation = Vector3(0.15, 0.4, 0.1)
+mesh = SubResource("box_mesh")
+material_override = SubResource("mat_polished")
+
+[node name="RoughTaper" type="MeshInstance3D" parent="."]
+position = Vector3(1.3, 0.5, 0)
+mesh = SubResource("cylinder_mesh")
+material_override = SubResource("mat_rough")
+
+[node name="MetalTorus" type="MeshInstance3D" parent="."]
+position = Vector3(3.4, 0.5, 0)
+rotation = Vector3(0.3, 0, 0.2)
+mesh = SubResource("torus_mesh")
+material_override = SubResource("mat_polished")

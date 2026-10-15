@@ -20,7 +20,7 @@ Required fields:
 - display_name, category, description: non-empty strings
 - entry_scene: valid project-local res:// path to a .tscn scene
 
-Optional parameters is an array of objects with an id, label, type and default. Supported types are bool, int and float. Numeric fields require min, max and a positive step; the default must be within bounds. The repository includes tools/validate_manifests.py to validate this contract and reject invalid paths or duplicate identifiers.
+Optional parameters is an array of objects with an id, label, type and default. Supported types are bool, int, float and choice. Choice parameters require a nonempty list of uniquely valued labeled string options; the default must match one option. Numeric fields require min, max and a positive step; the default must be within bounds. The repository includes tools/validate_manifests.py to validate this contract and reject invalid paths or duplicate identifiers.
 
 The manifest intentionally describes a technology experiment, not a particular GPU or SDK. New versions can introduce capability requirements, presets, benchmark modes, experiment dependencies, packaged scenes and metadata without changing the meaning of v1.
 
@@ -44,6 +44,12 @@ The first implementation runs these callbacks on the Godot main thread and keeps
 Camera navigation is a host-level service that works with each experiment's own `Camera3D`; the host does not replace the experiment renderer or fabricate a separate source scene. **Frame** uses the optional scene-root method `godauldron_inspection_bounds() -> AABB` returning a world-space bounding box. If absent, the host computes a world-space bounding box from loaded `MeshInstance3D` descendants, with a small origin fallback for non-mesh experiments.
 
 Optional grid, world axes and bounds are drawn in a separate host-owned scene node inside the viewport, not in the experiment subtree. They are off by default and their presence is recorded in run metadata along with whether camera manipulation occurred. They may alter GPU rendering costs when enabled, so comparative rendering tests must control this state. See [Visual inspection](INSPECTION.md).
+
+## Project scene gallery
+
+A generic scene-host experiment can load project-imported `PackedScene` resources without modifying the laboratory core. The technical gallery is one example: named `choice` values select importable `.tscn`, `.scn`, `.gltf` or `.glb` project resources. `godauldron_preview(parameters)` is an optional scene-root callback, invoked on selection and choice changes but never as a measured run. On each timed run, `godauldron_setup` reconstructs the scene so setup/asset import costs cannot be confused with sample-step timing.
+
+Scene staging is separated from native technology adapters. Asset source, load status and scene node/mesh counts are reported as scene-defined metrics; these do not measure GPU workload. Asset loading is not a substitute for GPU capture or verified shader execution. See [Technical scenes](TECHNICAL_SCENES.md).
 
 ## Measurements and reports
 

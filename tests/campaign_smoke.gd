@@ -17,6 +17,15 @@ func _tick(host: Node, count: int) -> void:
 		host.call("_process", 1.0 / 60.0)
 
 
+func _select_reference(host: Node) -> bool:
+	var catalog: Array = host.get("_experiments")
+	for i in range(catalog.size()):
+		if String(catalog[i].get("id", "")) == "org.godauldron.reference":
+			host.call("_select_experiment", i)
+			return true
+	return false
+
+
 func _verify() -> void:
 	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://experiments/reference/manifest.json"))
 	var plan: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://campaigns/reference-grid.json"))
@@ -65,6 +74,9 @@ func _verify() -> void:
 	var packed: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	var host: Node = packed.instantiate()
 	root.add_child(host)
+	if not _select_reference(host):
+		_fail("Reference experiment not discovered")
+		return
 	var picker: OptionButton = host.get("_campaign_picker") as OptionButton
 	if picker == null or picker.item_count != 1:
 		_fail("Campaign was not discovered")
@@ -130,7 +142,7 @@ func _verify() -> void:
 
 	# Re-selecting the current experiment follows the same teardown path as
 	# changing to a different one. Results must not leak into the new selection.
-	host.call("_select_experiment", 0)
+	_select_reference(host)
 	if results_tree.get_root() != null or not (host.get("_last_campaign_summary") as Dictionary).is_empty() or 			not String(host.get("_last_campaign_report_path")).is_empty():
 		_fail("A new experiment selection retained the previous campaign's results")
 		return

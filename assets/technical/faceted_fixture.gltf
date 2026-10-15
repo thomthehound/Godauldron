@@ -1,0 +1,191 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Godauldron reference geometry (portable glTF 2.0)"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Asymmetric Geometry",
+      "nodes": [
+        0,
+        1,
+        2
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "Blue Faceted Cube",
+      "mesh": 0,
+      "translation": [
+        -2,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0.26,
+        0,
+        0.965
+      ]
+    },
+    {
+      "name": "Amber Offset Pyramid",
+      "mesh": 1,
+      "translation": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Smaller Cube / Reuse",
+      "mesh": 0,
+      "translation": [
+        3.2,
+        -0.25,
+        -1.4
+      ],
+      "scale": [
+        0.45,
+        0.6,
+        0.5
+      ]
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Triangulated Cube",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1
+          },
+          "material": 0
+        }
+      ]
+    },
+    {
+      "name": "Asymmetric Pyramid",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 2,
+            "NORMAL": 3
+          },
+          "material": 1
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "Blue Satin",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.14,
+          0.44,
+          0.88,
+          1
+        ],
+        "metallicFactor": 0.22,
+        "roughnessFactor": 0.35
+      },
+      "doubleSided": true
+    },
+    {
+      "name": "Warm Gold",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.94,
+          0.57,
+          0.13,
+          1
+        ],
+        "metallicFactor": 0.66,
+        "roughnessFactor": 0.27
+      },
+      "doubleSided": true
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 1296,
+      "uri": "data:application/octet-stream;base64,MzMzvzMzM78zMzM/MzMzPzMzM78zMzM/MzMzPzMzMz8zMzM/MzMzvzMzM78zMzM/MzMzPzMzMz8zMzM/MzMzvzMzMz8zMzM/MzMzPzMzM78zMzO/MzMzvzMzM78zMzO/MzMzvzMzMz8zMzO/MzMzPzMzM78zMzO/MzMzvzMzMz8zMzO/MzMzPzMzMz8zMzO/MzMzvzMzM78zMzO/MzMzvzMzM78zMzM/MzMzvzMzMz8zMzM/MzMzvzMzM78zMzO/MzMzvzMzMz8zMzM/MzMzvzMzMz8zMzO/MzMzPzMzM78zMzM/MzMzPzMzM78zMzO/MzMzPzMzMz8zMzO/MzMzPzMzM78zMzM/MzMzPzMzMz8zMzO/MzMzPzMzMz8zMzM/MzMzvzMzMz8zMzM/MzMzPzMzMz8zMzM/MzMzPzMzMz8zMzO/MzMzvzMzMz8zMzM/MzMzPzMzMz8zMzO/MzMzvzMzMz8zMzO/MzMzvzMzM78zMzO/MzMzPzMzM78zMzO/MzMzPzMzM78zMzM/MzMzvzMzM78zMzO/MzMzPzMzM78zMzM/MzMzvzMzM78zMzM/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAIAAAAAAAACAPwAAAIAAAAAAAACAPwAAAIAAAAAAAAAAgAAAgD8AAAAAAAAAgAAAgD8AAAAAAAAAgAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAMzNzv5qZGb+amVm/zcyMP5qZGb/NzEy/AAAAAM3MzD8AAAAAzcyMP5qZGb/NzEy/mplZP5qZGb8AAIA/AAAAAM3MzD8AAAAAmplZP5qZGb8AAIA/MzMzv5qZGb9mZmY/AAAAAM3MzD8AAAAAMzMzv5qZGb9mZmY/MzNzv5qZGb+amVm/AAAAAM3MzD8AAAAAMzNzv5qZGb+amVm/mplZP5qZGb8AAIA/zcyMP5qZGb/NzEy/MzNzv5qZGb+amVm/MzMzv5qZGb9mZmY/mplZP5qZGb8AAIA/tfu6vN4TtL6Akm8/tfu6vN4TtL6Akm8/tfu6vN4TtL6Akm8/DaVnvws/0L4HsQC+DaVnvws/0L4HsQC+DaVnvws/0L4HsQC+tl9yPau/yb64zGq/tl9yPau/yb64zGq/tl9yPau/yb64zGq/onVtP5jdsr7vsAe+onVtP5jdsr7vsAe+onVtP5jdsr7vsAe+AAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAA"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 432,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 432,
+      "byteLength": 432,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 864,
+      "byteLength": 216,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 1080,
+      "byteLength": 216,
+      "target": 34962
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 36,
+      "type": "VEC3",
+      "min": [
+        -0.7,
+        -0.7,
+        -0.7
+      ],
+      "max": [
+        0.7,
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 36,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 18,
+      "type": "VEC3",
+      "min": [
+        -0.95,
+        -0.6,
+        -0.85
+      ],
+      "max": [
+        1.1,
+        1.6,
+        1
+      ]
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 18,
+      "type": "VEC3"
+    }
+  ]
+}

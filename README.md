@@ -11,6 +11,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - UI-independent experiment execution with optional warmup, isolated measured steps, per-run setup, cancellation and result reporting.
 - Versioned campaign presets with sequential parameter sweeps, per-run reports, and a comparison table showing dispersion and optional engineering guard limits.
 - Optional world grid, axis indicators, and experiment bounds overlays, disabled by default.
+- Technical-scene gallery with named scene selections, bundled glTF 2.0 mesh specimen and Godot material study; imported scenes share the existing inspector and run contract.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
@@ -39,6 +40,12 @@ Each artifact contains the editor, `extension_api.json`, `gdextension_interface.
 To exercise a proposed upstream change, select a public Godot fork and feature branch instead. The compiler is a reusable GitHub Actions workflow at [build-godot.yml](.github/workflows/build-godot.yml), with usage documented under [Engine tracking](docs/ENGINE_TRACKING.md).
 
 To **test a particular PR against Godot master HEAD**, add the `ci:godot-head` label. This triggers a one-shot Linux and Windows source build and runs that PR's Godauldron code against the binaries. Ordinary PR builds and subsequent pushes never compile Godot. To re-test a changed PR with a fresh master revision, remove and reapply the label (or rerun the previous workflow if you intentionally want to test its original revision). Create the repository label once under GitHub **Issues → Labels** if it doesn't already exist. See [Engine tracking](docs/ENGINE_TRACKING.md#opt-in-per-pr-master-builds) for details.
+
+## Technical scene gallery
+
+Select **Technical Scene Gallery** to inspect the bundled glTF geometry or authored material/primitive study. The **Technical scene** dropdown previews choices immediately without starting a measured run. **Frame** fits loaded geometry; a normal experiment run recreates the chosen scene during setup and records its path and mesh count separately from sampled CPU callbacks.
+
+The gallery uses ordinary Godot `PackedScene` loading, including imported `.gltf`/`.glb` assets; it does not contain a separate graphics importer or renderer. To add your own scenes, import them into the Godot project and add a labeled scene path as a `choice` parameter option in the gallery manifest. See [Technical scenes](docs/TECHNICAL_SCENES.md).
 
 ## Parameter campaigns
 

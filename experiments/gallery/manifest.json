@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.technical-gallery",
+  "display_name": "Technical Scene Gallery",
+  "category": "Visual inspection",
+  "description": "Inspect imported glTF and authored Godot technical scenes using the same camera and reporting tools. Scene import/setup is not a GPU benchmark.",
+  "entry_scene": "res://scenes/technical_gallery.tscn",
+  "parameters": [
+    {
+      "id": "scene",
+      "label": "Technical scene",
+      "type": "choice",
+      "default": "res://assets/technical/faceted_fixture.gltf",
+      "options": [
+        {
+          "value": "res://assets/technical/faceted_fixture.gltf",
+          "label": "Faceted glTF specimen"
+        },
+        {
+          "value": "res://scenes/technical/material_study.tscn",
+          "label": "Material / primitive study"
+        }
+      ]
+    }
+  ]
+}

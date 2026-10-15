@@ -54,10 +54,12 @@ jobs:
       - name: Verify scene and script loading
         run: .engine/godot --headless --path . --quit-after 15
       - name: Verify fixed-step run and exported results
-        run: .engine/godot --headless --path . --script res://tests/runtime_smoke.gd
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/runtime_smoke.gd
       - name: Verify campaigns and comparisons
         run: .engine/godot --headless --path . --script res://tests/campaign_smoke.gd
       - name: Verify campaign statistics and optional guard limits
         run: .engine/godot --headless --path . --script res://tests/analysis_smoke.gd
       - name: Verify camera navigation and inspection overlays
         run: .engine/godot --headless --path . --script res://tests/inspection_smoke.gd
+      - name: Verify technical gallery imports, previews, and report isolation
+        run: .engine/godot --headless --path . --script res://tests/gallery_smoke.gd

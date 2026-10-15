@@ -100,15 +100,6 @@ func _verify() -> void:
 	if displayed != 3:
 		_fail("Campaign table omitted sweep cases")
 		return
-	# Re-selecting the current experiment follows the same teardown path as
-	# changing to a different one. Results must not leak into the new selection.
-	host.call("_select_experiment", 0)
-	if results_tree.get_root() != null or not (host.get("_last_campaign_summary") as Dictionary).is_empty() or 			not String(host.get("_last_campaign_report_path")).is_empty():
-		_fail("A new experiment selection retained the previous campaign's results")
-		return
-	if not FileAccess.file_exists(path):
-		_fail("Changing experiments must not delete persisted campaign reports")
-		return
 	if summaries.size() != 3 or int(summary.get("baseline_index", -1)) != 1:
 		_fail("Campaign case summaries or baseline index are incorrect")
 		return
@@ -136,6 +127,16 @@ func _verify() -> void:
 			if int(report["steps"]) != 12 or int(report["warmup_steps"]) != 3:
 				_fail("Campaign did not respect its configured run phases")
 				return
+
+	# Re-selecting the current experiment follows the same teardown path as
+	# changing to a different one. Results must not leak into the new selection.
+	host.call("_select_experiment", 0)
+	if results_tree.get_root() != null or not (host.get("_last_campaign_summary") as Dictionary).is_empty() or 			not String(host.get("_last_campaign_report_path")).is_empty():
+		_fail("A new experiment selection retained the previous campaign's results")
+		return
+	if not FileAccess.file_exists(path):
+		_fail("Changing experiments must not delete persisted campaign reports")
+		return
 
 	# Cancellation cannot silently continue remaining cases or produce a complete summary.
 	host.call("_start_campaign")

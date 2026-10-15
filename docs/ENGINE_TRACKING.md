@@ -34,6 +34,21 @@ jobs:
 
 Editor builds and their API artifacts are not export templates or official Godot releases. The manually triggered source builds have not yet been validated by a full upstream compilation on GitHub Actions.
 
+## Opt-in per-PR master builds
+
+To request an exact upstream master test for a particular Godauldron pull request:
+
+1. Create a repository label named `ci:godot-head` under GitHub **Issues → Labels**, if necessary.
+2. Apply that label to the PR. The [PR opt-in workflow](../.github/workflows/ci-godot-head.yml) listens for the **labeled** event only.
+3. It invokes the reusable builder with `godotengine/godot` `master`, builds Linux and Windows from the **same resolved commit**, and runs [shared smoke tests](../.github/workflows/smoke-built-godot.yml) against the PR's merge-test code.
+4. Remove and reapply the label to request **another** build after additional PR commits. Ordinary `synchronize`, `opened`, and `push` events do not trigger this expensive workflow, even if the label stays attached.
+
+Each request runs a single build workflow with the current HEAD as resolved **at the start of that request**; it is not a continuously moving target and does not compile Godot on every PR. Re-running an old Actions run uses the previously recorded event/ref and should not be confused with requesting a fresh build against the updated PR.
+
+Both the manual build and PR-triggered build share the same [source builder](../.github/workflows/build-godot.yml) and [host smoke tests](../.github/workflows/smoke-built-godot.yml). They keep permissions read-only and never use `pull_request_target` to execute PR code. Artifact metadata records the precise upstream revision. Linux/Windows smoke tests do not establish actual GPU behavior; that needs real hardware.
+
+The label-driven workflow and the manual-run interface need to be merged onto the default branch before they are dependable entry points. The expensive source-build path has not yet been tested by a complete Godot compile in CI.
+
 ## What the smoke test means
 
 The rolling preview CI job verifies project import, script/scene loading, and a short process run. Headless Godot does not provide equivalent GPU rendering capabilities; passing the smoke does not establish rendering correctness, GPU feature support or real hardware performance.

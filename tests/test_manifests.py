@@ -36,6 +36,14 @@ class ManifestTests(unittest.TestCase):
         self.data["parameters"].append(self.data["parameters"][0].copy())
         self.assertIn("duplicated", " ".join(validate_manifest(self.data, self.root)))
 
+    def test_graphics_ownership(self):
+        self.data["graphics_owned_settings"] = ["msaa_3d", "scaling_3d_scale"]
+        self.assertEqual(validate_manifest(self.data, self.root), [])
+        self.data["graphics_owned_settings"] = ["unknown_renderer_flag"]
+        self.assertIn("unknown setting", " ".join(validate_manifest(self.data, self.root)))
+        self.data["graphics_owned_settings"] = ["*", "*"]
+        self.assertIn("duplicate claims", " ".join(validate_manifest(self.data, self.root)))
+
     def test_choice_parameter(self):
         self.data["parameters"].append({
             "id": "material", "label": "Material", "type": "choice",

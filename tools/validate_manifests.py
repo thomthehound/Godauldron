@@ -8,6 +8,10 @@ from typing import Any
 
 ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$")
 KINDS = {"int", "float", "bool", "choice"}
+GRAPHICS_KEYS = {
+    "scaling_3d_scale", "msaa_3d", "screen_space_aa",
+    "use_taa", "use_debanding", "positional_shadow_atlas_size",
+}
 
 def validate_manifest(data: Any, root: Path) -> list[str]:
     errors: list[str] = []
@@ -32,6 +36,14 @@ def validate_manifest(data: Any, root: Path) -> list[str]:
             errors.append(f"entry_scene not found: {scene}")
     else:
         errors.append("entry_scene must reference a .tscn scene")
+    owned = data.get("graphics_owned_settings", [])
+    if not isinstance(owned, list):
+        errors.append("graphics_owned_settings must be an array")
+    else:
+        if any(type(key) is not str or (key != "*" and key not in GRAPHICS_KEYS) for key in owned):
+            errors.append("graphics_owned_settings includes an unknown setting")
+        if len(set(map(str, owned))) != len(owned):
+            errors.append("graphics_owned_settings contains duplicate claims")
     params = data.get("parameters", [])
     if not isinstance(params, list):
         return errors + ["parameters must be an array"]

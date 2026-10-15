@@ -25,6 +25,7 @@ var _graphics_inputs: Dictionary = {}
 var _graphics_values: Dictionary = GraphicsSettings.PROFILES["High"].duplicate(true)
 var _graphics_owned: PackedStringArray = PackedStringArray()
 var _graphics_run_snapshot: Dictionary = {}
+var _run_parameters_snapshot: Dictionary = {}
 var _capture_sequence: int = 0
 var _capture_directory: String = "user://captures"
 var _camera_inspector: RefCounted = null
@@ -342,6 +343,10 @@ func _apply_graphics() -> void:
 func _capture_screenshot() -> void:
 	if _active_scene == null:
 		return
+	# Readback and PNG encoding can stall the device; don't contaminate a
+	# measured run with capture overhead.
+	if _has_active_run():
+		_finish_run(false)
 	var source_scene: Node = _active_scene
 	# Godot's viewport texture can be empty/stale before rendering completes.
 	await RenderingServer.frame_post_draw
@@ -362,6 +367,7 @@ func _capture_screenshot() -> void:
 		"format_version": 1,
 		"experiment_id": String(_manifest.get("id", "")),
 		"parameters": _collect_parameters(),
+		"parameter_source": "current_controls_or_preview",
 		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest)),
 		"inspection": {
 			"grid_overlay": _inspection_grid_enabled,
@@ -636,6 +642,7 @@ func _start_campaign() -> void:
 
 func _begin_campaign_case() -> void:
 	var next_case: Dictionary = _campaign.next_case()
+	_run_parameters_snapshot = next_case["parameters"].duplicate(true)
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
@@ -712,9 +719,10 @@ func _start_run() -> void:
 	if _has_active_run():
 		_finish_run(false)
 	_campaign = null
+	_run_parameters_snapshot = _collect_parameters()
 	_run = ExperimentRun.new()
 	_run.begin(
-		_active_scene, _collect_parameters(),
+		_active_scene, _run_parameters_snapshot,
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
 	_update_inspection_bounds()

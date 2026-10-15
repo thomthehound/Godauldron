@@ -9,6 +9,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Interactive Godot host with experiment discovery and a parameter inspector.
 - Namespace-based manifest v1 with scalar integer, floating-point and boolean options.
 - UI-independent experiment execution with optional warmup, isolated measured steps, per-run setup, cancellation and result reporting.
+- Versioned campaign presets with sequential parameter sweeps, repetitions and descriptive baseline comparisons.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
@@ -37,6 +38,10 @@ Each artifact contains the editor, `extension_api.json`, `gdextension_interface.
 To exercise a proposed upstream change, select a public Godot fork and feature branch instead. The compiler is a reusable GitHub Actions workflow at [build-godot.yml](.github/workflows/build-godot.yml), with usage documented under [Engine tracking](docs/ENGINE_TRACKING.md).
 
 To **test a particular PR against Godot master HEAD**, add the `ci:godot-head` label. This triggers a one-shot Linux and Windows source build and runs that PR's Godauldron code against the binaries. Ordinary PR builds and subsequent pushes never compile Godot. To re-test a changed PR with a fresh master revision, remove and reapply the label (or rerun the previous workflow if you intentionally want to test its original revision). Create the repository label once under GitHub **Issues → Labels** if it doesn't already exist. See [Engine tracking](docs/ENGINE_TRACKING.md#opt-in-per-pr-master-builds) for details.
+
+## Parameter campaigns
+
+Select the reference experiment, choose its sample campaign and click **Run campaign**. A campaign applies a saved parameter preset to an ordered sweep, repeats each configuration and records both per-run reports and an aggregate baseline comparison. These are descriptive **CPU callback timings**, not GPU measurements or statistically significant regression claims. See [Campaign authoring](docs/CAMPAIGNS.md).
 
 ## Extending the laboratory
 

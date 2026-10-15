@@ -43,6 +43,16 @@ func _verify() -> void:
 	if Campaign.validate(invalid, manifest).is_empty():
 		_fail("Unbounded campaign was accepted")
 		return
+	invalid = plan.duplicate(true)
+	invalid["sample_steps"] = 1.5
+	if Campaign.validate(invalid, manifest).is_empty():
+		_fail("Fractional sample count was accepted")
+		return
+	invalid = plan.duplicate(true)
+	invalid["id"] = "../../escape"
+	if Campaign.validate(invalid, manifest).is_empty():
+		_fail("Unsafe campaign identifier was accepted")
+		return
 
 	var packed: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	var host: Node = packed.instantiate()

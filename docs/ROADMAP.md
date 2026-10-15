@@ -22,7 +22,7 @@ Exit gate: current upstream Godot opens the lab, reference runs are exportable a
 - [ ] Scene loading and curated glTF technical scenes
 - [ ] Camera controllers, debug overlays and common visual inspection tools
 - [x] Host run phases: setup, warmup, sample, final reporting and cancellation (measured CPU callback time only)
-- [ ] Automated parameter sweeps, baseline comparisons and regression thresholds
+- [ ] Automated parameter sweeps, baseline comparisons and regression thresholds (bounded single-axis campaigns and descriptive baseline ratios implemented; threshold policy pending)
 - [ ] Hardware/driver metadata, logs, screenshots, image diff and magnifier
 - [ ] Independently testable host services and portable experiment schemas (runner extracted; catalog/capture pending)
 

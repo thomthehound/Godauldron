@@ -188,6 +188,10 @@ func refresh_captures() -> void:
 func _show_image(index: int, image: Image) -> void:
 	_current_images[index] = image
 	_images[index].texture = null if image == null else ImageTexture.create_from_image(image)
+	# Reset scroll extents too; the last high-resolution zoom should not
+	# leave an enormous empty viewport on the next comparison.
+	if image == null:
+		_images[index].custom_minimum_size = Vector2(330, 250)
 	_update_zoom(_zoom.value)
 
 

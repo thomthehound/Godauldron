@@ -8,12 +8,12 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 
 - Interactive Godot host with experiment discovery and a parameter inspector.
 - Namespace-based manifest v1 with scalar integer, floating-point and boolean options.
-- Fixed-step host experiment execution, per-run setup and result reporting.
+- UI-independent experiment execution with optional warmup, isolated measured steps, per-run setup, cancellation and result reporting.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
 
-The initial timing measures **CPU wall time inside host step calls**, not asynchronous GPU execution, frame latency, or complete frame performance. The reference fixture validates the harness; it is not a performance benchmark. Native SDK integration, GPU interoperability, reference image comparison, captures and advanced profiling are planned, not yet implemented.
+The timing measures **CPU wall time inside host step calls**, not asynchronous GPU execution, frame latency, or complete frame performance. Setup, warmup, sample-boundary callbacks and measured stepping are accounted for separately. When an experiment supplies its own counters, it can reset them through the optional `godauldron_begin_sample()` hook. Warmup defaults to zero for interactive demonstrations. The reference fixture validates the harness; it is not a performance benchmark. Native SDK integration, GPU interoperability, reference image comparison, captures and advanced profiling are planned, not yet implemented.
 
 ## Getting started
 

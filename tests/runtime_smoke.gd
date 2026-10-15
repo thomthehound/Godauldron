@@ -50,6 +50,9 @@ func _check_report(data: Dictionary, completed: bool, samples: int, warmup: int)
 	if absf(float(metrics.get("phase", -1.0)) - expected_phase) > 0.00001:
 		_fail("Experiment did not receive the correct combined number of fixed steps")
 		return false
+	if absf(float(metrics.get("sample_phase", -1.0)) - float(samples) / 60.0) > 0.00001:
+		_fail("Experiment's sample-boundary callback was not executed correctly")
+		return false
 	return true
 
 

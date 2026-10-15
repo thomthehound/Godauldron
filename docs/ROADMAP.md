@@ -21,10 +21,10 @@ Exit gate: current upstream Godot opens the lab, reference runs are exportable a
 - [ ] Searchable/categorized experiment catalog and reusable parameter presets
 - [ ] Scene loading and curated glTF technical scenes
 - [ ] Camera controllers, debug overlays and common visual inspection tools
-- [ ] Benchmark run phases: setup, warmup, sample, finalize, cancel
+- [x] Host run phases: setup, warmup, sample, final reporting and cancellation (measured CPU callback time only)
 - [ ] Automated parameter sweeps, baseline comparisons and regression thresholds
 - [ ] Hardware/driver metadata, logs, screenshots, image diff and magnifier
-- [ ] Independently testable host services and portable experiment schemas
+- [ ] Independently testable host services and portable experiment schemas (runner extracted; catalog/capture pending)
 
 Exit gate: a third party adds and compares an unrelated experiment without modifying core.
 

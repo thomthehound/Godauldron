@@ -11,12 +11,22 @@ var _records: Array[Dictionary] = []
 var _next_index: int = 0
 
 
+# JSON.parse_string() represents JSON numeric literals as floats, even for 4 or 12.
+# Treat mathematically integral JSON numbers as integers without accepting booleans.
+static func _json_integer(value: Variant) -> bool:
+	if typeof(value) == TYPE_INT:
+		return true
+	if typeof(value) != TYPE_FLOAT or not is_finite(float(value)):
+		return false
+	return float(value) == floorf(float(value)) and absf(float(value)) <= 1000000000.0
+
+
 static func _matches_type(spec: Dictionary, value: Variant) -> bool:
 	var kind: String = String(spec.get("type", ""))
 	if kind == "bool":
 		return typeof(value) == TYPE_BOOL
 	if kind == "int":
-		if typeof(value) != TYPE_INT:
+		if not _json_integer(value):
 			return false
 	elif kind == "float":
 		if typeof(value) != TYPE_FLOAT and typeof(value) != TYPE_INT:
@@ -31,7 +41,7 @@ static func _matches_type(spec: Dictionary, value: Variant) -> bool:
 
 static func validate(plan: Dictionary, manifest: Dictionary) -> PackedStringArray:
 	var errors := PackedStringArray()
-	if plan.get("schema_version") != 1 or typeof(plan.get("schema_version")) != TYPE_INT:
+	if not _json_integer(plan.get("schema_version")) or int(plan.get("schema_version", 0)) != 1:
 		errors.append("Campaign schema_version must be integer 1")
 	if not plan.get("id") is String or String(plan.get("id", "")).is_empty():
 		errors.append("Campaign id must be a non-empty string")
@@ -64,16 +74,16 @@ static func validate(plan: Dictionary, manifest: Dictionary) -> PackedStringArra
 	var repeats: Variant = plan.get("repetitions", 1)
 	var warmup: Variant = plan.get("warmup_steps", 0)
 	var samples: Variant = plan.get("sample_steps", 60)
-	if typeof(repeats) != TYPE_INT or repeats < 1 or repeats > MAX_RUNS:
+	if not _json_integer(repeats) or repeats < 1 or repeats > MAX_RUNS:
 		errors.append("repetitions must be an integer between 1 and %d" % MAX_RUNS)
-	if typeof(warmup) != TYPE_INT or warmup < 0 or warmup > 1000000:
+	if not _json_integer(warmup) or warmup < 0 or warmup > 1000000:
 		errors.append("warmup_steps must be an integer between 0 and 1000000")
-	if typeof(samples) != TYPE_INT or samples < 1 or samples > 1000000:
+	if not _json_integer(samples) or samples < 1 or samples > 1000000:
 		errors.append("sample_steps must be an integer between 1 and 1000000")
-	if typeof(repeats) == TYPE_INT and typeof(values) == TYPE_ARRAY and values.size() * repeats > MAX_RUNS:
+	if _json_integer(repeats) and typeof(values) == TYPE_ARRAY and values.size() * repeats > MAX_RUNS:
 		errors.append("Campaign exceeds %d runs" % MAX_RUNS)
 	var baseline: Variant = plan.get("baseline_index", 0)
-	if typeof(baseline) != TYPE_INT or typeof(values) != TYPE_ARRAY or baseline < 0 or baseline >= values.size():
+	if not _json_integer(baseline) or typeof(values) != TYPE_ARRAY or baseline < 0 or baseline >= values.size():
 		errors.append("baseline_index must identify a sweep value")
 	return errors
 

@@ -167,8 +167,23 @@ func _verify() -> void:
 	if absf(float(aspect_inspector.get("distance")) - expected_distance) > 0.0001:
 		_fail("KEEP_WIDTH perspective framing ignored vertical FOV")
 		return
-	# The same property changes the horizontal size semantics in orthographic.
+	var original_pan_target: Vector3 = aspect_inspector.target
+	aspect_inspector.pan(Vector2(0, 90), Vector2(1600, 900))
+	var expected_pan: float = (2.0 * expected_distance * tan(half_vertical) / 900.0) * 90.0
+	if absf(aspect_inspector.target.distance_to(original_pan_target) - expected_pan) > 0.0001:
+		_fail("KEEP_WIDTH panning still treats horizontal FOV as vertical")
+		return
+	# KEEP_HEIGHT uses vertical FOV; on portrait viewports the width is limiting.
+	aspect_camera.keep_aspect = Camera3D.KEEP_HEIGHT
+	aspect_inspector.frame(unit_bounds, Vector2i(900, 1600))
+	var width_limited_fov: float = atan(tan(half_horizontal) * (900.0 / 1600.0))
+	var expected_tall_distance: float = sqrt(3.0) / sin(width_limited_fov) * 1.15
+	if absf(float(aspect_inspector.get("distance")) - expected_tall_distance) > 0.0001:
+		_fail("KEEP_HEIGHT perspective framing ignored horizontal FOV")
+		return
+	# The same aspect-keeping mode changes orthographic size semantics.
 	aspect_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	aspect_camera.keep_aspect = Camera3D.KEEP_WIDTH
 	aspect_inspector.frame(unit_bounds, Vector2i(1600, 900))
 	var expected_ortho: float = sqrt(3.0) * 2.6 * aspect
 	if absf(aspect_camera.size - expected_ortho) > 0.0001:

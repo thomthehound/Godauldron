@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.reference",
+  "display_name": "Reference / Animated Geometry",
+  "category": "Host validation",
+  "description": "Deterministic procedural geometry used to exercise discovery, parameter controls, fixed-step execution and result export. Not a GPU performance reference.",
+  "entry_scene": "res://scenes/reference.tscn",
+  "parameters": [
+    {
+      "id": "grid",
+      "label": "Grid dimension",
+      "type": "int",
+      "default": 8,
+      "min": 2,
+      "max": 20,
+      "step": 1
+    },
+    {
+      "id": "amplitude",
+      "label": "Vertical amplitude",
+      "type": "float",
+      "default": 0.65,
+      "min": 0,
+      "max": 3,
+      "step": 0.05
+    },
+    {
+      "id": "speed",
+      "label": "Animation speed",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 5,
+      "step": 0.1
+    }
+  ]
+}

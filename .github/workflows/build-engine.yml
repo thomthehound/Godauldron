@@ -1,0 +1,45 @@
+name: Build upstream Godot
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream Godot branch or tag
+        required: true
+        default: master
+        type: string
+
+jobs:
+  linux-editor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ${{ inputs.upstream_ref }}
+          path: _engine_source
+          fetch-depth: 1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y scons pkg-config build-essential libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libudev-dev libgl1-mesa-dev
+      - name: Compile Linux editor
+        working-directory: _engine_source
+        run: scons platform=linuxbsd target=editor -j 2
+      - name: Stage editor
+        run: |
+          mkdir -p .engine
+          cp _engine_source/bin/godot.linuxbsd.editor.* .engine/godot
+          chmod +x .engine/godot
+          .engine/godot --version
+      - name: Smoke test Godauldron
+        run: |
+          .engine/godot --headless --path . --editor --import --quit
+          .engine/godot --headless --path . --quit-after 15
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godauldron-upstream-godot-linux-editor
+          path: .engine/godot
+          retention-days: 14

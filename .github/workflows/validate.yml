@@ -1,0 +1,34 @@
+name: Validate laboratory
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  manifest-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate manifests
+        run: python tools/validate_manifests.py
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+  godot-preview-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download newest published Godot 4 build
+        run: python tools/fetch_preview.py
+      - name: Import project
+        run: .engine/godot --headless --path . --editor --import --quit
+      - name: Verify scene and script loading
+        run: .engine/godot --headless --path . --quit-after 15

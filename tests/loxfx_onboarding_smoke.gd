@@ -184,12 +184,46 @@ func _verify() -> void:
 		_fail("Stage motion displaced externally authored content")
 		return
 
+	# Standalone and inherited scenes must retain their authored defaults,
+	# even when no experiment manifest supplies show_placeholder.
+	var standalone_portrait: Node3D = (load("res://scenes/showcase/portrait_reference_head.tscn") as PackedScene).instantiate()
+	var standalone_motion: Node3D = standalone_portrait.get_node("SubjectMotion")
+	standalone_motion.rotation.y = 0.125
+	root.add_child(standalone_portrait)
+	var standalone_placeholder: Node3D = standalone_portrait.get_node("SubjectMotion/NeutralSubject")
+	if standalone_placeholder.visible:
+		_fail("Standalone reference restored the primitive mannequin during _ready")
+		return
+	standalone_portrait.call("godauldron_preview", {"motion": "translate"})
+	standalone_portrait.call("godauldron_seek", 0.5)
+	if standalone_placeholder.visible or not is_equal_approx(standalone_motion.rotation.y, 0.125):
+		_fail("Preview without overrides lost authored visibility or rotation")
+		return
+	standalone_portrait.call("godauldron_preview", {"motion": "still", "show_placeholder": true})
+	if not standalone_placeholder.visible:
+		_fail("Explicit placeholder override could not enable the mannequin")
+		return
+	standalone_portrait.call("godauldron_preview", {"motion": "still"})
+	if standalone_placeholder.visible:
+		_fail("Omitted placeholder setting did not return to authored visibility")
+		return
+	standalone_portrait.free()
+
 	# The optional portrait reference must be a real imported textured
 	# MakeHuman GLB rather than another group of procedural spheres.
 	if not _select(host, "org.godauldron.portrait-reference-head"):
 		_fail("Bundled CC0 portrait head is not discoverable")
 		return
 	var portrait: Node3D = host.get("_active_scene")
+	var portrait_camera: Camera3D = portrait.get_node("StageCamera")
+	# This catches a reversed yaw: a renderable scene can otherwise pass
+	# every mesh-import test while placing the head entirely off-screen.
+	var head_target_in_camera: Vector3 = portrait_camera.to_local(Vector3(0.0, 1.57, 0.0))
+	if head_target_in_camera.z >= -0.2 or \
+			absf(head_target_in_camera.x) > -head_target_in_camera.z * 0.24 or \
+			absf(head_target_in_camera.y) > -head_target_in_camera.z * 0.25:
+		_fail("Reference portrait camera does not frame the head")
+		return
 	var human_root: Node = portrait.get_node_or_null(
 		"SubjectMotion/SubjectAnchor/MakeHumanBodyOrigin/MakeHumanReference"
 	)

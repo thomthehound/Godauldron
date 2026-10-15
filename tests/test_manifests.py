@@ -36,6 +36,21 @@ class ManifestTests(unittest.TestCase):
         self.data["parameters"].append(self.data["parameters"][0].copy())
         self.assertIn("duplicated", " ".join(validate_manifest(self.data, self.root)))
 
+    def test_choice_parameter(self):
+        self.data["parameters"].append({
+            "id": "material", "label": "Material", "type": "choice",
+            "default": "matte", "options": [
+                {"value": "matte", "label": "Matte"},
+                {"value": "polished", "label": "Polished"},
+            ],
+        })
+        self.assertEqual(validate_manifest(self.data, self.root), [])
+        self.data["parameters"][-1]["default"] = "absent"
+        self.assertIn("must match an option", " ".join(validate_manifest(self.data, self.root)))
+        self.data["parameters"][-1]["default"] = "matte"
+        self.data["parameters"][-1]["options"][1]["value"] = "matte"
+        self.assertIn("duplicated", " ".join(validate_manifest(self.data, self.root)))
+
     def test_duplicate_experiments(self):
         for name in ("one", "two"):
             folder = self.root / "experiments" / name

@@ -262,6 +262,18 @@ func _select_experiment(index: int) -> void:
 			check.button_pressed = bool(spec.get("default", false))
 			_parameters.add_child(check)
 			_controls[name] = check
+		elif String(spec.get("type", "")) == "choice":
+			var chooser := OptionButton.new()
+			for option in spec.get("options", []):
+				chooser.add_item(String(option["label"]))
+				var index: int = chooser.item_count - 1
+				chooser.set_item_metadata(index, String(option["value"]))
+				if option["value"] == spec.get("default"):
+					chooser.select(index)
+			chooser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			chooser.item_selected.connect(func(_selected: int) -> void: _preview_active_scene())
+			_parameters.add_child(chooser)
+			_controls[name] = chooser
 		else:
 			var field := SpinBox.new()
 			field.min_value = float(spec.get("min", -10000))
@@ -277,9 +289,19 @@ func _select_experiment(index: int) -> void:
 		return
 	_active_scene = scene_resource.instantiate()
 	_viewport.add_child(_active_scene)
+	_preview_active_scene()
 	_bind_inspection()
 	_status.text = String(_manifest.get("description", _manifest["display_name"]))
 	_discover_campaigns()
+
+
+func _preview_active_scene() -> void:
+	# Scene preview is separate from timed setup and cannot create a run report.
+	if _active_scene != null and _active_scene.has_method("godauldron_preview"):
+		_active_scene.call("godauldron_preview", _collect_parameters())
+		_update_inspection_bounds()
+		if _camera_inspector != null:
+			_frame_inspection()
 
 
 func _find_scene_camera(node: Node) -> Camera3D:
@@ -485,6 +507,9 @@ func _collect_parameters() -> Dictionary:
 		var control: Control = _controls[key]
 		if control is CheckBox:
 			result[key] = (control as CheckBox).button_pressed
+		elif control is OptionButton:
+			var chooser: OptionButton = control
+			result[key] = chooser.get_item_metadata(chooser.selected)
 		elif String(spec.get("type", "")) == "int":
 			result[key] = int((control as SpinBox).value)
 		else:

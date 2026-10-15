@@ -26,6 +26,13 @@ static func _matches_type(spec: Dictionary, value: Variant) -> bool:
 	var kind: String = String(spec.get("type", ""))
 	if kind == "bool":
 		return typeof(value) == TYPE_BOOL
+	if kind == "choice":
+		if typeof(value) != TYPE_STRING:
+			return false
+		for option in spec.get("options", []):
+			if typeof(option) == TYPE_DICTIONARY and option.get("value") == value:
+				return true
+		return false
 	if kind == "int":
 		if not _json_integer(value):
 			return false

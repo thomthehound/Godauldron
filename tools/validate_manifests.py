@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$")
-KINDS = {"int", "float", "bool"}
+KINDS = {"int", "float", "bool", "choice"}
 
 def validate_manifest(data: Any, root: Path) -> list[str]:
     errors: list[str] = []
@@ -52,12 +52,30 @@ def validate_manifest(data: Any, root: Path) -> list[str]:
             errors.append(f"{key}.label must be non-empty")
         kind = param.get("type")
         if kind not in KINDS:
-            errors.append(f"{key}.type must be int, float or bool")
+            errors.append(f"{key}.type must be int, float, bool or choice")
             continue
         default = param.get("default")
         if kind == "bool":
             if type(default) is not bool:
                 errors.append(f"{key}.default must be boolean")
+            continue
+        if kind == "choice":
+            options = param.get("options")
+            if not isinstance(options, list) or not options:
+                errors.append(f"{key}.options must be a non-empty array")
+                continue
+            values: set[str] = set()
+            for j, option in enumerate(options):
+                if not isinstance(option, dict) or not isinstance(option.get("value"), str) or not option["value"]:
+                    errors.append(f"{key}.options[{j}].value must be a non-empty string")
+                    continue
+                if not isinstance(option.get("label"), str) or not option["label"].strip():
+                    errors.append(f"{key}.options[{j}].label must be non-empty")
+                if option["value"] in values:
+                    errors.append(f"{key}.options[{j}].value is duplicated")
+                values.add(option["value"])
+            if type(default) is not str or default not in values:
+                errors.append(f"{key}.default must match an option value")
             continue
         if kind == "int" and type(default) is not int:
             errors.append(f"{key}.default must be integer")

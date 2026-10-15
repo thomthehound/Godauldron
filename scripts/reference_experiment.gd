@@ -6,6 +6,7 @@ var _phase: float = 0.0
 var _amplitude: float = 0.65
 var _speed: float = 1.0
 var _sample_start_phase: float = -1.0
+var _grid_dimension: int = 8
 
 
 func _ready() -> void:
@@ -41,6 +42,7 @@ func godauldron_setup(parameters: Dictionary) -> void:
 	_amplitude = float(parameters.get("amplitude", 0.65))
 	_speed = float(parameters.get("speed", 1.0))
 	var grid: int = int(parameters.get("grid", 8))
+	_grid_dimension = grid
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(1.0, 1.0, 1.0)
 	var material := StandardMaterial3D.new()
@@ -76,3 +78,14 @@ func godauldron_metrics() -> Dictionary:
 		"phase": _phase,
 		"sample_phase": _phase - _sample_start_phase if _sample_start_phase >= 0.0 else 0.0
 	}
+
+
+func godauldron_inspection_bounds() -> AABB:
+	# World-space bounds with enough headroom for the animated geometry.
+	# Each unit cube rotates about Y; its maximum X/Z half-width is sqrt(0.5).
+	var half_width: float = float(_grid_dimension - 1) * 1.65 * 0.5 + sqrt(0.5)
+	var half_height: float = maxf(0.75, _amplitude + 0.5)
+	return AABB(
+		global_position - Vector3(half_width, half_height, half_width),
+		Vector3(half_width * 2.0, half_height * 2.0, half_width * 2.0)
+	)

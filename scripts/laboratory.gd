@@ -8,12 +8,22 @@ const MAX_STEPS_PER_FRAME := 8
 const ExperimentRun = preload("res://scripts/experiment_run.gd")
 const ExperimentCampaign = preload("res://scripts/experiment_campaign.gd")
 const CAMPAIGN_ROOT := "res://campaigns"
+const InspectionCamera = preload("res://scripts/inspection_camera.gd")
+const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
 var _controls: Dictionary = {}
 var _active_scene: Node = null
 var _viewport: SubViewport
+var _viewport_container: SubViewportContainer
+var _camera_inspector: RefCounted = null
+var _inspection_overlay: Node3D
+var _inspection_bounds: AABB
+var _inspection_grid_enabled: bool = false
+var _inspection_bounds_enabled: bool = false
+var _inspector_drag: int = 0
+var _camera_manipulated: bool = false
 var _list: ItemList
 var _parameters: VBoxContainer
 var _status: Label
@@ -137,16 +147,48 @@ func _build_ui() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	sidebar.add_child(_status)
 
+	var viewer := VBoxContainer.new()
+	viewer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	viewer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(viewer)
+	var toolbar := HBoxContainer.new()
+	viewer.add_child(toolbar)
+	var frame_button := Button.new()
+	frame_button.text = "Frame"
+	frame_button.pressed.connect(_frame_inspection)
+	toolbar.add_child(frame_button)
+	var reset_button := Button.new()
+	reset_button.text = "Reset camera"
+	reset_button.pressed.connect(_reset_inspection)
+	toolbar.add_child(reset_button)
+	var grid_button := CheckButton.new()
+	grid_button.text = "Grid / axes"
+	grid_button.toggled.connect(_toggle_inspection_grid)
+	toolbar.add_child(grid_button)
+	var bounds_button := CheckButton.new()
+	bounds_button.text = "Bounds"
+	bounds_button.toggled.connect(_toggle_inspection_bounds)
+	toolbar.add_child(bounds_button)
+
 	_viewport = SubViewport.new()
 	_viewport.size = Vector2i(960, 720)
 	_viewport.own_world_3d = true
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	var viewport_container := SubViewportContainer.new()
-	viewport_container.stretch = true
-	viewport_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	viewport_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content.add_child(viewport_container)
-	viewport_container.add_child(_viewport)
+	_viewport_container = SubViewportContainer.new()
+	_viewport_container.stretch = true
+	_viewport_container.mouse_filter = Control.MOUSE_FILTER_STOP
+	_viewport_container.focus_mode = Control.FOCUS_ALL
+	_viewport_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_viewport_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_viewport_container.gui_input.connect(_on_inspection_input)
+	viewer.add_child(_viewport_container)
+	_viewport_container.add_child(_viewport)
+	_inspection_overlay = InspectionOverlay.new()
+	_inspection_overlay.name = "InspectionOverlay"
+	_viewport.add_child(_inspection_overlay)
+	var hint := Label.new()
+	hint.text = "Right drag: orbit   |   Middle drag: pan   |   Wheel: zoom   |   F: frame"
+	viewer.add_child(hint)
 
 	var comparison_panel := VBoxContainer.new()
 	root.add_child(comparison_panel)
@@ -197,6 +239,9 @@ func _select_experiment(index: int) -> void:
 	_comparison_table.clear()
 	_last_campaign_report_path = ""
 	_last_campaign_summary.clear()
+	_inspector_drag = 0
+	_camera_inspector = null
+	_camera_manipulated = false
 	if _active_scene != null:
 		_viewport.remove_child(_active_scene)
 		_active_scene.queue_free()
@@ -232,8 +277,112 @@ func _select_experiment(index: int) -> void:
 		return
 	_active_scene = scene_resource.instantiate()
 	_viewport.add_child(_active_scene)
+	_bind_inspection()
 	_status.text = String(_manifest.get("description", _manifest["display_name"]))
 	_discover_campaigns()
+
+
+func _find_scene_camera(node: Node) -> Camera3D:
+	if node is Camera3D:
+		return node
+	for child in node.get_children():
+		var found: Camera3D = _find_scene_camera(child)
+		if found != null:
+			return found
+	return null
+
+
+func _bind_inspection() -> void:
+	_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
+	_refresh_inspection_overlay()
+	var view_camera: Camera3D = _viewport.get_camera_3d()
+	# A scene being replaced may still have a queued-for-free camera.
+	if view_camera == null or not _active_scene.is_ancestor_of(view_camera):
+		view_camera = _find_scene_camera(_active_scene)
+	if view_camera == null:
+		_camera_inspector = null
+		return
+	_camera_inspector = InspectionCamera.new()
+	_camera_inspector.bind(view_camera, _inspection_bounds)
+
+
+func _update_inspection_bounds() -> void:
+	if _active_scene == null:
+		return
+	_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
+	if _inspection_bounds_enabled:
+		_refresh_inspection_overlay()
+
+
+func _refresh_inspection_overlay() -> void:
+	if _inspection_overlay != null:
+		_inspection_overlay.call("configure", _inspection_bounds, _inspection_grid_enabled, _inspection_bounds_enabled)
+
+
+func _frame_inspection() -> void:
+	if _camera_inspector == null or _active_scene == null:
+		return
+	_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
+	_camera_inspector.frame(_inspection_bounds, _viewport.size)
+	_camera_manipulated = true
+	_refresh_inspection_overlay()
+
+
+func _reset_inspection() -> void:
+	if _camera_inspector == null:
+		return
+	_camera_inspector.reset()
+	_camera_manipulated = false
+
+
+func _toggle_inspection_grid(enabled: bool) -> void:
+	_inspection_grid_enabled = enabled
+	_refresh_inspection_overlay()
+
+
+func _toggle_inspection_bounds(enabled: bool) -> void:
+	_inspection_bounds_enabled = enabled
+	if enabled and _active_scene != null:
+		_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
+	_refresh_inspection_overlay()
+
+
+func _on_inspection_input(event: InputEvent) -> void:
+	if _camera_inspector == null:
+		return
+	if event is InputEventMouseButton:
+		var mouse: InputEventMouseButton = event
+		if mouse.button_index == MOUSE_BUTTON_RIGHT:
+			_inspector_drag = 1 if mouse.pressed else 0
+			if mouse.pressed:
+				_viewport_container.grab_focus()
+				_viewport_container.accept_event()
+		elif mouse.button_index == MOUSE_BUTTON_MIDDLE:
+			_inspector_drag = 2 if mouse.pressed else 0
+			if mouse.pressed:
+				_viewport_container.grab_focus()
+				_viewport_container.accept_event()
+		elif mouse.pressed and mouse.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_camera_inspector.dolly(1.0)
+			_camera_manipulated = true
+			_viewport_container.accept_event()
+		elif mouse.pressed and mouse.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_camera_inspector.dolly(-1.0)
+			_camera_manipulated = true
+			_viewport_container.accept_event()
+	elif event is InputEventMouseMotion and _inspector_drag != 0:
+		var motion: InputEventMouseMotion = event
+		if _inspector_drag == 1:
+			_camera_inspector.orbit(motion.relative)
+		else:
+			_camera_inspector.pan(motion.relative, _viewport_container.size)
+		_camera_manipulated = true
+		_viewport_container.accept_event()
+	elif event is InputEventKey:
+		var key_event: InputEventKey = event
+		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_F:
+			_frame_inspection()
+			_viewport_container.accept_event()
 
 
 func _discover_campaigns() -> void:
@@ -284,6 +433,8 @@ func _begin_campaign_case() -> void:
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
+	# Setup can change scene bounds between campaign cases.
+	_update_inspection_bounds()
 	_accumulator = 0.0
 	_status.text = "Campaign case %d, repetition %d" % [
 		int(next_case["case_index"]) + 1, int(next_case["repetition"]) + 1
@@ -356,6 +507,7 @@ func _start_run() -> void:
 		_active_scene, _collect_parameters(),
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
+	_update_inspection_bounds()
 	_accumulator = 0.0
 	_status.text = "Running %s" % String(_manifest["display_name"])
 	_update_telemetry()
@@ -400,6 +552,11 @@ func _finish_run(completed: bool) -> void:
 	if not completed:
 		finished_run.cancel()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
+	report["inspection"] = {
+		"grid_overlay": _inspection_grid_enabled,
+		"bounds_overlay": _inspection_bounds_enabled,
+		"camera_manipulated": _camera_manipulated
+	}
 	if _campaign != null:
 		var next_case: Dictionary = _campaign.next_case()
 		report["campaign_id"] = String(_campaign.summary(false)["campaign_id"])

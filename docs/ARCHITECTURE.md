@@ -39,6 +39,12 @@ The UI exposes separate nonnegative warmup and positive measurement step counts;
 
 The first implementation runs these callbacks on the Godot main thread and keeps the experiment scene loaded until a different experiment is selected. An experiment may perform its actual work asynchronously; its reported metrics must clearly distinguish submitted work from completed work.
 
+## Scene inspection protocol
+
+Camera navigation is a host-level service that works with each experiment's own `Camera3D`; the host does not replace the experiment renderer or fabricate a separate source scene. **Frame** uses the optional scene-root method `godauldron_inspection_bounds() -> AABB` returning a world-space bounding box. If absent, the host computes a world-space bounding box from loaded `MeshInstance3D` descendants, with a small origin fallback for non-mesh experiments.
+
+Optional grid, world axes and bounds are drawn in a separate host-owned scene node inside the viewport, not in the experiment subtree. They are off by default and their presence is recorded in run metadata along with whether camera manipulation occurred. They may alter GPU rendering costs when enabled, so comparative rendering tests must control this state. See [Visual inspection](INSPECTION.md).
+
 ## Measurements and reports
 
 Reports are JSON files stored in user://results and include identity, parameters, completed/requested step count, fixed delta, timestamps, engine version, OS and scene-defined metrics.

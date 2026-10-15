@@ -25,7 +25,6 @@ var _graphics_inputs: Dictionary = {}
 var _graphics_values: Dictionary = GraphicsSettings.PROFILES["High"].duplicate(true)
 var _graphics_owned: PackedStringArray = PackedStringArray()
 var _graphics_run_snapshot: Dictionary = {}
-var _run_parameters_snapshot: Dictionary = {}
 var _capture_sequence: int = 0
 var _capture_directory: String = "user://captures"
 var _camera_inspector: RefCounted = null
@@ -490,6 +489,7 @@ func _preview_active_scene() -> void:
 	if _active_scene != null and _active_scene.has_method("godauldron_preview"):
 		_active_scene.call("godauldron_preview", _collect_parameters())
 		_update_inspection_bounds()
+		_apply_graphics()
 		if _camera_inspector != null:
 			_frame_inspection()
 
@@ -642,13 +642,13 @@ func _start_campaign() -> void:
 
 func _begin_campaign_case() -> void:
 	var next_case: Dictionary = _campaign.next_case()
-	_run_parameters_snapshot = next_case["parameters"].duplicate(true)
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
-	# Setup can change scene bounds between campaign cases.
+	# Setup may change render settings and ownership between campaign cases.
 	_update_inspection_bounds()
-	_graphics_run_snapshot = GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest))
+	_apply_graphics()
+	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
 	_status.text = "Campaign case %d, repetition %d" % [
 		int(next_case["case_index"]) + 1, int(next_case["repetition"]) + 1
@@ -719,14 +719,14 @@ func _start_run() -> void:
 	if _has_active_run():
 		_finish_run(false)
 	_campaign = null
-	_run_parameters_snapshot = _collect_parameters()
 	_run = ExperimentRun.new()
 	_run.begin(
-		_active_scene, _run_parameters_snapshot,
+		_active_scene, _collect_parameters(),
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
 	_update_inspection_bounds()
-	_graphics_run_snapshot = GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest))
+	_apply_graphics()
+	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
 	_status.text = "Running %s" % String(_manifest["display_name"])
 	_update_telemetry()

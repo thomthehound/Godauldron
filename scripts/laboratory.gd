@@ -294,15 +294,16 @@ func _find_scene_camera(node: Node) -> Camera3D:
 
 func _bind_inspection() -> void:
 	_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
+	_refresh_inspection_overlay()
 	var view_camera: Camera3D = _viewport.get_camera_3d()
-	if view_camera == null:
+	# A scene being replaced may still have a queued-for-free camera.
+	if view_camera == null or not _active_scene.is_ancestor_of(view_camera):
 		view_camera = _find_scene_camera(_active_scene)
 	if view_camera == null:
 		_camera_inspector = null
 		return
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(view_camera, _inspection_bounds)
-	_refresh_inspection_overlay()
 
 
 func _refresh_inspection_overlay() -> void:

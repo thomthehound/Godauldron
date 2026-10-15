@@ -132,6 +132,22 @@ func _verify() -> void:
 			_fail("Presentation-stage metrics claim simulation performance")
 			return
 
+	# An entirely experiment-owned scene inherits the lighting/camera stage
+	# while adding a native/provider payload node under SubjectAnchor.
+	var composed: PackedScene = load("res://experiments/showcase-example/scenes/portrait_with_project_subject.tscn") as PackedScene
+	if composed == null or not _select(host, "org.godauldron.project-owned-scene"):
+		_fail("Example project-owned scene was not loadable by generic discovery")
+		return
+	var authored: Node3D = host.get("_active_scene")
+	var example_node: Node = authored.get_node_or_null("SubjectMotion/SubjectAnchor/ExampleSubjectMarker")
+	if example_node == null or not example_node is MeshInstance3D:
+		_fail("Inherited project stage lost independently authored scene content")
+		return
+	authored.call("godauldron_seek", 0.9)
+	if example_node.get_parent() != authored.get_node("SubjectMotion/SubjectAnchor"):
+		_fail("Stage motion displaced externally authored content")
+		return
+
 	# Confirm the actual host playback UI remains independent of timed runs.
 	if not _select(host, "org.godauldron.showcase-portrait"):
 		_fail("Could not return to portrait stage")

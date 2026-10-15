@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.project-owned-scene",
+  "display_name": "Showcase / Project-owned scene example",
+  "category": "Scene authoring",
+  "description": "An inherited studio stage edited within the experiment package. Replace its small turquoise marker with your real provider output; no Godauldron core changes.",
+  "entry_scene": "res://experiments/showcase-example/scenes/portrait_with_project_subject.tscn",
+  "visualization_path": "godot_scene",
+  "parameters": [
+    {
+      "id": "motion",
+      "label": "Subject anchor motion",
+      "type": "choice",
+      "default": "still",
+      "options": [
+        {
+          "value": "still",
+          "label": "Stationary"
+        },
+        {
+          "value": "turn",
+          "label": "Turn"
+        },
+        {
+          "value": "nod",
+          "label": "Nod"
+        }
+      ]
+    },
+    {
+      "id": "show_placeholder",
+      "label": "Show neutral placeholder",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "id": "background",
+      "label": "Backdrop",
+      "type": "choice",
+      "default": "slate",
+      "options": [
+        {
+          "value": "slate",
+          "label": "Dark slate"
+        },
+        {
+          "value": "light",
+          "label": "Light neutral"
+        },
+        {
+          "value": "warm",
+          "label": "Warm contrast"
+        }
+      ]
+    }
+  ]
+}

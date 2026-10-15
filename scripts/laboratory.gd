@@ -14,10 +14,16 @@ const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
+const ExperimentPlayback = preload("res://scripts/experiment_playback.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
 var _selected_experiment_index: int = -1
+var _playback = ExperimentPlayback.new()
+var _playback_accumulator: float = 0.0
+var _playback_button: Button
+var _playback_time_control: SpinBox
+var _playback_delta_control: SpinBox
 var _controls: Dictionary = {}
 var _active_scene: Node = null
 var _viewport: SubViewport
@@ -144,6 +150,48 @@ func _build_ui() -> void:
 	_campaign_button.disabled = true
 	_campaign_button.pressed.connect(_start_campaign)
 	campaign_row.add_child(_campaign_button)
+
+	# Untimed experiment playback never emits benchmark measurements.
+	var playback_title := Label.new()
+	playback_title.text = "Interactive playback (NOT measured)"
+	sidebar.add_child(playback_title)
+	var playback_row := HBoxContainer.new()
+	sidebar.add_child(playback_row)
+	_playback_button = Button.new()
+	_playback_button.text = "Play"
+	_playback_button.pressed.connect(_toggle_playback)
+	playback_row.add_child(_playback_button)
+	var reset_playback := Button.new()
+	reset_playback.text = "Reset"
+	reset_playback.pressed.connect(_reset_playback)
+	playback_row.add_child(reset_playback)
+	var single_step := Button.new()
+	single_step.text = "Step"
+	single_step.pressed.connect(_step_playback)
+	playback_row.add_child(single_step)
+	var timing_row := HBoxContainer.new()
+	sidebar.add_child(timing_row)
+	var delta_label := Label.new()
+	delta_label.text = "Fixed Δt (s)"
+	timing_row.add_child(delta_label)
+	_playback_delta_control = SpinBox.new()
+	_playback_delta_control.min_value = 0.001
+	_playback_delta_control.max_value = 0.1
+	_playback_delta_control.step = 0.0001
+	_playback_delta_control.value = FIXED_STEP
+	_playback_delta_control.custom_minimum_size = Vector2(100, 0)
+	_playback_delta_control.value_changed.connect(_on_playback_delta_changed)
+	timing_row.add_child(_playback_delta_control)
+	var time_label := Label.new()
+	time_label.text = "Timeline (s)"
+	timing_row.add_child(time_label)
+	_playback_time_control = SpinBox.new()
+	_playback_time_control.min_value = 0
+	_playback_time_control.max_value = 300
+	_playback_time_control.step = 0.01
+	_playback_time_control.custom_minimum_size = Vector2(90, 0)
+	_playback_time_control.value_changed.connect(_seek_playback)
+	timing_row.add_child(_playback_time_control)
 
 	var buttons := HBoxContainer.new()
 	sidebar.add_child(buttons)
@@ -419,6 +467,7 @@ func _capture_screenshot() -> void:
 		"format_version": 1,
 		"experiment_id": String(_manifest.get("id", "")),
 		"visualization_path": NativeExperimentPackage.display_path(_manifest),
+		"playback": _playback.snapshot(),
 		"parameters": _collect_parameters(),
 		"parameter_source": "current_controls_or_preview",
 		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest)),
@@ -515,6 +564,7 @@ func _select_experiment(index: int) -> void:
 			check.button_pressed = bool(spec.get("default", false))
 			_parameters.add_child(check)
 			_controls[name] = check
+			check.toggled.connect(func(_enabled: bool) -> void: _preview_active_scene())
 		elif String(spec.get("type", "")) == "choice":
 			var chooser := OptionButton.new()
 			for option in spec.get("options", []):
@@ -536,6 +586,7 @@ func _select_experiment(index: int) -> void:
 			field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			_parameters.add_child(field)
 			_controls[name] = field
+			field.value_changed.connect(func(_new_value: float) -> void: _preview_active_scene())
 	_selected_experiment_index = index
 	var scene_resource: PackedScene = load(String(_manifest["entry_scene"])) as PackedScene
 	if scene_resource == null:
@@ -544,6 +595,9 @@ func _select_experiment(index: int) -> void:
 	_active_scene = scene_resource.instantiate()
 	_viewport.add_child(_active_scene)
 	_preview_active_scene()
+	_playback.bind(_active_scene, _collect_parameters(), _playback_delta_control.value)
+	_playback_accumulator = 0.0
+	_update_playback_ui()
 	_bind_inspection()
 	_apply_graphics()
 	_status.text = String(_manifest.get("description", _manifest["display_name"]))
@@ -560,6 +614,9 @@ func _preview_active_scene() -> void:
 	# Preview itself does not create a measured run.
 	if _active_scene != null and _active_scene.has_method("godauldron_preview"):
 		_active_scene.call("godauldron_preview", _collect_parameters())
+		_playback.bind(_active_scene, _collect_parameters(), _playback_delta_control.value)
+		_playback_accumulator = 0.0
+		_update_playback_ui()
 		_update_inspection_bounds()
 		_apply_graphics()
 		if _camera_inspector != null:
@@ -694,6 +751,8 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	_playback.invalidate()
+	_update_playback_ui()
 	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
 		_status.text = "Comparison viewer open or analysis active; campaign cannot start yet"
 		return
@@ -787,11 +846,78 @@ func _collect_parameters() -> Dictionary:
 	return result
 
 
+func _update_playback_ui() -> void:
+	if _playback_button == null:
+		return
+	_playback_button.text = "Pause" if _playback.playing else "Play"
+	if _playback_time_control != null:
+		_playback_time_control.set_block_signals(true)
+		_playback_time_control.value = float(_playback.step_index) * _playback.step_seconds
+		_playback_time_control.set_block_signals(false)
+
+
+func _toggle_playback() -> void:
+	if _has_active_run() or _capture_pending:
+		_status.text = "Playback unavailable during benchmark or capture"
+		return
+	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
+		_status.text = "Close image comparison before interactive playback"
+		return
+	if _playback.playing:
+		_playback.pause()
+	else:
+		if not _playback.initialized and not _playback.reset():
+			_status.text = "Experiment does not expose deterministic playback callbacks"
+			return
+		_playback.playing = true
+	_playback_accumulator = 0.0
+	_update_playback_ui()
+
+
+func _reset_playback() -> void:
+	if _has_active_run() or _capture_pending:
+		return
+	_playback.bind(_active_scene, _collect_parameters(), _playback_delta_control.value)
+	_playback.reset()
+	_playback_accumulator = 0.0
+	_update_playback_ui()
+
+
+func _step_playback() -> void:
+	if _has_active_run() or _capture_pending:
+		return
+	_playback.pause()
+	if not _playback.step():
+		_status.text = "Experiment does not support fixed-step playback"
+	_update_playback_ui()
+
+
+func _seek_playback(seconds: float) -> void:
+	if _has_active_run() or _capture_pending:
+		return
+	var target: int = maxi(0, roundi(seconds / _playback.step_seconds))
+	if not _playback.seek(target):
+		_status.text = "Cannot seek this scene: no direct seek and replay exceeds limit"
+	_update_playback_ui()
+
+
+func _on_playback_delta_changed(value: float) -> void:
+	if _has_active_run():
+		_status.text = "Stop benchmark before changing playback delta"
+		return
+	_playback.bind(_active_scene, _collect_parameters(), value)
+	_playback.reset()
+	_playback_accumulator = 0.0
+	_update_playback_ui()
+
+
 func _has_active_run() -> bool:
 	return _run != null and _run.is_active()
 
 
 func _start_run() -> void:
+	_playback.invalidate()
+	_update_playback_ui()
 	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
 		_status.text = "Comparison viewer open or analysis active; experiment cannot start yet"
 		return
@@ -823,6 +949,15 @@ func _stop_run() -> void:
 
 func _process(delta: float) -> void:
 	if not _has_active_run():
+		if _playback.playing:
+			_playback_accumulator += minf(delta, 0.25)
+			var frames: int = 0
+			while _playback_accumulator >= _playback.step_seconds and frames < MAX_STEPS_PER_FRAME and _playback.playing:
+				_playback.step()
+				_playback_accumulator -= _playback.step_seconds
+				frames += 1
+			if frames > 0:
+				_update_playback_ui()
 		return
 	_accumulator += minf(delta, 0.25)
 	var steps_this_frame := 0

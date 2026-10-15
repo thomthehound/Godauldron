@@ -40,6 +40,9 @@ func _ready() -> void:
 
 func _load_asset(path: String, force_reload: bool) -> void:
 	if not force_reload and _loaded != null and path == _asset_path:
+		# Recover cleanly when the user reselects a previously valid preview
+		# after an invalid path; the visible instance is still the right one.
+		_load_error = ""
 		return
 	if not path.begins_with("res://") or path.contains("..") or \
 			not (path.ends_with(".tscn") or path.ends_with(".scn") or \

@@ -69,3 +69,5 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/visual_comparison_smoke.gd
       - name: Verify native package isolation and deterministic showcase stages
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/loxfx_onboarding_smoke.gd
+      - name: Verify searchable experiments and saved configurations
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/session_smoke.gd

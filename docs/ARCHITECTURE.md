@@ -10,6 +10,10 @@
 
 **Native integration services (future):** explicit resource ownership, device capability queries, buffer/image access, command scheduling contracts, synchronization, lifetime rules and backend-dependent errors.
 
+## Saved user configurations
+
+The experiment catalog is searchable without changing manifest identity or replacing the active experiment. User-authored session JSON is kept under `user://sessions`, and never executed or treated as a project manifest. A versioned service validates the requested experiment against the installed catalog, checks every typed parameter and host setting, and loads nothing until the file is accepted. Native dependency preflight comes before mutating the active scene. An accepted restore finalizes the previous benchmark first, applies all parameters as a single preview, updates unclaimed graphics controls and restores the camera/inspection configuration. It does not import solver state or imply bitwise GPU reproducibility. See [Saved sessions](EXPERIMENT_SESSIONS.md).
+
 ## Manifest v1
 
 Experiments are discovered at project start in experiments/<name>/manifest.json.

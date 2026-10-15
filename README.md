@@ -15,6 +15,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Host graphics presets (Low, Medium, High, Ultra, Showcase), expandable per-setting controls with experiment ownership, and viewport PNG captures with adjacent provenance metadata.
 - Saved-capture comparison window with side-by-side images, magnification, RGB difference maps, channel-error statistics and warnings for mismatched experiment/camera/graphics settings.
 - Drop-in native experiment package preflight for external GDExtensions, plus reusable, editable showcase stages and untimed fixed-step playback/seek controls.
+- Searchable experiment catalog and named, validated user configuration snapshots for experiment parameters, graphics controls, camera, overlays, playback delta and run step counts.
 - A deterministic animated-geometry reference fixture.
 - Python manifest validation, regression tests, and a Godot end-to-end runtime smoke test.
 - Rolling upstream Godot edge and Godot 4 compatibility smoke tests, plus on-demand reusable builds of upstream Godot source.
@@ -43,6 +44,12 @@ Each artifact contains the editor, `extension_api.json`, `gdextension_interface.
 To exercise a proposed upstream change, select a public Godot fork and feature branch instead. The compiler is a reusable GitHub Actions workflow at [build-godot.yml](.github/workflows/build-godot.yml), with usage documented under [Engine tracking](docs/ENGINE_TRACKING.md).
 
 To **test a particular PR against Godot master HEAD**, add the `ci:godot-head` label. This triggers a one-shot Linux and Windows source build and runs that PR's Godauldron code against the binaries. Ordinary PR builds and subsequent pushes never compile Godot. To re-test a changed PR with a fresh master revision, remove and reapply the label (or rerun the previous workflow if you intentionally want to test its original revision). Create the repository label once under GitHub **Issues → Labels** if it doesn't already exist. See [Engine tracking](docs/ENGINE_TRACKING.md#opt-in-per-pr-master-builds) for details.
+
+## Search and saved configurations
+
+Use the search box above the experiment catalog to filter by name, category, ID or description. Name a configuration and select **Save** to store the current experiment, parameter values, graphics choices, camera pose, overlay flags, playback timestep, and benchmark step counts. Select a saved entry and **Load** to restore those settings. These files live in `user://sessions` rather than modifying project manifests or scenes. Restoration rejects missing experiments, invalid choices and out-of-range values before changing a running experiment.
+
+This saves a **reproducible configuration**, not a simulation checkpoint. Solver internal memory, queued GPU work, imported native binaries, authored lights/exposure, and the current animation timeline are not serialized. See [Session configuration and remaining Cauldron gaps](docs/EXPERIMENT_SESSIONS.md).
 
 ## External native experiments / LoxFX
 

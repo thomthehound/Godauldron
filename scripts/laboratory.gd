@@ -15,6 +15,7 @@ const ImageCapture = preload("res://scripts/image_capture.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
 const ExperimentPlayback = preload("res://scripts/experiment_playback.gd")
+const LabSession = preload("res://scripts/lab_session.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
@@ -42,10 +43,19 @@ var _camera_inspector: RefCounted = null
 var _inspection_overlay: Node3D
 var _inspection_bounds: AABB
 var _inspection_grid_enabled: bool = false
+var _inspection_grid_toggle: CheckButton
+var _inspection_bounds_toggle: CheckButton
 var _inspection_bounds_enabled: bool = false
 var _inspector_drag: int = 0
 var _camera_manipulated: bool = false
 var _list: ItemList
+var _catalog_search: LineEdit
+var _catalog_visible: Array[int] = []
+var _session_name: LineEdit
+var _session_picker: OptionButton
+var _session_entries: Array[Dictionary] = []
+var _session_root: String = "user://sessions"
+var _session_sequence: int = 0
 var _parameters: VBoxContainer
 var _status: Label
 var _telemetry: Label
@@ -69,6 +79,7 @@ var _results_directory: String = "user://results"
 func _ready() -> void:
 	_build_ui()
 	_discover()
+	_refresh_sessions()
 	if not _experiments.is_empty():
 		_list.select(0)
 		_select_experiment(0)
@@ -97,11 +108,39 @@ func _build_ui() -> void:
 	var experiments_title := Label.new()
 	experiments_title.text = "Experiments"
 	sidebar.add_child(experiments_title)
+	_catalog_search = LineEdit.new()
+	_catalog_search.placeholder_text = "Search name, category, ID…"
+	_catalog_search.text_changed.connect(_refresh_catalog)
+	sidebar.add_child(_catalog_search)
 
 	_list = ItemList.new()
 	_list.custom_minimum_size = Vector2(0, 185)
-	_list.item_selected.connect(_select_experiment)
+	_list.item_selected.connect(_on_visible_experiment_selected)
 	sidebar.add_child(_list)
+	var session_header := Label.new()
+	session_header.text = "Saved configurations"
+	sidebar.add_child(session_header)
+	_session_name = LineEdit.new()
+	_session_name.placeholder_text = "Configuration name"
+	sidebar.add_child(_session_name)
+	var session_controls := HBoxContainer.new()
+	sidebar.add_child(session_controls)
+	var save_session := Button.new()
+	save_session.text = "Save"
+	save_session.pressed.connect(_save_session)
+	session_controls.add_child(save_session)
+	_session_picker = OptionButton.new()
+	_session_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	session_controls.add_child(_session_picker)
+	var load_session := Button.new()
+	load_session.text = "Load"
+	load_session.pressed.connect(_load_selected_session)
+	session_controls.add_child(load_session)
+	var refresh_sessions := Button.new()
+	refresh_sessions.text = "↻"
+	refresh_sessions.tooltip_text = "Refresh saved configurations"
+	refresh_sessions.pressed.connect(_refresh_sessions)
+	session_controls.add_child(refresh_sessions)
 
 	var param_title := Label.new()
 	param_title.text = "Parameters"
@@ -224,14 +263,14 @@ func _build_ui() -> void:
 	reset_button.text = "Reset camera"
 	reset_button.pressed.connect(_reset_inspection)
 	toolbar.add_child(reset_button)
-	var grid_button := CheckButton.new()
-	grid_button.text = "Grid / axes"
-	grid_button.toggled.connect(_toggle_inspection_grid)
-	toolbar.add_child(grid_button)
-	var bounds_button := CheckButton.new()
-	bounds_button.text = "Bounds"
-	bounds_button.toggled.connect(_toggle_inspection_bounds)
-	toolbar.add_child(bounds_button)
+	_inspection_grid_toggle = CheckButton.new()
+	_inspection_grid_toggle.text = "Grid / axes"
+	_inspection_grid_toggle.toggled.connect(_toggle_inspection_grid)
+	toolbar.add_child(_inspection_grid_toggle)
+	_inspection_bounds_toggle = CheckButton.new()
+	_inspection_bounds_toggle.text = "Bounds"
+	_inspection_bounds_toggle.toggled.connect(_toggle_inspection_bounds)
+	toolbar.add_child(_inspection_bounds_toggle)
 	var quality_label := Label.new()
 	quality_label.text = "Graphics"
 	toolbar.add_child(quality_label)
@@ -311,6 +350,180 @@ func _build_ui() -> void:
 	_comparison_window.transient = true
 	_comparison_window.exclusive = true
 	add_child(_comparison_window)
+
+
+func _session_snapshot(name: String) -> Dictionary:
+	var camera_state := {}
+	var active_camera: Camera3D = _viewport.get_camera_3d()
+	if active_camera != null and _active_scene != null and _active_scene.is_ancestor_of(active_camera):
+		camera_state = {
+			"position": [active_camera.global_position.x, active_camera.global_position.y, active_camera.global_position.z],
+			"rotation_degrees": [active_camera.global_rotation_degrees.x, active_camera.global_rotation_degrees.y, active_camera.global_rotation_degrees.z],
+			"projection": int(active_camera.projection),
+			"fov": active_camera.fov,
+			"size": active_camera.size
+		}
+	return {
+		"version": 1,
+		"name": name,
+		"experiment_id": String(_manifest.get("id", "")),
+		"parameters": _collect_parameters(),
+		"graphics_profile": _quality_picker.get_item_text(_quality_picker.selected),
+		"graphics": _graphics_values.duplicate(true),
+		"graphics_effective_at_save": GraphicsSettings.read(_viewport, _graphics_owned),
+		"warmup_steps": int(_warmup_steps.value),
+		"run_steps": int(_run_steps.value),
+		"playback_delta": _playback_delta_control.value,
+		"inspection": {"grid": _inspection_grid_enabled, "bounds": _inspection_bounds_enabled},
+		"camera": camera_state,
+		"captured_at": Time.get_datetime_string_from_system(),
+		"engine": Engine.get_version_info()
+	}
+
+
+func _refresh_sessions() -> void:
+	_session_entries = LabSession.catalog(_session_root)
+	_session_picker.clear()
+	for item in _session_entries:
+		_session_picker.add_item(String(item["label"]))
+	_session_picker.disabled = _session_entries.is_empty()
+
+
+func _save_session() -> void:
+	if _active_scene == null:
+		_status.text = "Select an experiment before saving a configuration"
+		return
+	if _has_active_run() or _capture_pending or (_comparison_window != null and bool(_comparison_window.call("analysis_busy"))):
+		_status.text = "Cannot save a configuration while a run, capture or analysis is active"
+		return
+	var document: Dictionary = _session_snapshot(_session_name.text.strip_edges())
+	var error: String = LabSession.validate(document, _experiments)
+	if not error.is_empty():
+		_status.text = "Configuration not saved: " + error
+		return
+	_session_sequence += 1
+	var stem: String = "config_%s_p%d_%d" % [
+		Time.get_datetime_string_from_system().replace(":", "-"), OS.get_process_id(), _session_sequence
+	]
+	var result: Dictionary = LabSession.save(_session_root, stem, document)
+	if not bool(result.get("ok", false)):
+		_status.text = "Configuration save failed: " + String(result.get("error", "Unknown error"))
+		return
+	_refresh_sessions()
+	for i in range(_session_entries.size()):
+		if _session_entries[i]["stem"] == stem:
+			_session_picker.select(i)
+			break
+	_status.text = "Saved configuration: " + String(document["name"])
+
+
+func _load_selected_session() -> void:
+	if _session_picker.selected < 0 or _session_picker.selected >= _session_entries.size():
+		_status.text = "Select a saved configuration"
+		return
+	var stem: String = _session_entries[_session_picker.selected]["stem"]
+	var read: Dictionary = LabSession.read_session(_session_root, stem)
+	if not bool(read.get("ok", false)):
+		_status.text = "Configuration load failed: " + String(read.get("error", "Unknown error"))
+		return
+	_apply_session(read["record"])
+
+
+func _apply_session(document: Dictionary) -> bool:
+	# Validate and preflight before cancelling or changing the running
+	# experiment. A stale, incompatible or malicious JSON file changes nothing.
+	var error: String = LabSession.validate(document, _experiments)
+	if not error.is_empty():
+		_status.text = "Configuration rejected: " + error
+		return false
+	if _capture_pending or (_comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy")))):
+		_status.text = "Close capture/analysis before restoring a configuration"
+		return false
+	var target_index: int = -1
+	for i in range(_experiments.size()):
+		if _experiments[i].get("id") == document["experiment_id"]:
+			target_index = i
+			break
+	if target_index < 0:
+		return false
+	var native_status: Dictionary = NativeExperimentPackage.preflight(_experiments[target_index])
+	if not bool(native_status.get("ok", false)):
+		_status.text = "Configuration native dependency unavailable: " + String(native_status.get("error", "unknown"))
+		return false
+	# The installed manifest may still reference a scene that was removed or
+	# cannot instantiate after an SDK update. Check it before ending a run.
+	var scene_resource: PackedScene = load(String(_experiments[target_index]["entry_scene"])) as PackedScene
+	if scene_resource == null:
+		_status.text = "Configuration experiment scene cannot be loaded"
+		return false
+	if _has_active_run():
+		_finish_run(false)
+	if _selected_experiment_index != target_index or _active_scene == null:
+		_select_experiment(target_index)
+		if _active_scene == null or _manifest.get("id") != document["experiment_id"]:
+			_status.text = "Could not load saved experiment scene"
+			return false
+	# Parameter updates are applied as ONE coherent preview, not one
+	# intermediate scene rebuild or benchmark cancellation per control.
+	for spec in _manifest.get("parameters", []):
+		var key: String = String(spec["id"])
+		var control: Control = _controls[key]
+		var value: Variant = document["parameters"][key]
+		control.set_block_signals(true)
+		if control is CheckBox:
+			(control as CheckBox).button_pressed = bool(value)
+		elif control is OptionButton:
+			var selector: OptionButton = control
+			for i in range(selector.item_count):
+				if selector.get_item_metadata(i) == value:
+					selector.select(i)
+					break
+		else:
+			(control as SpinBox).value = float(value)
+		control.set_block_signals(false)
+	_playback_delta_control.set_block_signals(true)
+	_playback_delta_control.value = float(document["playback_delta"])
+	_playback_delta_control.set_block_signals(false)
+	_warmup_steps.value = int(document["warmup_steps"])
+	_run_steps.value = int(document["run_steps"])
+	_preview_active_scene()
+	_graphics_values = document["graphics"].duplicate(true)
+	# JSON implementations may decode whole numbers as floating point.
+	# Restore the exact enum/int Variant types Godot's viewport expects.
+	for key in ["msaa_3d", "screen_space_aa", "positional_shadow_atlas_size"]:
+		_graphics_values[key] = int(_graphics_values[key])
+	for i in range(_quality_picker.item_count):
+		if _quality_picker.get_item_text(i) == document["graphics_profile"]:
+			_quality_picker.select(i)
+			break
+	_apply_graphics()
+	_inspection_grid_enabled = document["inspection"]["grid"]
+	_inspection_bounds_enabled = document["inspection"]["bounds"]
+	# Restoring render state without the UI controls would leave the toolbar
+	# lying about the current scene. Avoid callbacks during this atomic load.
+	_inspection_grid_toggle.set_block_signals(true)
+	_inspection_grid_toggle.button_pressed = _inspection_grid_enabled
+	_inspection_grid_toggle.set_block_signals(false)
+	_inspection_bounds_toggle.set_block_signals(true)
+	_inspection_bounds_toggle.button_pressed = _inspection_bounds_enabled
+	_inspection_bounds_toggle.set_block_signals(false)
+	_refresh_inspection_overlay()
+	var camera_state: Dictionary = document["camera"]
+	var camera: Camera3D = _viewport.get_camera_3d()
+	if camera != null and not camera_state.is_empty():
+		camera.projection = int(camera_state["projection"])
+		camera.fov = float(camera_state["fov"])
+		camera.size = float(camera_state["size"])
+		var origin: Array = camera_state["position"]
+		var angles: Array = camera_state["rotation_degrees"]
+		camera.global_position = Vector3(origin[0], origin[1], origin[2])
+		camera.global_rotation_degrees = Vector3(angles[0], angles[1], angles[2])
+		if _camera_inspector != null:
+			_camera_inspector.bind(camera, _inspection_bounds)
+	_camera_manipulated = not camera_state.is_empty()
+	_session_name.text = String(document["name"])
+	_status.text = "Restored configuration: " + String(document["name"])
+	return true
 
 
 func _open_visual_comparison() -> void:
@@ -503,7 +716,7 @@ func _capture_screenshot() -> void:
 
 func _discover() -> void:
 	_experiments.clear()
-	_list.clear()
+	_catalog_visible.clear()
 	for folder in DirAccess.get_directories_at(MANIFEST_ROOT):
 		var manifest_path: String = "%s/%s/manifest.json" % [MANIFEST_ROOT, folder]
 		if not FileAccess.file_exists(manifest_path):
@@ -517,9 +730,41 @@ func _discover() -> void:
 			push_warning("Incomplete manifest: " + manifest_path)
 			continue
 		_experiments.append(manifest)
-		_list.add_item(String(manifest["display_name"]))
+	_refresh_catalog("")
 	if _experiments.is_empty():
 		_status.text = "No experiments discovered. Add experiments/<name>/manifest.json."
+
+
+func _on_visible_experiment_selected(visible_index: int) -> void:
+	if visible_index >= 0 and visible_index < _catalog_visible.size():
+		_select_experiment(_catalog_visible[visible_index])
+
+
+func _refresh_catalog(_query: String) -> void:
+	var previous_id: String = String(_manifest.get("id", ""))
+	_list.clear()
+	_catalog_visible.clear()
+	var query: String = _catalog_search.text.strip_edges().to_lower()
+	for index in range(_experiments.size()):
+		var entry: Dictionary = _experiments[index]
+		var searchable: String = "%s %s %s %s" % [
+			entry.get("display_name", ""), entry.get("category", ""),
+			entry.get("id", ""), entry.get("description", "")
+		]
+		if not query.is_empty() and not searchable.to_lower().contains(query):
+			continue
+		_catalog_visible.append(index)
+		_list.add_item(String(entry["display_name"]))
+		if entry.get("id") == previous_id:
+			_list.select(_catalog_visible.size() - 1)
+
+
+func _select_visible_current() -> void:
+	for visible_index in range(_catalog_visible.size()):
+		if _catalog_visible[visible_index] == _selected_experiment_index:
+			_list.select(visible_index)
+			return
+	_list.deselect_all()
 
 
 func _select_experiment(index: int) -> void:
@@ -531,8 +776,7 @@ func _select_experiment(index: int) -> void:
 	var native_status: Dictionary = NativeExperimentPackage.preflight(candidate)
 	if not bool(native_status.get("ok", false)):
 		_status.text = String(native_status.get("error", "Native package unavailable"))
-		if _selected_experiment_index >= 0:
-			_list.select(_selected_experiment_index)
+		_select_visible_current()
 		return
 	if _has_active_run():
 		_finish_run(false)
@@ -588,6 +832,7 @@ func _select_experiment(index: int) -> void:
 			_controls[name] = field
 			field.value_changed.connect(func(_new_value: float) -> void: _preview_active_scene())
 	_selected_experiment_index = index
+	_select_visible_current()
 	var scene_resource: PackedScene = load(String(_manifest["entry_scene"])) as PackedScene
 	if scene_resource == null:
 		_status.text = "Unable to load experiment scene"

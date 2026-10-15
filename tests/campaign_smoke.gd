@@ -142,7 +142,7 @@ func _verify() -> void:
 
 	# Re-selecting the current experiment follows the same teardown path as
 	# changing to a different one. Results must not leak into the new selection.
-	host.call("_select_experiment", 0)
+	_select_reference(host)
 	if results_tree.get_root() != null or not (host.get("_last_campaign_summary") as Dictionary).is_empty() or 			not String(host.get("_last_campaign_report_path")).is_empty():
 		_fail("A new experiment selection retained the previous campaign's results")
 		return

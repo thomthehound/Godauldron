@@ -10,5 +10,3 @@ The optional reference portrait uses an unmodified, textured MakeHuman / MPFB gl
 - The original rig in this model does **not** implement an experiment's simulation or hair attachment.
 - **Scale/fit and scalp landmarks still require visual inspection and calibration before treating this asset as a physically standardized scalp topology.**
 - Projects can always supply their own heads and scenes.
-
-This installer validates GLB version/length rather than adding unnecessary byte-identity hash gates.

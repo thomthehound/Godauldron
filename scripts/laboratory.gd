@@ -6,6 +6,8 @@ const MANIFEST_ROOT := "res://experiments"
 const FIXED_STEP := 1.0 / 60.0
 const MAX_STEPS_PER_FRAME := 8
 const ExperimentRun = preload("res://scripts/experiment_run.gd")
+const ExperimentCampaign = preload("res://scripts/experiment_campaign.gd")
+const CAMPAIGN_ROOT := "res://campaigns"
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
@@ -18,10 +20,18 @@ var _status: Label
 var _telemetry: Label
 var _run_steps: SpinBox
 var _warmup_steps: SpinBox
+var _campaign_picker: OptionButton
+var _campaign_button: Button
+var _campaign_plans: Array[Dictionary] = []
+var _campaign: RefCounted = null
+var _last_campaign_report_path: String = ""
+var _last_campaign_summary: Dictionary = {}
 
 var _run: ExperimentRun = null
 var _accumulator: float = 0.0
 var _report_sequence: int = 0
+# Configurable result location also allows integration tests to simulate I/O failure.
+var _results_directory: String = "user://results"
 
 
 func _ready() -> void:
@@ -97,6 +107,17 @@ func _build_ui() -> void:
 	_run_steps.value = 600
 	_run_steps.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	steps_row.add_child(_run_steps)
+
+	var campaign_row := HBoxContainer.new()
+	sidebar.add_child(campaign_row)
+	_campaign_picker = OptionButton.new()
+	_campaign_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	campaign_row.add_child(_campaign_picker)
+	_campaign_button = Button.new()
+	_campaign_button.text = "Run campaign"
+	_campaign_button.disabled = true
+	_campaign_button.pressed.connect(_start_campaign)
+	campaign_row.add_child(_campaign_button)
 
 	var buttons := HBoxContainer.new()
 	sidebar.add_child(buttons)
@@ -191,6 +212,73 @@ func _select_experiment(index: int) -> void:
 	_active_scene = scene_resource.instantiate()
 	_viewport.add_child(_active_scene)
 	_status.text = String(_manifest.get("description", _manifest["display_name"]))
+	_discover_campaigns()
+
+
+func _discover_campaigns() -> void:
+	_campaign_plans.clear()
+	_campaign_picker.clear()
+	for file in DirAccess.get_files_at(CAMPAIGN_ROOT):
+		if not file.ends_with(".json"):
+			continue
+		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(CAMPAIGN_ROOT.path_join(file)))
+		if typeof(parsed) != TYPE_DICTIONARY or parsed.get("experiment_id") != _manifest.get("id"):
+			continue
+		var errors: PackedStringArray = ExperimentCampaign.validate(parsed, _manifest)
+		if not errors.is_empty():
+			push_warning("Invalid campaign %s: %s" % [file, ", ".join(errors)])
+			continue
+		_campaign_plans.append(parsed)
+		_campaign_picker.add_item(String(parsed.get("id", file)))
+	_campaign_button.disabled = _campaign_plans.is_empty()
+	if _campaign_plans.is_empty():
+		_campaign_picker.add_item("No campaigns available")
+		_campaign_picker.disabled = true
+	else:
+		_campaign_picker.disabled = false
+		_campaign_picker.select(0)
+
+
+func _start_campaign() -> void:
+	if _active_scene == null or _campaign_plans.is_empty():
+		return
+	if _has_active_run():
+		_finish_run(false)
+	_campaign = ExperimentCampaign.new()
+	_last_campaign_report_path = ""
+	_last_campaign_summary.clear()
+	var errors: PackedStringArray = _campaign.configure(
+		_campaign_plans[_campaign_picker.selected], _manifest
+	)
+	if not errors.is_empty():
+		_status.text = "Invalid campaign: " + ", ".join(errors)
+		_campaign = null
+		return
+	_begin_campaign_case()
+
+
+func _begin_campaign_case() -> void:
+	var next_case: Dictionary = _campaign.next_case()
+	_run = ExperimentRun.new()
+	_run.begin(_active_scene, next_case["parameters"],
+		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
+	_accumulator = 0.0
+	_status.text = "Campaign case %d, repetition %d" % [
+		int(next_case["case_index"]) + 1, int(next_case["repetition"]) + 1
+	]
+	_update_telemetry()
+
+
+func _finish_campaign(completed: bool) -> void:
+	_last_campaign_summary = _campaign.summary(completed)
+	var path: String = _save_report(_last_campaign_summary, "campaign_" + String(_last_campaign_summary["campaign_id"]))
+	_last_campaign_report_path = path
+	_campaign = null
+	if path.is_empty():
+		# _save_report set the concrete I/O error. Never replace it with success.
+		_status.text = "Campaign summary NOT saved: " + _status.text
+		return
+	_status.text = ("Campaign complete" if completed else "Campaign cancelled") + ": " + path
 
 
 func _collect_parameters() -> Dictionary:
@@ -216,6 +304,7 @@ func _start_run() -> void:
 		return
 	if _has_active_run():
 		_finish_run(false)
+	_campaign = null
 	_run = ExperimentRun.new()
 	_run.begin(
 		_active_scene, _collect_parameters(),
@@ -265,12 +354,40 @@ func _finish_run(completed: bool) -> void:
 	if not completed:
 		finished_run.cancel()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
-	var result_dir: String = ProjectSettings.globalize_path("user://results")
-	DirAccess.make_dir_recursive_absolute(result_dir)
-	# Preserve every run, including repeated starts/stops in the same second.
-	# Process identity avoids collisions between independent host instances;
-	# the sequence and existence check handle rapid runs and restarts.
-	var prefix: String = "%s_%s_p%d" % [String(_manifest["id"]), Time.get_datetime_string_from_system().replace(":", "-"), OS.get_process_id()]
+	if _campaign != null:
+		var next_case: Dictionary = _campaign.next_case()
+		report["campaign_id"] = String(_campaign.summary(false)["campaign_id"])
+		report["campaign_case_index"] = int(next_case["case_index"])
+		report["campaign_repetition"] = int(next_case["repetition"])
+	var result_path: String = _save_report(report, String(_manifest["id"]))
+	if _campaign != null:
+		if result_path.is_empty():
+			_finish_campaign(false)
+			return
+		_campaign.record(report, result_path)
+		if completed and _campaign.is_active():
+			_begin_campaign_case()
+		else:
+			_finish_campaign(completed)
+		return
+	if result_path.is_empty():
+		# Keep _save_report's error; this run executed but its data was NOT saved.
+		return
+	_status.text = "%s: %d measured steps, %d warmup steps. Report: %s" % [
+		"Complete" if completed else "Stopped",
+		int(report["steps"]), int(report["warmup_steps"]), result_path
+	]
+
+
+func _save_report(report: Dictionary, identifier: String) -> String:
+	var result_dir: String = ProjectSettings.globalize_path(_results_directory)
+	if DirAccess.make_dir_recursive_absolute(result_dir) != OK:
+		_status.text = "Could not create results directory: " + result_dir
+		return ""
+	# Preserve all reports, including rapid repetitions and later process restarts.
+	var prefix: String = "%s_%s_p%d" % [
+		identifier, Time.get_datetime_string_from_system().replace(":", "-"), OS.get_process_id()
+	]
 	var result_path: String = ""
 	while true:
 		_report_sequence += 1
@@ -280,10 +397,12 @@ func _finish_run(completed: bool) -> void:
 	var output := FileAccess.open(result_path, FileAccess.WRITE)
 	if output == null:
 		_status.text = "Could not write results to " + result_path
-		return
+		return ""
 	output.store_string(JSON.stringify(report, "\t") + "\n")
+	output.flush()
+	var write_error: Error = output.get_error()
 	output.close()
-	_status.text = "%s: %d measured steps, %d warmup steps. Report: %s" % [
-		"Complete" if completed else "Stopped",
-		int(report["steps"]), int(report["warmup_steps"]), result_path
-	]
+	if write_error != OK:
+		_status.text = "Could not finish writing results to %s (error %d)" % [result_path, int(write_error)]
+		return ""
+	return result_path

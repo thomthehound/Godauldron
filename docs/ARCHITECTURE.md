@@ -49,6 +49,12 @@ All timings measure elapsed CPU time enclosing the synchronous Godot callback. T
 
 Later reports will include independent clocks/metrics with clear ownership and synchronization semantics, such as GPU timestamps, CPU submission durations, queue waits, DMA/copy costs, allocations, frame time and display latency. Accurate integration overhead requires comparing like workloads and explicitly accounting for asynchronous work.
 
+## Campaigns and baseline comparison
+
+The `ExperimentCampaign` service expands a versioned JSON preset into ordered, bounded runs. The UI executes them through the same `ExperimentRun` lifecycle used for single runs, retains each run report, and exports an aggregate report on completion or cancellation. Base parameters override manifest defaults, and one sweep axis overrides its selected parameter.
+
+Ratios are measured host-step CPU mean / baseline host-step CPU mean. They require all repetitions to be completed and a positive baseline mean. A value of 1.25 indicates 25% more time inside host callbacks on that machine; it does not establish a GPU slowdown or a statistically reliable performance regression. See [Campaign authoring](CAMPAIGNS.md).
+
 ## Native execution strategies (future)
 
 **Engine-owned:** the experiment uses Godot's supported compute and rendering interfaces. Useful for engine effects, scene integrations and portable examples.

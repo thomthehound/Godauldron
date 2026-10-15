@@ -55,3 +55,5 @@ jobs:
         run: .engine/godot --headless --path . --quit-after 15
       - name: Verify fixed-step run and exported results
         run: .engine/godot --headless --path . --script res://tests/runtime_smoke.gd
+      - name: Verify campaigns and comparisons
+        run: .engine/godot --headless --path . --script res://tests/campaign_smoke.gd

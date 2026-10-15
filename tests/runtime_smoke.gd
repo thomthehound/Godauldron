@@ -158,5 +158,31 @@ func _verify() -> void:
 		_fail("CPU timing must be nonnegative")
 		return
 
-	print("Godauldron runtime smoke passed: run phases, cancellation, metrics and report preservation")
+
+	# Simulate a non-directory at the results path. A completed run must not
+	# overwrite the actual I/O failure with a misleading "Complete" status.
+	var blocked_path: String = "user://results-blocked-%d" % OS.get_process_id()
+	var blocker: FileAccess = FileAccess.open(blocked_path, FileAccess.WRITE)
+	if blocker == null:
+		_fail("Could not prepare a blocked results directory")
+		return
+	blocker.store_string("This is a file, not a directory")
+	blocker.close()
+	host.set("_results_directory", blocked_path)
+	warmup_control.value = 0
+	samples_control.value = 1
+	host.call("_start_run")
+	_tick(host, 1)
+	var status: Label = host.get("_status") as Label
+	var failure_text: String = status.text
+	host.set("_results_directory", "user://results")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(blocked_path))
+	if not (failure_text.begins_with("Could not create results directory:") or failure_text.begins_with("Could not write results to ")):
+		_fail("Single-run save failure was overwritten or hidden: " + failure_text)
+		return
+	if bool(host.call("_has_active_run")):
+		_fail("Run still active after report-save failure")
+		return
+
+	print("Godauldron runtime smoke passed: run phases, cancellation, metrics and report preservation, I/O failure")
 	quit(0)

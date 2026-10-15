@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.reference.grid-sweep",
+  "experiment_id": "org.godauldron.reference",
+  "description": "Repeatable host-run grid comparison; descriptive CPU callback timing only.",
+  "base_parameters": {
+    "amplitude": 0.65,
+    "speed": 1
+  },
+  "axis": {
+    "parameter": "grid",
+    "values": [
+      4,
+      8,
+      12
+    ]
+  },
+  "baseline_index": 1,
+  "repetitions": 2,
+  "warmup_steps": 3,
+  "sample_steps": 12
+}

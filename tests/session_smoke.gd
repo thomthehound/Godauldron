@@ -26,7 +26,7 @@ func _verify() -> void:
 		_fail("Required experiments missing")
 		return
 	var search: LineEdit = host.get("_catalog_search")
-	search.text = "technical"
+	search.text = "org.godauldron.technical-gallery"
 	var visible: Array = host.get("_catalog_visible")
 	if visible.size() != 1 or visible[0] != gallery:
 		_fail("Experiment filtering selected incorrect index")

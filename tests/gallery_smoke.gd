@@ -157,6 +157,9 @@ func _verify() -> void:
 	picker.select(0)
 	picker.item_selected.emit(0)
 	host.call("_start_campaign")
+	if host.get("_campaign") == null or not bool(host.call("_has_active_run")):
+		_fail("Synthetic gallery campaign failed to start: " + (host.get("_status") as Label).text)
+		return
 	host.call("_process", 1.0 / 60.0)
 	picker.select(1)
 	picker.item_selected.emit(1)
@@ -165,7 +168,7 @@ func _verify() -> void:
 		return
 	var campaign_summary: Dictionary = host.get("_last_campaign_summary")
 	if bool(campaign_summary.get("completed", true)) or int(campaign_summary.get("recorded_runs", -1)) != 1:
-		_fail("Cancelled gallery campaign was incorrectly marked complete")
+		_fail("Cancelled gallery campaign has incorrect status or count: " + str(campaign_summary))
 		return
 	var case_summaries: Array = campaign_summary.get("case_summaries", [])
 	if case_summaries.size() != 2 or (case_summaries[0]["report_paths"] as Array).size() != 1:

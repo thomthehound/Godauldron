@@ -54,6 +54,14 @@ func _verify() -> void:
 		_fail("Unsafe campaign identifier was accepted")
 		return
 
+	var service := Campaign.new()
+	if not service.configure(plan, manifest).is_empty():
+		_fail("A valid JSON campaign failed configuration")
+		return
+	if typeof(service.next_case()["parameters"]["grid"]) != TYPE_INT:
+		_fail("Manifest integer parameters must remain integers in experiment callbacks")
+		return
+
 	var packed: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	var host: Node = packed.instantiate()
 	root.add_child(host)

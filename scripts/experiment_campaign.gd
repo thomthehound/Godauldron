@@ -102,13 +102,18 @@ func configure(plan: Dictionary, manifest: Dictionary) -> PackedStringArray:
 	var defaults := {}
 	for spec in manifest.get("parameters", []):
 		defaults[String(spec["id"])] = spec.get("default")
-	defaults.merge(_plan.get("base_parameters", {}), true)
+	var specs: Dictionary = {}
+	for spec in manifest.get("parameters", []):
+		specs[String(spec["id"])] = spec
+	for key in _plan.get("base_parameters", {}):
+		var value: Variant = _plan["base_parameters"][key]
+		defaults[key] = int(value) if String(specs[key]["type"]) == "int" else value
 	var axis: Dictionary = _plan["axis"]
 	var key: String = String(axis["parameter"])
 	var repetitions: int = int(_plan.get("repetitions", 1))
 	for i in range(axis["values"].size()):
 		var parameters: Dictionary = defaults.duplicate(true)
-		parameters[key] = axis["values"][i]
+		parameters[key] = int(axis["values"][i]) if String(specs[key]["type"]) == "int" else axis["values"][i]
 		for repeat in range(repetitions):
 			_cases.append({
 				"case_index": i, "repetition": repeat,

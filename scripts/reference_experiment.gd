@@ -32,6 +32,8 @@ func _ready() -> void:
 
 func godauldron_setup(parameters: Dictionary) -> void:
 	for instance in _instances:
+		# Remove immediately so the next measured case does not retain old scene geometry.
+		remove_child(instance)
 		instance.queue_free()
 	_instances.clear()
 	_phase = 0.0

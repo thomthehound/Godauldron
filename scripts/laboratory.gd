@@ -480,6 +480,10 @@ func _apply_session(document: Dictionary) -> bool:
 	_run_steps.value = int(document["run_steps"])
 	_preview_active_scene()
 	_graphics_values = document["graphics"].duplicate(true)
+	# JSON implementations may decode whole numbers as floating point.
+	# Restore the exact enum/int Variant types Godot's viewport expects.
+	for key in ["msaa_3d", "screen_space_aa", "positional_shadow_atlas_size"]:
+		_graphics_values[key] = int(_graphics_values[key])
 	for i in range(_quality_picker.item_count):
 		if _quality_picker.get_item_text(i) == document["graphics_profile"]:
 			_quality_picker.select(i)

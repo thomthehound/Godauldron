@@ -153,6 +153,11 @@ func _apply_settings(parameters: Dictionary) -> void:
 func godauldron_preview(parameters: Dictionary) -> void:
 	if not _initialized:
 		return
+	# The stand-alone scene constructs its default pose in _ready().
+	# Selecting it from the host with unchanged defaults must not rebuild
+	# thousands of CPU ribbon vertices a second time unnecessarily.
+	if parameters == _parameters and is_zero_approx(_time) and _hair.mesh != null:
+		return
 	_time = 0.0
 	_apply_settings(parameters)
 

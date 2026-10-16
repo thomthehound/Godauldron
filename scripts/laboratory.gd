@@ -9,6 +9,8 @@ const ExperimentRun = preload("res://scripts/experiment_run.gd")
 const ExperimentCampaign = preload("res://scripts/experiment_campaign.gd")
 const CAMPAIGN_ROOT := "res://campaigns"
 const InspectionCamera = preload("res://scripts/inspection_camera.gd")
+const InspectionViews = preload("res://scripts/inspection_views.gd")
+const PixelInspector = preload("res://scripts/pixel_inspector.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
@@ -55,6 +57,17 @@ var _inspection_bounds_toggle: CheckButton
 var _inspection_bounds_enabled: bool = false
 var _inspector_drag: int = 0
 var _camera_manipulated: bool = false
+var _camera_picker: OptionButton
+var _camera_paths: Array[String] = []
+var _bookmark_picker: OptionButton
+var _bookmark_name: LineEdit
+var _bookmark_entries: Array[Dictionary] = []
+var _bookmarks_root: String = "user://inspection_views"
+var _pixel_toggle: CheckButton
+var _pixel_panel: HBoxContainer
+var _pixel_texture: TextureRect
+var _pixel_info: Label
+var _last_pixel_sample: Dictionary = {}
 var _list: ItemList
 var _catalog_search: LineEdit
 var _catalog_visible: Array[int] = []
@@ -89,6 +102,7 @@ var _results_directory: String = "user://results"
 
 
 func _ready() -> void:
+	_bookmark_entries = InspectionViews.read(_bookmarks_root)
 	_build_ui()
 	_discover()
 	_refresh_sessions()
@@ -310,6 +324,41 @@ func _build_ui() -> void:
 	_inspection_bounds_toggle.text = "Bounds"
 	_inspection_bounds_toggle.toggled.connect(_toggle_inspection_bounds)
 	toolbar.add_child(_inspection_bounds_toggle)
+	var camera_row := HBoxContainer.new()
+	viewer.add_child(camera_row)
+	var camera_label := Label.new()
+	camera_label.text = "Scene camera"
+	camera_row.add_child(camera_label)
+	_camera_picker = OptionButton.new()
+	_camera_picker.custom_minimum_size = Vector2(180, 0)
+	_camera_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_camera_picker.item_selected.connect(_choose_scene_camera)
+	camera_row.add_child(_camera_picker)
+	_bookmark_name = LineEdit.new()
+	_bookmark_name.placeholder_text = "View name"
+	_bookmark_name.custom_minimum_size = Vector2(105, 0)
+	camera_row.add_child(_bookmark_name)
+	var save_view := Button.new()
+	save_view.text = "Save view"
+	save_view.pressed.connect(_save_inspection_view)
+	camera_row.add_child(save_view)
+	var bookmark_row := HBoxContainer.new()
+	viewer.add_child(bookmark_row)
+	_bookmark_picker = OptionButton.new()
+	_bookmark_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bookmark_row.add_child(_bookmark_picker)
+	var restore_view := Button.new()
+	restore_view.text = "Restore view"
+	restore_view.pressed.connect(_restore_inspection_view)
+	bookmark_row.add_child(restore_view)
+	var delete_view := Button.new()
+	delete_view.text = "Delete view"
+	delete_view.pressed.connect(_delete_inspection_view)
+	bookmark_row.add_child(delete_view)
+	_pixel_toggle = CheckButton.new()
+	_pixel_toggle.text = "Inspect pixel"
+	_pixel_toggle.tooltip_text = "One-shot viewport readback on next left-click, outside measured runs"
+	bookmark_row.add_child(_pixel_toggle)
 	var quality_label := Label.new()
 	quality_label.text = "Graphics"
 	toolbar.add_child(quality_label)
@@ -356,6 +405,19 @@ func _build_ui() -> void:
 	_viewport_container.gui_input.connect(_on_inspection_input)
 	viewer.add_child(_viewport_container)
 	_viewport_container.add_child(_viewport)
+	_pixel_panel = HBoxContainer.new()
+	_pixel_panel.visible = false
+	viewer.add_child(_pixel_panel)
+	_pixel_texture = TextureRect.new()
+	_pixel_texture.custom_minimum_size = Vector2(156, 156)
+	_pixel_texture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_pixel_texture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_pixel_texture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_pixel_panel.add_child(_pixel_texture)
+	_pixel_info = Label.new()
+	_pixel_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pixel_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pixel_panel.add_child(_pixel_info)
 	_inspection_overlay = InspectionOverlay.new()
 	_inspection_overlay.name = "InspectionOverlay"
 	_viewport.add_child(_inspection_overlay)
@@ -765,6 +827,7 @@ func _capture_screenshot() -> void:
 	var camera: Camera3D = _viewport.get_camera_3d()
 	if camera != null:
 		metadata["camera"] = {
+			"scene_camera_path": _active_scene_camera_path(),
 			"position": [camera.global_position.x, camera.global_position.y, camera.global_position.z],
 			"rotation_degrees": [camera.global_rotation_degrees.x, camera.global_rotation_degrees.y, camera.global_rotation_degrees.z],
 			"projection": camera.projection,
@@ -875,6 +938,9 @@ func _export_frame_sequence() -> void:
 			error = "No rendered frame available"
 			break
 		if i == 0:
+			# Bind provenance to the first actually rendered frame. Setup may
+			# replace or activate a different scene camera.
+			metadata["scene_camera_path"] = _active_scene_camera_path()
 			# UI layout can complete after setup; use actual captured dimensions.
 			metadata["viewport_size"] = [rendered.get_width(), rendered.get_height()]
 			var context_result: Dictionary = writer.update_context(metadata)
@@ -896,7 +962,8 @@ func _export_frame_sequence() -> void:
 			]
 		# Per-frame state can vary when the provider updates its renderer.
 		var frame_context: Dictionary = {
-			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest))
+			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
+			"scene_camera_path": _active_scene_camera_path()
 		}
 		var written: Dictionary = writer.write_frame(rendered, i, observed, frame_context)
 		if not bool(written.get("ok", false)):
@@ -1011,6 +1078,9 @@ func _select_experiment(index: int) -> void:
 	_inspector_drag = 0
 	_camera_inspector = null
 	_camera_manipulated = false
+	_pixel_panel.visible = false
+	_last_pixel_sample.clear()
+	_pixel_toggle.button_pressed = false
 	if _active_scene != null:
 		_viewport.remove_child(_active_scene)
 		_active_scene.queue_free()
@@ -1104,6 +1174,15 @@ func _find_scene_camera(node: Node) -> Camera3D:
 	return null
 
 
+func _active_scene_camera_path() -> String:
+	if _active_scene == null or _viewport == null:
+		return ""
+	var camera: Camera3D = _viewport.get_camera_3d()
+	if camera == null or (camera != _active_scene and not _active_scene.is_ancestor_of(camera)):
+		return ""
+	return String(_active_scene.get_path_to(camera))
+
+
 func _bind_inspection() -> void:
 	_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
 	_refresh_inspection_overlay()
@@ -1113,9 +1192,201 @@ func _bind_inspection() -> void:
 		view_camera = _find_scene_camera(_active_scene)
 	if view_camera == null:
 		_camera_inspector = null
+		_refresh_scene_cameras()
+		_refresh_view_bookmarks()
 		return
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(view_camera, _inspection_bounds)
+	_refresh_scene_cameras()
+	_refresh_view_bookmarks()
+
+
+func _refresh_scene_cameras() -> void:
+	_camera_paths.clear()
+	_camera_picker.set_block_signals(true)
+	_camera_picker.clear()
+	var candidates: Array[Dictionary] = InspectionViews.enumerate(_active_scene)
+	var selected: int = -1
+	for record in candidates:
+		var path: String = String(record["path"])
+		_camera_paths.append(path)
+		_camera_picker.add_item(String(record["label"]))
+		if _camera_inspector != null and record["camera"] == _camera_inspector.camera:
+			selected = _camera_picker.item_count - 1
+	if selected >= 0:
+		_camera_picker.select(selected)
+	elif _camera_picker.item_count == 0:
+		_camera_picker.add_item("No scene cameras")
+		_camera_picker.disabled = true
+	else:
+		_camera_picker.select(0)
+	_camera_picker.disabled = _camera_paths.is_empty()
+	_camera_picker.set_block_signals(false)
+
+
+func _choose_scene_camera(index: int) -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Camera selection is unavailable during runs or capture"
+		_refresh_scene_cameras()
+		return
+	if index < 0 or index >= _camera_paths.size():
+		return
+	var camera: Camera3D = InspectionViews.camera_for(_active_scene, _camera_paths[index])
+	if camera == null:
+		_status.text = "The selected scene camera is unavailable"
+		return
+	camera.current = true
+	_camera_inspector = InspectionCamera.new()
+	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
+	_camera_manipulated = false
+	_refresh_scene_cameras()
+
+
+func _refresh_view_bookmarks() -> void:
+	_bookmark_picker.clear()
+	var experiment: String = String(_manifest.get("id", ""))
+	for i in range(_bookmark_entries.size()):
+		var entry: Dictionary = _bookmark_entries[i]
+		if entry.get("experiment_id") != experiment:
+			continue
+		_bookmark_picker.add_item("%s · %s" % [entry["name"], entry["camera_path"]])
+		_bookmark_picker.set_item_metadata(_bookmark_picker.item_count - 1, i)
+	_bookmark_picker.disabled = _bookmark_picker.item_count == 0
+
+
+func _view_action_ready() -> bool:
+	if _capture_pending or _has_active_run() or _active_scene == null or _camera_inspector == null:
+		_status.text = "Stop the run or capture before editing scene viewpoints"
+		return false
+	return true
+
+
+func _save_inspection_view() -> void:
+	if not _view_action_ready():
+		return
+	var label: String = _bookmark_name.text.strip_edges()
+	if label.is_empty() or label.length() > InspectionViews.MAX_NAME:
+		_status.text = "View name must have 1–60 characters"
+		return
+	var camera: Camera3D = _camera_inspector.camera
+	var path: String = String(_active_scene.get_path_to(camera))
+	var candidate: Dictionary = {
+		"experiment_id": String(_manifest["id"]), "camera_path": path,
+		"name": label, "state": _camera_inspector.snapshot()
+	}
+	if not InspectionViews.valid_entry(candidate):
+		_status.text = "View contains an invalid camera state"
+		return
+	var updated: Array[Dictionary] = _bookmark_entries.duplicate(true)
+	var replaced: bool = false
+	for i in range(updated.size()):
+		if updated[i]["experiment_id"] == candidate["experiment_id"] and \
+				updated[i]["camera_path"] == path and updated[i]["name"] == label:
+			updated[i] = candidate
+			replaced = true
+			break
+	if not replaced:
+		updated.append(candidate)
+	var written: Dictionary = InspectionViews.write(_bookmarks_root, updated)
+	if not bool(written.get("ok", false)):
+		_status.text = "View save failed: " + String(written.get("error", "unknown"))
+		return
+	_bookmark_entries = updated
+	_refresh_view_bookmarks()
+	_status.text = ("Updated" if replaced else "Saved") + " viewpoint: " + label
+
+
+func _selected_bookmark_index() -> int:
+	if _bookmark_picker.selected < 0 or _bookmark_picker.selected >= _bookmark_picker.item_count:
+		return -1
+	return int(_bookmark_picker.get_item_metadata(_bookmark_picker.selected))
+
+
+func _restore_inspection_view() -> void:
+	if not _view_action_ready():
+		return
+	var index: int = _selected_bookmark_index()
+	if index < 0 or index >= _bookmark_entries.size():
+		return
+	var record: Dictionary = _bookmark_entries[index]
+	if record.get("experiment_id") != _manifest.get("id"):
+		_status.text = "View belongs to another experiment"
+		return
+	var camera: Camera3D = InspectionViews.camera_for(_active_scene, String(record["camera_path"]))
+	if camera == null:
+		_status.text = "View's scene camera no longer exists"
+		return
+	camera.current = true
+	_camera_inspector = InspectionCamera.new()
+	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
+	if not _camera_inspector.restore(record["state"]):
+		_status.text = "View camera state was rejected"
+		return
+	_camera_manipulated = true
+	_refresh_scene_cameras()
+	_status.text = "Restored viewpoint: " + String(record["name"])
+
+
+func _delete_inspection_view() -> void:
+	if not _view_action_ready():
+		return
+	var index: int = _selected_bookmark_index()
+	if index < 0 or index >= _bookmark_entries.size():
+		return
+	var updated: Array[Dictionary] = _bookmark_entries.duplicate(true)
+	var label: String = String(updated[index]["name"])
+	updated.remove_at(index)
+	var saved: Dictionary = InspectionViews.write(_bookmarks_root, updated)
+	if not bool(saved.get("ok", false)):
+		_status.text = "View deletion failed: " + String(saved.get("error", "unknown"))
+		return
+	_bookmark_entries = updated
+	_refresh_view_bookmarks()
+	_status.text = "Deleted viewpoint: " + label
+
+
+func _inspect_rendered_pixel(local_point: Vector2) -> void:
+	if _active_scene == null or _has_active_run() or _capture_pending:
+		_status.text = "Pixel inspection requires an idle or unmeasured playback scene"
+		return
+	var scene: Node = _active_scene
+	var viewport_size: Vector2 = _viewport_container.size
+	# One GPU readback per explicit click. Freeze untimed playback so the
+	# inspected image corresponds to the visible pose.
+	_playback.pause()
+	_update_playback_ui()
+	_capture_pending = true
+	await RenderingServer.frame_post_draw
+	if not is_instance_valid(scene) or _active_scene != scene:
+		_capture_pending = false
+		_status.text = "Pixel inspection cancelled: experiment changed"
+		return
+	var texture: ViewportTexture = _viewport.get_texture()
+	if texture == null:
+		_capture_pending = false
+		_status.text = "Pixel inspection failed: no viewport texture"
+		return
+	var rendered: Image = texture.get_image()
+	var result: Dictionary = PixelInspector.sample(rendered, local_point, viewport_size)
+	_capture_pending = false
+	if not bool(result.get("ok", false)):
+		_status.text = "Pixel inspection failed: " + String(result.get("error", "unknown"))
+		return
+	var position: Vector2i = result["point"]
+	var rgba: Array = result["rgba8"]
+	_last_pixel_sample = {
+		"experiment_id": String(_manifest.get("id", "")),
+		"scene_camera_path": _active_scene_camera_path(),
+		"pixel": [position.x, position.y],
+		"rgba8": rgba.duplicate(),
+		"render_size": [rendered.get_width(), rendered.get_height()]
+	}
+	_pixel_texture.texture = ImageTexture.create_from_image(result["tile"])
+	_pixel_info.text = "Rendered pixel %d, %d / %d × %d\nRGBA8: %d, %d, %d, %d\n13 × 13 texels · nearest-neighbor magnification\nDisplayed output color, not linear HDR radiance or GPU timing" % [
+		position.x, position.y, rendered.get_width(), rendered.get_height(),
+		rgba[0], rgba[1], rgba[2], rgba[3]
+	]
+	_pixel_panel.visible = true
 
 
 func _update_inspection_bounds() -> void:
@@ -1180,6 +1451,10 @@ func _on_inspection_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
+		if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed and _pixel_toggle.button_pressed:
+			_viewport_container.accept_event()
+			_inspect_rendered_pixel(mouse.position)
+			return
 		if mouse.button_index == MOUSE_BUTTON_RIGHT:
 			_inspector_drag = 1 if mouse.pressed else 0
 			if mouse.pressed:

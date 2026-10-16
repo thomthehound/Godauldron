@@ -74,7 +74,7 @@ Showcase is deliberately expensive and is not a performance baseline. Capturing 
 
 ## Technical scene gallery
 
-Select **Technical Scene Gallery** to inspect the bundled glTF geometry or authored material/primitive study. The **Technical scene** dropdown previews choices immediately without starting a measured run. **Frame** fits loaded geometry; a normal experiment run recreates the chosen scene during setup and records its path and mesh count separately from sampled CPU callbacks.
+Select **Technical Scene Gallery** to inspect the bundled glTF geometry or authored material/primitive study. The **Technical scene** dropdown previews choices immediately without starting a measured run. **Frame** fits loaded geometry; a normal experiment run recreates the chosen scene during setup and records its path and mesh count separately from sampled CPU callbacks. The **Scene camera** chooser, persistent named **Save/Restore view** bookmarks and click-driven **Inspect pixel** magnifier are available for inspection without embedding diagnostics into the experiment. See [Inspection views](docs/INSPECTION_VIEWS.md).
 
 The gallery uses ordinary Godot `PackedScene` loading, including imported `.gltf`/`.glb` assets; it does not contain a separate graphics importer or renderer. To add your own scenes, import them into the Godot project and add a labeled scene path as a `choice` parameter option in the gallery manifest. See [Technical scenes](docs/TECHNICAL_SCENES.md).
 

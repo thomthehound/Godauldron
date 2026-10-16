@@ -1523,7 +1523,11 @@ func _diagnostic_index_for_key(key: String) -> int:
 
 
 func _diagnostic_provenance() -> Dictionary:
-	return RenderDiagnostics.provenance(_rendering_method, _diagnostic_key)
+	var record: Dictionary = RenderDiagnostics.provenance(_rendering_method, _diagnostic_key)
+	var effective: int = int(_viewport.debug_draw) if _viewport != null else -1
+	record["effective_viewport_debug_draw"] = effective
+	record["matches_host_selection"] = effective == int(record["viewport_debug_draw"])
+	return record
 
 
 func _fly_direction() -> Vector3:

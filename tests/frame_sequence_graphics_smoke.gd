@@ -78,5 +78,54 @@ func _verify() -> void:
 			bool((host.get("_playback")).playing):
 		_fail("Export did not leave interactive playback paused at its final frame")
 		return
-	print("Godauldron graphical frame sequence passed: 3 fixed-step PNGs with metadata")
+	# Switch to a provider whose setup changes viewport values and takes
+	# ownership of a graphics key. Export must record post-setup effective
+	# settings rather than the prior preview's values.
+	var viewport: SubViewport = host.get("_viewport")
+	var old_scene: Node = host.get("_active_scene")
+	viewport.remove_child(old_scene)
+	old_scene.queue_free()
+	var probe: Node3D = preload("res://tests/fixtures/sequence_graphics_probe.gd").new()
+	viewport.add_child(probe)
+	host.set("_active_scene", probe)
+	host.call("_apply_graphics")
+	if viewport.msaa_3d == Viewport.MSAA_DISABLED:
+		_fail("Probe started without contrasting preview graphics")
+		return
+	host.set("_sequence_directory", OUTPUT + "-ownership-%d" % OS.get_process_id())
+	(host.get("_sequence_start_control") as SpinBox).value = 0
+	(host.get("_sequence_frames_control") as SpinBox).value = 3
+	host.call("_export_frame_sequence")
+	if not bool(host.get("_capture_pending")):
+		_fail("Provider-owned graphics sequence was not started")
+		return
+	frames = 0
+	while bool(host.get("_capture_pending")) and frames < 120:
+		frames += 1
+		await process_frame
+	if bool(host.get("_capture_pending")):
+		_fail("Provider-owned graphics sequence did not finish")
+		return
+	var probe_folders: PackedStringArray = DirAccess.get_directories_at(String(host.get("_sequence_directory")))
+	if probe_folders.size() != 1:
+		_fail("Provider graphics test sequence not found")
+		return
+	var probe_path: String = String(host.get("_sequence_directory")).path_join(probe_folders[0])
+	var probe_manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(probe_path.path_join("sequence.json")))
+	if typeof(probe_manifest) != TYPE_DICTIONARY or \
+			int(probe_manifest.get("graphics", {}).get("effective", {}).get("msaa_3d", -1)) != Viewport.MSAA_DISABLED or \
+			absf(float(probe_manifest.get("graphics", {}).get("effective", {}).get("scaling_3d_scale", 0.0)) - 1.0) > 0.001 or \
+			not probe_manifest.get("graphics", {}).get("experiment_owned", []).has("msaa_3d"):
+		_fail("Post-setup graphics context was not reconciled before capture")
+		return
+	for i in range(3):
+		var probe_sidecar: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(probe_path.path_join("frame_%06d.json" % i))
+		)
+		var expected_msaa: int = Viewport.MSAA_DISABLED if i == 0 else Viewport.MSAA_2X
+		if typeof(probe_sidecar) != TYPE_DICTIONARY or \
+				int(probe_sidecar.get("graphics", {}).get("effective", {}).get("msaa_3d", -1)) != expected_msaa:
+			_fail("Per-frame graphics metadata does not reflect provider changes")
+			return
+	print("Godauldron graphical frame sequence passed: post-setup ownership and per-frame graphics attribution")
 	quit(0)

@@ -203,5 +203,20 @@ func _verify() -> void:
 	if not InspectionViews.read(save_root).is_empty():
 		_fail("Host Delete view left persisted bookmark data")
 		return
+	# A Camera3D may itself be the experiment root; "." is a valid
+	# scene-owned path and must survive capture provenance.
+	var replaced_scene: Node = host.get("_active_scene")
+	viewport.remove_child(replaced_scene)
+	replaced_scene.queue_free()
+	var root_camera := Camera3D.new()
+	root_camera.name = "SceneRootCamera"
+	viewport.add_child(root_camera)
+	root_camera.current = true
+	host.set("_active_scene", root_camera)
+	if host.call("_active_scene_camera_path") != "." or \
+			InspectionViews.enumerate(root_camera).size() != 1 or \
+			InspectionViews.camera_for(root_camera, ".") != root_camera:
+		_fail("A Camera3D scene root was not recognized as a valid scene-owned camera")
+		return
 	print("Godauldron inspection view smoke passed: scene cameras, bookmarks, pixel coordinates")
 	quit(0)

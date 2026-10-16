@@ -105,5 +105,18 @@ func _verify() -> void:
 			report["host_observability"]["sample_callback"]["count"] != 0:
 		_fail("Runner mixed provider GPU timing with host callback observations")
 		return
+	if int(scene.get("timing_calls")) != 1:
+		_fail("Completed runner failed to query provider timing exactly once")
+		return
+	var cancelled = Runner.new()
+	cancelled.begin(scene, {}, 0, 3, 1.0 / 60.0)
+	cancelled.advance()
+	cancelled.cancel()
+	var cancelled_report: Dictionary = cancelled.make_report("org.godauldron.test-observability")
+	if cancelled_report["provider_gpu_timing"]["available"] or \
+			cancelled_report["provider_gpu_timing"]["reason"] != "run_not_completed" or \
+			int(scene.get("timing_calls")) != 1:
+		_fail("Cancelled benchmark queried or accepted completed device timing")
+		return
 	print("Godauldron observability smoke passed: percentiles, exclusions, provenance, and lifecycle")
 	quit(0)

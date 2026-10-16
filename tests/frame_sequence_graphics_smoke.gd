@@ -59,7 +59,7 @@ func _verify() -> void:
 	if typeof(summary) != TYPE_DICTIONARY or String(summary.get("status", "")) != "complete" or \
 			int(summary.get("written_frames", -1)) != 3 or \
 			int(summary.get("start_step", -1)) != 10:
-		_fail("Completed renderer sequence did not report expected frame range")
+		_fail("Completed renderer sequence did not report expected frame range: " + JSON.stringify(summary))
 		return
 	for i in range(3):
 		var stem: String = "frame_%06d" % i

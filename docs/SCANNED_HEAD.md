@@ -21,7 +21,7 @@ The bare head avoids the MakeHuman sample's hairstyle obscuring the scalp. The s
 
 The supplied image maps are for presentation; they do not supply a collision-ready scalp mesh, UV-stable follicles, attachment transforms, or verified real-world dimensions. Actual LoxFX groom placement, attachment, solver, and rendering belong to the provider.
 
-The scene inherits Godauldron's ordinary camera/light stage and deterministic, adjustable translation. Its camera and lighting are deliberately separate from the MakeHuman baseline so both candidates can be evaluated without changing the underlying host.
+The scene inherits Godauldron's ordinary camera/light stage and deterministic, adjustable translation. Its presentation overrides select a neutral mid-gray backdrop, reduced direct key/rim intensities, a partly transparent key shadow, and broad ambient fill. The scene's appearance remains editable with standard Godot Environment and Light3D nodes. These are visual-display controls, not simulation parameters. Other experiments remain free to supply their own lighting.
 
 ## Visual acceptance
 

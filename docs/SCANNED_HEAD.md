@@ -1,28 +1,24 @@
-# Lee Perry-Smith scanned reference head
+# Neutral scalp reference
 
-The optional `scenes/showcase/scanned_reference_head.tscn` provides a photographic 3D head scan for scalp and hair-silhouette inspection, separately from the MakeHuman full-body test fixture.
+The `scenes/showcase/scanned_reference_head.tscn` scene provides a simple, untextured head/scalp for attaching and inspecting hair. The neutral matte material deliberately hides the source scan's skin colors and texture artifacts. The separate MakeHuman example remains an imported-character test fixture, not a hair demonstration.
 
 ## Source and attribution
 
 **Lee Perry-Smith / Infinite Realities**, *Infinite, 3D Head Scan*. Licensed under **Creative Commons Attribution 3.0 Unported (CC BY 3.0)**. Based on a work at www.triplegangers.com.
 
-Original redistributable files in the [three.js example library](https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf/LeePerrySmith):
-
+The geometry was redistributed from the [three.js example library](https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf/LeePerrySmith):
 - `LeePerrySmith.glb` → `assets/showcase/lee_perry_smith.glb`
-- `Map-COL.jpg` → `assets/showcase/lee_perry_smith_color.jpg`
-- `Infinite-Level_02_Tangent_SmoothUV.jpg` → `assets/showcase/lee_perry_smith_normal.jpg`
-- [Upstream license notice](https://github.com/mrdoob/three.js/blob/dev/examples/models/gltf/LeePerrySmith/LeePerrySmith_License.txt)
+- [Upstream license](https://github.com/mrdoob/three.js/blob/dev/examples/models/gltf/LeePerrySmith/LeePerrySmith_License.txt)
 
-These original files are bundled unmodified. The Godot scene supplies external material settings, lighting, scene scaling, and camera composition.
+The original photographic material files are retained separately for provenance, but the showcase overrides the scan's materials with an untextured matte surface.
 
-## Reference role and limits
+## Scene and attachment
 
-The bare head avoids the MakeHuman sample's hairstyle obscuring the scalp. The source mesh's object-space X/Y/Z extents are approximately 8.55/7.95/5.18 arbitrary units. The scene uses an editorial scale factor of 0.03 (about 25.7 cm wide), **not a scan-provided physical measurement**.
+- `SubjectMotion/SubjectAnchor` is the provider-owned attachment point.
+- `SubjectMotion/SubjectAnchor/ScannedHeadMount` applies a 0.03 uniform scale to the source scan. Groom roots and attachment positions must be aligned to the rendered surface in the same coordinate frame.
+- The source mesh's object-space X/Y/Z extents are approximately 8.55/7.95/5.18 arbitrary units. The displayed width is approximately 0.257 m, **not a verified real-world measurement**.
+- The stage offers still, turn, nod and deterministic lateral translation motions. The scene does not instantiate, simulate or render hair.
 
-The supplied image maps are for presentation; they do not supply a collision-ready scalp mesh, UV-stable follicles, attachment transforms, or verified real-world dimensions. Actual LoxFX groom placement, attachment, solver, and rendering belong to the provider.
+## Validation
 
-The scene inherits Godauldron's ordinary camera/light stage and deterministic, adjustable translation. Its camera and lighting are deliberately separate from the MakeHuman baseline so both candidates can be evaluated without changing the underlying host.
-
-## Visual acceptance
-
-The graphics-backed `portrait-visual-capture` CI job renders still and translated images from both subjects, plus profile and rear views of the scanned head. Assess frontal and angled silhouette, visible scalp area, texture/material quality, lighting, motion framing, and eventual groom/root correspondence using real screenshots. Do not substitute glTF import success or image generation for this review.
+Graphical CI captures the matte head at rest, translated, in profile and from the rear. The visible scalp and silhouette are the relevant criteria; realistic skin, eyes or a complete humanoid are not. Root correspondence and physical-scale calibration must be verified when a groom/provider is attached.

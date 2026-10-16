@@ -2,7 +2,7 @@ extends SceneTree
 ## Capture the actual reference portrait with a graphics-backed Godot renderer.
 ## This is visual evidence for scene acceptance, not a simulation benchmark.
 
-const SCENE_PATH := "res://scenes/showcase/portrait_reference_head.tscn"
+const SCENE_PATH := "res://scenes/showcase/scanned_reference_head.tscn"
 const OUTPUT_DIR := "res://visual-artifacts"
 const CAPTURE_SIZE := Vector2i(960, 720)
 
@@ -18,7 +18,7 @@ func _fail(message: String) -> void:
 
 func _run() -> void:
 	var scene_path: String = SCENE_PATH
-	var label: String = "makehuman"
+	var label: String = "head"
 	for user_arg in OS.get_cmdline_user_args():
 		var argument: String = String(user_arg)
 		if argument.begins_with("--scene="):
@@ -39,6 +39,10 @@ func _run() -> void:
 	viewport.add_child(stage)
 	var camera := stage.get_node("StageCamera") as Camera3D
 	camera.current = true
+	var stage_environment := stage.get_node("StageEnvironment") as WorldEnvironment
+	if stage_environment.environment.background_mode != Environment.BG_COLOR:
+		_fail("Studio scene does not use its authored background color")
+		return
 	if stage.get_node("SubjectMotion/NeutralSubject").visible:
 		_fail("Primitive mannequin is visible in the reference portrait")
 		return
@@ -52,19 +56,19 @@ func _run() -> void:
 		{"name": "still", "motion": "still", "time": 0.0},
 		{"name": "translated", "motion": "translate", "time": 0.7}
 	]
-	if label == "scanned":
+	if label == "head":
 		poses.append({
 			"name": "profile", "motion": "still", "time": 0.0,
-			"camera_position": Vector3(0.48, 1.58, 0.0)
+			"camera_position": Vector3(0.40, 1.59, 0.0)
 		})
 		poses.append({
 			"name": "rear", "motion": "still", "time": 0.0,
-			"camera_position": Vector3(0.0, 1.58, -0.48)
+			"camera_position": Vector3(0.0, 1.59, -0.40)
 		})
 	for pose in poses:
 		if pose.has("camera_position"):
 			camera.position = pose["camera_position"]
-			camera.look_at(Vector3(0.0, 1.55, 0.0), Vector3.UP)
+			camera.look_at(Vector3(0.0, 1.57, 0.0), Vector3.UP)
 		stage.call("godauldron_preview", {
 			"motion": pose["motion"],
 			"background": "as_authored"
@@ -77,6 +81,25 @@ func _run() -> void:
 		if captured == null or captured.get_width() != CAPTURE_SIZE.x or \
 				captured.get_height() != CAPTURE_SIZE.y:
 			_fail("Rendering did not produce the expected portrait image")
+			return
+		# The corner is unobstructed by the reference bust; catch an
+		# accidentally selected sky/clear mode producing a black void.
+		var backdrop_pixel: Color = captured.get_pixel(12, 12)
+		if backdrop_pixel.r < 0.12 or backdrop_pixel.g < 0.12 or backdrop_pixel.b < 0.12:
+			_fail("Reference portrait renders against a black backdrop")
+			return
+		var highlights: int = 0
+		var samples: int = 0
+		for y in range(0, captured.get_height(), 8):
+			for x in range(0, captured.get_width(), 8):
+				var pixel: Color = captured.get_pixel(x, y)
+				if pixel.r > 0.97 and pixel.g > 0.97 and pixel.b > 0.97:
+					highlights += 1
+				samples += 1
+		var white_fraction: float = float(highlights) / maxf(1.0, float(samples))
+		print("Portrait nearly-white sample fraction: %.4f" % white_fraction)
+		if white_fraction > 0.02:
+			_fail("Hair reference has excessive clipped highlights")
 			return
 		var image_name: String = label + "_" + String(pose["name"])
 		var screenshot_path: String = OUTPUT_DIR + "/" + image_name + ".jpg"

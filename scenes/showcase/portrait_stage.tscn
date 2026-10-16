@@ -3,8 +3,8 @@
 [ext_resource type="Script" path="res://scripts/showcase_stage.gd" id="1"]
 
 [sub_resource type="Environment" id="env"]
-background_mode = 2
-background_color = Color(0.045, 0.058, 0.083, 1)
+background_mode = 1
+background_color = Color(0.26, 0.285, 0.32, 1)
 ambient_light_source = 2
 ambient_light_color = Color(0.7, 0.78, 0.86, 1)
 ambient_light_energy = 0.37
@@ -70,19 +70,20 @@ current = true
 [node name="KeySoft" type="DirectionalLight3D" parent="."]
 rotation_degrees = Vector3(-42, -33, 0)
 light_color = Color(1, 0.94, 0.84, 1)
-light_energy = 1.15
+light_energy = 0.45
+shadow_opacity = 0.55
 shadow_enabled = true
 
 [node name="RimBack" type="OmniLight3D" parent="."]
 position = Vector3(0.8, 3.3, -2.6)
 light_color = Color(1, 0.80, 0.60, 1)
-light_energy = 1.65
+light_energy = 0.24
 omni_range = 11.0
 
 [node name="FillSoft" type="OmniLight3D" parent="."]
 position = Vector3(-3.1, 2.9, 3.0)
 light_color = Color(0.62, 0.75, 1, 1)
-light_energy = 0.9
+light_energy = 0.3
 omni_range = 12.0
 
 [node name="Floor" type="MeshInstance3D" parent="."]

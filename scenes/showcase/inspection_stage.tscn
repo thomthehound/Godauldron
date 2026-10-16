@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://scripts/showcase_stage.gd" id="1"]
 
 [sub_resource type="Environment" id="env"]
-background_mode = 2
+background_mode = 1
 background_color = Color(0.045, 0.058, 0.083, 1)
 ambient_light_source = 2
 ambient_light_color = Color(0.7, 0.78, 0.86, 1)

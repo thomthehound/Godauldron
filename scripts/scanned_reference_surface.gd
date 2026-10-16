@@ -1,20 +1,15 @@
 extends Node3D
-## Apply the documented scan's PBR surface maps to its imported mesh.
-## The scan remains an ordinary project-owned scene asset.
+## Neutral inspection material for a head/scalp geometry reference.
+## The scan's photographic textures are intentionally not used.
 
-@export var color_texture: Texture2D
-@export var normal_texture: Texture2D
+@export var matte_color: Color = Color(0.45, 0.48, 0.51)
 
 
 func _ready() -> void:
 	var surface := StandardMaterial3D.new()
-	surface.albedo_color = Color.WHITE
-	surface.albedo_texture = color_texture
-	surface.roughness = 0.82
+	surface.albedo_color = matte_color
+	surface.roughness = 0.95
 	surface.metallic = 0.0
-	if normal_texture != null:
-		surface.normal_enabled = true
-		surface.normal_texture = normal_texture
 	_apply_surface(self, surface)
 
 

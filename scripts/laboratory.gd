@@ -972,9 +972,11 @@ func _export_frame_sequence() -> void:
 			error = "No rendered frame available"
 			break
 		if i == 0:
-			# Bind provenance to the first actually rendered frame. Setup may
-			# replace or activate a different scene camera.
+			# Bind provenance to the first actual render: setup can replace
+			# the active camera and change viewport diagnostic rendering.
 			metadata["scene_camera_path"] = _active_scene_camera_path()
+			metadata["render_diagnostic"] = _diagnostic_provenance()
+			metadata["render_diagnostic_basis"] = "first_captured_frame"
 			# UI layout can complete after setup; use actual captured dimensions.
 			metadata["viewport_size"] = [rendered.get_width(), rendered.get_height()]
 			var context_result: Dictionary = writer.update_context(metadata)

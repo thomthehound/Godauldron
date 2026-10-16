@@ -11,18 +11,12 @@ var target: Vector3 = Vector3.ZERO
 var distance: float = 10.0
 var yaw: float = 0.0
 var pitch: float = 0.0
-var _original_transform: Transform3D
-var _original_size: float = 1.0
 var _original_state: Dictionary = {}
-var _initial_target: Vector3 = Vector3.ZERO
 
 
 func bind(view_camera: Camera3D, bounds: AABB) -> void:
 	camera = view_camera
-	_original_transform = camera.global_transform
-	_original_size = camera.size
 	target = bounds.get_center()
-	_initial_target = target
 	_sync_from_camera()
 	_original_state = snapshot()
 

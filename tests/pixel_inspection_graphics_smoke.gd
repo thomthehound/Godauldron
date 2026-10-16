@@ -59,6 +59,7 @@ func _verify() -> void:
 	var sampled: Dictionary = host.get("_last_pixel_sample")
 	var visual: Control = host.get("_pixel_panel")
 	if not visual.visible or sampled.get("experiment_id") != "org.godauldron.showcase-portrait" or \
+			String(sampled.get("scene_camera_path", "")).is_empty() or \
 			(sampled.get("rgba8", []) as Array).size() != 4 or \
 			int(sampled.get("render_size", [0, 0])[0]) < 100 or \
 			host.get("_active_scene") != source_scene:

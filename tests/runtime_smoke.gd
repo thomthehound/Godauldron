@@ -42,6 +42,15 @@ func _check_report(data: Dictionary, completed: bool, samples: int, warmup: int)
 	if not report.has("warmup_host_step_cpu_wall_usec_total") or not report.has("host_step_cpu_wall_usec_total"):
 		_fail("Phase-separated CPU timing fields are missing")
 		return false
+	var observations: Dictionary = report.get("host_observability", {})
+	if int(observations.get("sample_callback_total", -1)) != samples or \
+			int(observations.get("warmup_callback_total", -1)) != warmup:
+		_fail("Host observability counted the wrong benchmark phases")
+		return false
+	var gpu: Dictionary = report.get("provider_gpu_timing", {})
+	if bool(gpu.get("available", true)) or gpu.get("reason") != "provider_resolved_timings_not_reported":
+		_fail("A fixture without GPU timings acquired invented device measurements")
+		return false
 	var metrics: Dictionary = report.get("experiment_metrics", {})
 	if int(metrics.get("instances", -1)) != 64:
 		_fail("Experiment setup or final metrics were lost")

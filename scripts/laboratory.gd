@@ -608,6 +608,10 @@ func _add_quality_boolean(key: String, label_text: String) -> void:
 
 
 func _on_quality_selected(index: int) -> void:
+	if _capture_pending:
+		_quality_picker.select(5 if not GraphicsSettings.PROFILES.has(_quality_picker.get_item_text(_quality_picker.selected)) else _quality_picker.selected)
+		_status.text = "Cannot change graphics during capture"
+		return
 	if index >= GraphicsSettings.PROFILES.size():
 		return
 	if _has_active_run():
@@ -629,6 +633,9 @@ func _on_quality_boolean_changed(value: bool, key: String) -> void:
 
 
 func _change_graphics_value(key: String, value: Variant) -> void:
+	if _capture_pending:
+		_status.text = "Cannot change graphics during capture"
+		return
 	if GraphicsSettings.is_owned(key, _graphics_owned):
 		return
 	if _has_active_run():
@@ -803,6 +810,15 @@ func _export_frame_sequence() -> void:
 		return
 	_capture_pending = true
 	_playback.pause()
+	for control in _controls.values():
+		if control is SpinBox:
+			(control as SpinBox).editable = false
+		elif control is BaseButton:
+			(control as BaseButton).disabled = true
+	_playback_delta_control.editable = false
+	_playback_time_control.editable = false
+	_sequence_start_control.editable = false
+	_sequence_frames_control.editable = false
 	_playback.bind(source_scene, parameters, _playback_delta_control.value)
 	var error: String = ""
 	if not _playback.reset() or not _playback.seek(first_step):
@@ -837,6 +853,15 @@ func _export_frame_sequence() -> void:
 		_status.text = "Exporting fixed-step frame %d/%d" % [i + 1, frame_count]
 	var result: Dictionary = writer.finish(error)
 	_capture_pending = false
+	for control in _controls.values():
+		if control is SpinBox:
+			(control as SpinBox).editable = true
+		elif control is BaseButton:
+			(control as BaseButton).disabled = false
+	_playback_delta_control.editable = true
+	_playback_time_control.editable = true
+	_sequence_start_control.editable = true
+	_sequence_frames_control.editable = true
 	_playback_accumulator = 0.0
 	_update_playback_ui()
 	if not bool(result.get("ok", false)):
@@ -1066,11 +1091,21 @@ func _reset_inspection() -> void:
 
 
 func _toggle_inspection_grid(enabled: bool) -> void:
+	if _capture_pending:
+		_inspection_grid_toggle.set_block_signals(true)
+		_inspection_grid_toggle.button_pressed = _inspection_grid_enabled
+		_inspection_grid_toggle.set_block_signals(false)
+		return
 	_inspection_grid_enabled = enabled
 	_refresh_inspection_overlay()
 
 
 func _toggle_inspection_bounds(enabled: bool) -> void:
+	if _capture_pending:
+		_inspection_bounds_toggle.set_block_signals(true)
+		_inspection_bounds_toggle.button_pressed = _inspection_bounds_enabled
+		_inspection_bounds_toggle.set_block_signals(false)
+		return
 	_inspection_bounds_enabled = enabled
 	if enabled and _active_scene != null:
 		_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
@@ -1142,6 +1177,9 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	if _capture_pending:
+		_status.text = "Capture in progress; campaign cannot start yet"
+		return
 	_playback.invalidate()
 	_update_playback_ui()
 	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
@@ -1318,6 +1356,9 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	if _capture_pending:
+		_status.text = "Capture in progress; experiment cannot start yet"
+		return
 	_playback.invalidate()
 	_update_playback_ui()
 	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):

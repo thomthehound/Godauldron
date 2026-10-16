@@ -13,6 +13,7 @@ var yaw: float = 0.0
 var pitch: float = 0.0
 var _original_transform: Transform3D
 var _original_size: float = 1.0
+var _original_state: Dictionary = {}
 var _initial_target: Vector3 = Vector3.ZERO
 
 
@@ -23,6 +24,7 @@ func bind(view_camera: Camera3D, bounds: AABB) -> void:
 	target = bounds.get_center()
 	_initial_target = target
 	_sync_from_camera()
+	_original_state = snapshot()
 
 
 func _sync_from_camera() -> void:
@@ -100,10 +102,9 @@ func frame(bounds: AABB, viewport_size: Vector2i) -> void:
 func reset() -> void:
 	if not is_instance_valid(camera):
 		return
-	camera.global_transform = _original_transform
-	camera.size = _original_size
-	target = _initial_target
-	_sync_from_camera()
+	# Match the whole selected camera state, not only its transform/size.
+	# A restored bookmark may have modified projection or other lens values.
+	restore(_original_state)
 
 
 

@@ -9,6 +9,8 @@ const ExperimentRun = preload("res://scripts/experiment_run.gd")
 const ExperimentCampaign = preload("res://scripts/experiment_campaign.gd")
 const CAMPAIGN_ROOT := "res://campaigns"
 const InspectionCamera = preload("res://scripts/inspection_camera.gd")
+const InspectionViews = preload("res://scripts/inspection_views.gd")
+const PixelInspector = preload("res://scripts/pixel_inspector.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
@@ -55,6 +57,17 @@ var _inspection_bounds_toggle: CheckButton
 var _inspection_bounds_enabled: bool = false
 var _inspector_drag: int = 0
 var _camera_manipulated: bool = false
+var _camera_picker: OptionButton
+var _camera_paths: Array[String] = []
+var _bookmark_picker: OptionButton
+var _bookmark_name: LineEdit
+var _bookmark_entries: Array[Dictionary] = []
+var _bookmarks_root: String = "user://inspection_views"
+var _pixel_toggle: CheckButton
+var _pixel_panel: HBoxContainer
+var _pixel_texture: TextureRect
+var _pixel_info: Label
+var _last_pixel_sample: Dictionary = {}
 var _list: ItemList
 var _catalog_search: LineEdit
 var _catalog_visible: Array[int] = []
@@ -89,6 +102,7 @@ var _results_directory: String = "user://results"
 
 
 func _ready() -> void:
+	_bookmark_entries = InspectionViews.read(_bookmarks_root)
 	_build_ui()
 	_discover()
 	_refresh_sessions()

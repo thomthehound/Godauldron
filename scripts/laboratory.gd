@@ -29,6 +29,7 @@ var _playback_delta_control: SpinBox
 var _sequence_start_control: SpinBox
 var _sequence_frames_control: SpinBox
 var _sequence_directory: String = "user://sequences"
+var _sequence_quality_index: int = -1
 var _controls: Dictionary = {}
 var _active_scene: Node = null
 var _viewport: SubViewport
@@ -609,7 +610,8 @@ func _add_quality_boolean(key: String, label_text: String) -> void:
 
 func _on_quality_selected(index: int) -> void:
 	if _capture_pending:
-		_quality_picker.select(5 if not GraphicsSettings.PROFILES.has(_quality_picker.get_item_text(_quality_picker.selected)) else _quality_picker.selected)
+		if _sequence_quality_index >= 0:
+			_quality_picker.select(_sequence_quality_index)
 		_status.text = "Cannot change graphics during capture"
 		return
 	if index >= GraphicsSettings.PROFILES.size():
@@ -809,6 +811,8 @@ func _export_frame_sequence() -> void:
 		_status.text = "Sequence failed: " + String(began.get("error", "Unknown error"))
 		return
 	_capture_pending = true
+	_sequence_quality_index = _quality_picker.selected
+	_quality_picker.disabled = true
 	_playback.pause()
 	for control in _controls.values():
 		if control is SpinBox:
@@ -853,6 +857,8 @@ func _export_frame_sequence() -> void:
 		_status.text = "Exporting fixed-step frame %d/%d" % [i + 1, frame_count]
 	var result: Dictionary = writer.finish(error)
 	_capture_pending = false
+	_quality_picker.disabled = false
+	_sequence_quality_index = -1
 	for control in _controls.values():
 		if control is SpinBox:
 			(control as SpinBox).editable = true
@@ -862,6 +868,7 @@ func _export_frame_sequence() -> void:
 	_playback_time_control.editable = true
 	_sequence_start_control.editable = true
 	_sequence_frames_control.editable = true
+	_apply_graphics()
 	_playback_accumulator = 0.0
 	_update_playback_ui()
 	if not bool(result.get("ok", false)):

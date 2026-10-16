@@ -35,6 +35,12 @@ light_energy = 0.11
 [node name="FillSoft" parent="." index="4"]
 light_energy = 0.24
 
+[node name="ScalpFill" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-38.0, 140.0, 0)
+light_color = Color(0.92, 0.94, 1.0, 1)
+light_energy = 0.22
+shadow_enabled = false
+
 [node name="Floor" parent="." index="5"]
 visible = false
 

@@ -800,6 +800,9 @@ func _export_frame_sequence() -> void:
 	if not bool(began.get("ok", false)):
 		_status.text = "Sequence failed: " + String(began.get("error", "Unknown error"))
 		return
+	# Changing status text on every frame can reflow the viewport container,
+	# altering actual render resolution during an otherwise fixed-size export.
+	_status.text = "Exporting fixed-step PNG sequence..."
 	_capture_pending = true
 	_sequence_quality_index = _quality_picker.selected
 	_quality_picker.disabled = true
@@ -875,7 +878,6 @@ func _export_frame_sequence() -> void:
 		if not bool(written.get("ok", false)):
 			error = String(written.get("error", "Frame write failed"))
 			break
-		_status.text = "Exporting fixed-step frame %d/%d" % [i + 1, frame_count]
 	var result: Dictionary = writer.finish(error)
 	_capture_pending = false
 	_quality_picker.disabled = false

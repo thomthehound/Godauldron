@@ -76,7 +76,33 @@ func _verify() -> void:
 	if not bool(interrupted.begin(output, "partial", 0, 2, 0.01, {}).get("ok", false)):
 		_fail("Could not start partial sequence")
 		return
-	interrupted.write_frame(pixels, 0)
+	var updated_context: Dictionary = interrupted.update_context({"experiment_id": "org.godauldron.post-setup"})
+	if not bool(updated_context.get("ok", false)):
+		_fail("Cannot persist graphics context after setup")
+		return
+	var first_written: Dictionary = interrupted.write_frame(pixels, 0, {}, {"graphics": {"effective": {"msaa_3d": 0}}})
+	if not bool(first_written.get("ok", false)):
+		_fail("Could not persist initial partial frame: " + str(first_written))
+		return
+	# Read before finish(), modelling a process that terminates abruptly.
+	var persisted: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(String(first_written["image"]).get_base_dir().path_join("sequence.json"))
+	)
+	if typeof(persisted) != TYPE_DICTIONARY or persisted.get("status") != "incomplete" or \
+			int(persisted.get("written_frames", -1)) != 1 or \
+			persisted["frames"].size() != 1 or \
+			persisted.get("experiment_id") != "org.godauldron.post-setup":
+		_fail("Crash-recovery manifest does not reflect committed frame progress")
+		return
+	if bool(interrupted.update_context({}).get("ok", true)):
+		_fail("Sequence context changed after a frame was committed")
+		return
+	var partial_sidecar: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(String(first_written["metadata"]))
+	)
+	if int(partial_sidecar.get("graphics", {}).get("effective", {}).get("msaa_3d", -1)) != 0:
+		_fail("Per-frame graphics provenance was not saved")
+		return
 	var partial: Dictionary = interrupted.finish("scene changed")
 	var partial_manifest: Variant = JSON.parse_string(
 		FileAccess.get_file_as_string(String(partial["manifest"]))

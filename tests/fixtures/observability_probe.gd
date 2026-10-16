@@ -2,6 +2,7 @@ extends Node
 ## Independent synthetic provider exercising lifecycle and resolved timing format.
 
 var _steps: int = 0
+var timing_calls: int = 0
 
 
 func godauldron_setup(_params: Dictionary) -> void:
@@ -13,6 +14,7 @@ func godauldron_step(_delta: float) -> void:
 
 
 func godauldron_resolved_gpu_timings() -> Dictionary:
+	timing_calls += 1
 	return {
 		"status": "resolved", "phase": "sample",
 		"synchronization": "completed",

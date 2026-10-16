@@ -14,6 +14,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Technical-scene gallery with named scene selections, bundled glTF 2.0 mesh specimen and Godot material study; imported scenes share the existing inspector and run contract.
 - Host graphics presets (Low, Medium, High, Ultra, Showcase), expandable per-setting controls with experiment ownership, and viewport PNG captures with adjacent provenance metadata.
 - Saved-capture comparison window with side-by-side images, magnification, RGB difference maps, channel-error statistics and warnings for mismatched experiment/camera/graphics settings.
+- Bounded fixed-step PNG frame-sequence export from interactive playback with numbered frames, sidecars and sequence provenance; never included in benchmark timings.
 - Drop-in native experiment package preflight for external GDExtensions, plus reusable, editable showcase stages, generic fixed-step translation/rotation motion and an optional real CC0 MakeHuman reference portrait.
 - Searchable experiment catalog and named, validated user configuration snapshots for experiment parameters, graphics controls, camera, overlays, playback delta and run step counts.
 - A deterministic animated-geometry reference fixture.
@@ -66,6 +67,8 @@ The host's Reset, Play/Pause, Step, fixed Δt, and timeline controls support rep
 Use **Compare images…** in the viewport toolbar to inspect two saved PNG captures side by side, zoom in, and view an amplified RGB difference image with numerical channel errors and separate alpha-change highlighting. Large-image decoding, comparisons and exports run in a low-priority worker; the viewer uses bounded-size preview textures while metrics and saved results remain full resolution. The laboratory blocks timed runs until pending analysis is finished. Comparison checks the capture metadata and warns when the camera, experiment or graphics conditions differ; images of different sizes are shown but not silently aligned. A difference PNG and its source metadata can be saved under `user://comparisons`. See [Visual comparisons](docs/VISUAL_COMPARISON.md).
 
 The viewport toolbar has **Graphics** presets (Low, Medium, High, Ultra, Showcase) and an **Advanced…** panel for the currently implemented per-viewport settings. An experiment can reserve specific graphics properties so the host cannot overwrite what it is testing. **Capture PNG** saves the rendered experiment viewport—without the surrounding laboratory UI—to `user://captures` with a JSON metadata file recording the scene, settings, camera and engine version. Observation-only provider capture metadata stays separate from benchmark metrics, and runs cannot begin during pending frame readback.
+
+For animation inspection, select a start step and frame count in the playback area and choose **Export PNG frames**. Results are written to `user://sequences`, each with a time-indexed metadata sidecar and sequence summary; see [Fixed-step frame sequences](docs/FRAME_SEQUENCES.md).
 
 Showcase is deliberately expensive and is not a performance baseline. Capturing while a benchmark is active cancels and preserves that run first, avoiding readback/encoding contamination. See [Graphics and capture design](docs/GRAPHICS_AND_CAPTURE.md) for supported controls, ownership, limitations and the video/visual comparison roadmap.
 

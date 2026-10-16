@@ -14,7 +14,7 @@ func godauldron_step(_delta: float) -> void:
 
 func godauldron_resolved_gpu_timings() -> Dictionary:
 	return {
-		"status": "resolved",
+		"status": "resolved", "phase": "sample",
 		"synchronization": "completed",
 		"unit": "microseconds",
 		"measurement_source": "device_timestamp",

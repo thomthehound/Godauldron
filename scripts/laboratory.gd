@@ -324,6 +324,41 @@ func _build_ui() -> void:
 	_inspection_bounds_toggle.text = "Bounds"
 	_inspection_bounds_toggle.toggled.connect(_toggle_inspection_bounds)
 	toolbar.add_child(_inspection_bounds_toggle)
+	var camera_row := HBoxContainer.new()
+	viewer.add_child(camera_row)
+	var camera_label := Label.new()
+	camera_label.text = "Scene camera"
+	camera_row.add_child(camera_label)
+	_camera_picker = OptionButton.new()
+	_camera_picker.custom_minimum_size = Vector2(180, 0)
+	_camera_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_camera_picker.item_selected.connect(_choose_scene_camera)
+	camera_row.add_child(_camera_picker)
+	_bookmark_name = LineEdit.new()
+	_bookmark_name.placeholder_text = "View name"
+	_bookmark_name.custom_minimum_size = Vector2(105, 0)
+	camera_row.add_child(_bookmark_name)
+	var save_view := Button.new()
+	save_view.text = "Save view"
+	save_view.pressed.connect(_save_inspection_view)
+	camera_row.add_child(save_view)
+	var bookmark_row := HBoxContainer.new()
+	viewer.add_child(bookmark_row)
+	_bookmark_picker = OptionButton.new()
+	_bookmark_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bookmark_row.add_child(_bookmark_picker)
+	var restore_view := Button.new()
+	restore_view.text = "Restore view"
+	restore_view.pressed.connect(_restore_inspection_view)
+	bookmark_row.add_child(restore_view)
+	var delete_view := Button.new()
+	delete_view.text = "Delete view"
+	delete_view.pressed.connect(_delete_inspection_view)
+	bookmark_row.add_child(delete_view)
+	_pixel_toggle = CheckButton.new()
+	_pixel_toggle.text = "Inspect pixel"
+	_pixel_toggle.tooltip_text = "One-shot viewport readback on next left-click, outside measured runs"
+	bookmark_row.add_child(_pixel_toggle)
 	var quality_label := Label.new()
 	quality_label.text = "Graphics"
 	toolbar.add_child(quality_label)
@@ -370,6 +405,19 @@ func _build_ui() -> void:
 	_viewport_container.gui_input.connect(_on_inspection_input)
 	viewer.add_child(_viewport_container)
 	_viewport_container.add_child(_viewport)
+	_pixel_panel = HBoxContainer.new()
+	_pixel_panel.visible = false
+	viewer.add_child(_pixel_panel)
+	_pixel_texture = TextureRect.new()
+	_pixel_texture.custom_minimum_size = Vector2(156, 156)
+	_pixel_texture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_pixel_texture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_pixel_texture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_pixel_panel.add_child(_pixel_texture)
+	_pixel_info = Label.new()
+	_pixel_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pixel_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pixel_panel.add_child(_pixel_info)
 	_inspection_overlay = InspectionOverlay.new()
 	_inspection_overlay.name = "InspectionOverlay"
 	_viewport.add_child(_inspection_overlay)

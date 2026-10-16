@@ -27,6 +27,10 @@ func _verify() -> void:
 	camera.position = Vector3(3, 4, 7)
 	camera.fov = 51.0
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
+	camera.frustum_offset = Vector2(0.05, -0.1)
+	camera.h_offset = 0.13
+	camera.v_offset = -0.09
+	camera.cull_mask = 1023
 	var other := Camera3D.new()
 	other.name = "Profile"
 	inner.add_child(other)
@@ -50,11 +54,18 @@ func _verify() -> void:
 	inspector.orbit(Vector2(50, 30))
 	camera.fov = 77.0
 	camera.keep_aspect = Camera3D.KEEP_HEIGHT
+	camera.frustum_offset = Vector2.ZERO
+	camera.h_offset = 0.0
+	camera.v_offset = 0.0
+	camera.cull_mask = 1
 	if not inspector.restore(captured) or \
 			not camera.global_transform.is_equal_approx(expected) or \
 			not expected_target.is_equal_approx(inspector.target) or \
 			absf(camera.fov - 51.0) > 0.00001 or \
-			camera.keep_aspect != Camera3D.KEEP_WIDTH:
+			camera.keep_aspect != Camera3D.KEEP_WIDTH or \
+			not camera.frustum_offset.is_equal_approx(Vector2(0.05, -0.1)) or \
+			absf(camera.h_offset - 0.13) > 0.00001 or \
+			absf(camera.v_offset + 0.09) > 0.00001 or camera.cull_mask != 1023:
 		_fail("Restoring bookmark did not recover exact camera optics and orbit")
 		return
 	var entry: Dictionary = {

@@ -161,6 +161,21 @@ func _verify() -> void:
 	observability.observe_frame_tick(116000)
 	var experiments: Array = host.get("_experiments")
 	var initial_index: int = int(host.get("_selected_experiment_index"))
+	# Rejected native preflight does not replace the active scene and must
+	# preserve its last valid result rather than clearing it prematurely.
+	var invalid_native: Dictionary = experiments[initial_index].duplicate(true)
+	invalid_native["id"] = "org.godauldron.missing-native-observability-test"
+	invalid_native["native_extensions"] = ["res://missing-observability-test.gdextension"]
+	var rejected_index: int = experiments.size()
+	experiments.append(invalid_native)
+	host.set("_experiments", experiments)
+	host.call("_select_experiment", rejected_index)
+	if int(host.get("_selected_experiment_index")) != initial_index or \
+			host.get("_active_scene") != delayed or \
+			not gpu_label.text.contains("simulated_dispatch") or \
+			observability.live_snapshot()["sample_callback"]["count"] != 1:
+		_fail("Failed native preflight erased the current experiment's observations")
+		return
 	var next_index: int = -1
 	for i in range(experiments.size()):
 		if i != initial_index:

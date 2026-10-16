@@ -1451,7 +1451,8 @@ func _stop_run() -> void:
 func _process(delta: float) -> void:
 	var now_usec: int = Time.get_ticks_usec()
 	var analysis_active: bool = _comparison_window != null and bool(_comparison_window.call("analysis_busy"))
-	_observability.observe_frame_tick(now_usec, _capture_pending or analysis_active)
+	var exclude: bool = _capture_pending or analysis_active
+	_observability.observe_frame_tick(now_usec, exclude)
 	if _last_observability_ui_tick < 0 or now_usec - _last_observability_ui_tick > 250000:
 		_last_observability_ui_tick = now_usec
 		_update_observability_ui()
@@ -1468,16 +1469,20 @@ func _process(delta: float) -> void:
 				frames += 1
 			if frames > 0:
 				_update_playback_ui()
+		_observability.observe_orchestration(float(Time.get_ticks_usec() - now_usec), exclude)
 		return
 	_accumulator += minf(delta, 0.25)
+	var callback_usec_in_frame: int = 0
 	var steps_this_frame := 0
 	while _accumulator >= FIXED_STEP and steps_this_frame < MAX_STEPS_PER_FRAME and _has_active_run():
 		_run.advance()
 		_observability.observe_callback(float(_run.last_step_cpu_usec), _run.last_step_phase)
+		callback_usec_in_frame += _run.last_step_cpu_usec
 		_accumulator -= FIXED_STEP
 		steps_this_frame += 1
 	if steps_this_frame > 0:
 		_update_telemetry()
+	_observability.observe_orchestration(maxf(0.0, float(Time.get_ticks_usec() - now_usec - callback_usec_in_frame)), exclude)
 	if _run != null and _run.phase == ExperimentRun.Phase.COMPLETED:
 		_finish_run(true)
 
@@ -1488,6 +1493,7 @@ func _update_observability_ui() -> void:
 	var snapshot: Dictionary = _observability.live_snapshot()
 	var frames: Dictionary = snapshot["frame_interval"]
 	var callback: Dictionary = snapshot["sample_callback"]
+	var orchestration: Dictionary = snapshot["host_orchestration"]
 	var frame_text: String = "warming up"
 	if int(frames["count"]) > 0:
 		frame_text = "p50 %.2f / p95 %.2f / p99 %.2f ms" % [
@@ -1500,8 +1506,13 @@ func _update_observability_ui() -> void:
 			float(callback["p50_usec"]) / 1000.0, float(callback["p95_usec"]) / 1000.0,
 			float(callback["p99_usec"]) / 1000.0
 		]
-	_observability_label.text = "Host _process intervals: %s\nStep callback CPU wall: %s | warmup %d | excluded frames %d" % [
-		frame_text, callback_text, int(snapshot["warmup_callback_total"]), int(snapshot["excluded_frame_intervals"])
+	var orchestration_text: String = "no samples"
+	if int(orchestration["count"]) > 0:
+		orchestration_text = "p50 %.3f / p95 %.3f ms" % [
+			float(orchestration["p50_usec"]) / 1000.0, float(orchestration["p95_usec"]) / 1000.0
+		]
+	_observability_label.text = "Host _process intervals: %s\nHost orchestration (excl callbacks): %s\nStep callback CPU wall: %s | warmup %d | excluded frames %d" % [
+		frame_text, orchestration_text, callback_text, int(snapshot["warmup_callback_total"]), int(snapshot["excluded_frame_intervals"])
 	]
 	_observability_plot.call("update_samples", snapshot["frame_intervals_usec"], snapshot["sample_callbacks_usec"])
 

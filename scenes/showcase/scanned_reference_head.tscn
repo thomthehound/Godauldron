@@ -1,14 +1,12 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/showcase/portrait_stage.tscn" id="1"]
 [ext_resource type="PackedScene" path="res://assets/showcase/lee_perry_smith.glb" id="2"]
-[ext_resource type="Texture2D" path="res://assets/showcase/lee_perry_smith_color.jpg" id="3"]
-[ext_resource type="Texture2D" path="res://assets/showcase/lee_perry_smith_normal.jpg" id="4"]
 [ext_resource type="Script" path="res://scripts/scanned_reference_surface.gd" id="5"]
 
 [sub_resource type="Environment" id="reference_environment"]
 background_mode = 1
-background_color = Color(0.31, 0.33, 0.36, 1)
+background_color = Color(0.36, 0.40, 0.44, 1)
 ambient_light_source = 2
 ambient_light_color = Color(0.88, 0.90, 0.93, 1)
 ambient_light_energy = 0.36
@@ -22,12 +20,12 @@ translation_amplitude_m = 0.09
 environment = SubResource("reference_environment")
 
 [node name="StageCamera" parent="." index="1"]
-position = Vector3(0.08, 1.58, 0.48)
-rotation_degrees = Vector3(-3.6, 9.5, 0)
+position = Vector3(0.05, 1.59, 0.40)
+rotation_degrees = Vector3(-4.0, 7.2, 0)
 fov = 38.0
 
 [node name="KeySoft" parent="." index="2"]
-light_energy = 0.24
+light_energy = 0.4
 shadow_opacity = 0.5
 shadow_blur = 1.3
 
@@ -35,7 +33,7 @@ shadow_blur = 1.3
 light_energy = 0.11
 
 [node name="FillSoft" parent="." index="4"]
-light_energy = 0.15
+light_energy = 0.24
 
 [node name="Floor" parent="." index="5"]
 visible = false
@@ -49,7 +47,5 @@ visible = false
 [node name="ScannedHeadMount" type="Node3D" parent="SubjectMotion/SubjectAnchor" index="0"]
 script = ExtResource("5")
 scale = Vector3(0.03, 0.03, 0.03)
-color_texture = ExtResource("3")
-normal_texture = ExtResource("4")
 
 [node name="ScannedHead" parent="SubjectMotion/SubjectAnchor/ScannedHeadMount" index="0" instance=ExtResource("2")]

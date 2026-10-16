@@ -4,7 +4,7 @@ Godauldron provides three independent host-side observations and an optional pro
 
 ## Live laboratory telemetry
 
-The small rolling plot shows the **interval between successive host `_process` entries** (blue) and the **CPU wall time spent inside `godauldron_step`** during measured steps (amber). The adjacent text reports rolling p50/p95/p99 values. The rolling window holds the most recent 240 observations per series. A gray guide in the plot marks 16.67 ms (60 Hz), but is not a performance pass/fail threshold.
+The small rolling plot shows the **interval between successive host `_process` entries** (blue, upper band) and the **CPU wall time spent inside `godauldron_step`** during measured steps (amber, lower band). These are separate sample-index axes and have independent vertical scales; they do not imply that a callback corresponds to a particular displayed frame. The adjacent text reports rolling p50/p95/p99 values. The rolling window holds the most recent 240 observations per series. A gray guide in the plot marks 16.67 ms (60 Hz), but is not a performance pass/fail threshold.
 
 The text also reports the **host `_process` remainder after timed step callbacks**, measured by the monotonic clock around the callback dispatch loop. This remainder covers local orchestration and reporting work inside that method; it is **not** whole-process CPU utilization, GPU time, or all of Godot's rendering/main-thread work. Its p50/p95 is displayed separately. The main-thread scheduling/presentation interval is not CPU busy time.
 

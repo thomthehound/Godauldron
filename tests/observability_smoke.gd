@@ -118,5 +118,64 @@ func _verify() -> void:
 			int(scene.get("timing_calls")) != 1:
 		_fail("Cancelled benchmark queried or accepted completed device timing")
 		return
+	# Host regression: an expensive provider timing query is finalization,
+	# not routine per-frame overhead. Switching experiments must clear the
+	# previous experiment's declared GPU percentiles and rolling counters.
+	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	root.add_child(host)
+	var vp: SubViewport = host.get("_viewport")
+	var original: Node = host.get("_active_scene")
+	vp.remove_child(original)
+	original.queue_free()
+	var delayed: Node = preload("res://tests/fixtures/observability_probe.gd").new()
+	delayed.set("delayed_resolution", true)
+	vp.add_child(delayed)
+	host.set("_active_scene", delayed)
+	var result_dir: String = "user://observability-lifecycle-%d" % OS.get_process_id()
+	host.set("_results_directory", result_dir)
+	var measured_run = Runner.new()
+	measured_run.begin(delayed, {}, 0, 1, 1.0 / 60.0)
+	measured_run.advance()
+	host.set("_run", measured_run)
+	host.call("_finish_run", true)
+	var gpu_label: Label = host.get("_provider_timing_label")
+	if not gpu_label.text.contains("simulated_dispatch"):
+		_fail("Provider timing was not displayed after a completed run")
+		return
+	var reports: PackedStringArray = DirAccess.get_files_at(result_dir)
+	if reports.size() != 1:
+		_fail("Exactly one lifecycle report was not persisted")
+		return
+	var saved: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(result_dir.path_join(reports[0]))
+	)
+	if typeof(saved) != TYPE_DICTIONARY or \
+			int(saved.get("report_preparation_host_wall_usec", -1)) < 10000 or \
+			not String(saved.get("report_preparation_boundary", "")).contains("provider timing") or \
+			not saved.get("provider_gpu_timing", {}).get("available", false):
+		_fail("Report preparation omitted the synchronous provider resolution cost")
+		return
+	var observability = host.get("_observability")
+	observability.observe_callback(40.0, "sample")
+	observability.observe_frame_tick(100000)
+	observability.observe_frame_tick(116000)
+	var experiments: Array = host.get("_experiments")
+	var initial_index: int = int(host.get("_selected_experiment_index"))
+	var next_index: int = -1
+	for i in range(experiments.size()):
+		if i != initial_index:
+			next_index = i
+			break
+	if next_index < 0:
+		_fail("No alternative experiment available for lifecycle regression")
+		return
+	host.call("_select_experiment", next_index)
+	if int(host.get("_selected_experiment_index")) != next_index or \
+			gpu_label.text.contains("simulated_dispatch") or \
+			not gpu_label.text.contains("unavailable") or \
+			observability.live_snapshot()["sample_callback"]["count"] != 0 or \
+			observability.live_snapshot()["frame_interval"]["count"] != 0:
+		_fail("Experiment switch retained stale provider timing or host observations")
+		return
 	print("Godauldron observability smoke passed: percentiles, exclusions, provenance, and lifecycle")
 	quit(0)

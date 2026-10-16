@@ -868,7 +868,6 @@ func _export_frame_sequence() -> void:
 	# Context that may be changed by setup is recorded after playback reset.
 	var metadata: Dictionary = {
 		"experiment_id": String(_manifest.get("id", "")),
-		"scene_camera_path": _active_scene_camera_path(),
 		"parameters": parameters.duplicate(true),
 		"visualization_path": NativeExperimentPackage.display_path(_manifest),
 		"inspection": {"grid_overlay": _inspection_grid_enabled, "bounds_overlay": _inspection_bounds_enabled},
@@ -939,6 +938,9 @@ func _export_frame_sequence() -> void:
 			error = "No rendered frame available"
 			break
 		if i == 0:
+			# Bind provenance to the first actually rendered frame. Setup may
+			# replace or activate a different scene camera.
+			metadata["scene_camera_path"] = _active_scene_camera_path()
 			# UI layout can complete after setup; use actual captured dimensions.
 			metadata["viewport_size"] = [rendered.get_width(), rendered.get_height()]
 			var context_result: Dictionary = writer.update_context(metadata)
@@ -1176,7 +1178,7 @@ func _active_scene_camera_path() -> String:
 	if _active_scene == null or _viewport == null:
 		return ""
 	var camera: Camera3D = _viewport.get_camera_3d()
-	if camera == null or not _active_scene.is_ancestor_of(camera):
+	if camera == null or (camera != _active_scene and not _active_scene.is_ancestor_of(camera)):
 		return ""
 	return String(_active_scene.get_path_to(camera))
 

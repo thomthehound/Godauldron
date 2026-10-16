@@ -778,21 +778,12 @@ func _export_frame_sequence() -> void:
 		return
 	var source_scene: Node = _active_scene
 	var parameters: Dictionary = _collect_parameters()
-	var camera: Camera3D = _viewport.get_camera_3d()
-	var camera_state := {}
-	if camera != null:
-		camera_state = {
-			"position": [camera.global_position.x, camera.global_position.y, camera.global_position.z],
-			"rotation_degrees": [camera.global_rotation_degrees.x, camera.global_rotation_degrees.y, camera.global_rotation_degrees.z],
-			"projection": camera.projection, "fov": camera.fov
-		}
+	# Context that may be changed by setup is recorded after playback reset.
 	var metadata: Dictionary = {
 		"experiment_id": String(_manifest.get("id", "")),
 		"parameters": parameters.duplicate(true),
 		"visualization_path": NativeExperimentPackage.display_path(_manifest),
-		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
-		"camera_at_start": camera_state,
-		"viewport_size": [_viewport.size.x, _viewport.size.y],
+ 		"viewport_size": [_viewport.size.x, _viewport.size.y],
 		"inspection": {"grid_overlay": _inspection_grid_enabled, "bounds_overlay": _inspection_bounds_enabled},
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
@@ -827,6 +818,21 @@ func _export_frame_sequence() -> void:
 	var error: String = ""
 	if not _playback.reset() or not _playback.seek(first_step):
 		error = "Unable to reset/seek experiment playback"
+	else:
+		# Setup may mutate graphics and its ownership contract. Reconcile
+		# host-controlled settings before collecting the rendered baseline.
+		_apply_graphics()
+		metadata["graphics"] = GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest))
+		var camera_after_setup: Camera3D = _viewport.get_camera_3d()
+		if camera_after_setup != null:
+			metadata["camera_at_start"] = {
+				"position": [camera_after_setup.global_position.x, camera_after_setup.global_position.y, camera_after_setup.global_position.z],
+				"rotation_degrees": [camera_after_setup.global_rotation_degrees.x, camera_after_setup.global_rotation_degrees.y, camera_after_setup.global_rotation_degrees.z],
+				"projection": camera_after_setup.projection, "fov": camera_after_setup.fov
+			}
+		var context_result: Dictionary = writer.update_context(metadata)
+		if not bool(context_result.get("ok", false)):
+			error = String(context_result.get("error", "Cannot persist capture context"))
 	for i in range(frame_count):
 		if not error.is_empty():
 			break
@@ -850,7 +856,11 @@ func _export_frame_sequence() -> void:
 			observed["camera_rotation_degrees"] = [
 				active_camera.global_rotation_degrees.x, active_camera.global_rotation_degrees.y, active_camera.global_rotation_degrees.z
 			]
-		var written: Dictionary = writer.write_frame(texture.get_image(), i, observed)
+		# Per-frame state can vary when the provider updates its renderer.
+		var frame_context: Dictionary = {
+			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest))
+		}
+		var written: Dictionary = writer.write_frame(texture.get_image(), i, observed, frame_context)
 		if not bool(written.get("ok", false)):
 			error = String(written.get("error", "Frame write failed"))
 			break

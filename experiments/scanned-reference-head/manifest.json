@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.scanned-reference-head",
+  "display_name": "Showcase / Scanned Reference Head (CC BY 3.0)",
+  "category": "Reusable stage templates",
+  "description": "Lee Perry-Smith photogrammetry head for hair silhouette and scalp inspection; attributed CC BY 3.0. No native hair or physics simulation; scale and landmarks require calibration.",
+  "entry_scene": "res://scenes/showcase/scanned_reference_head.tscn",
+  "visualization_path": "godot_scene",
+  "parameters": [
+    {
+      "id": "motion",
+      "label": "Subject anchor motion",
+      "type": "choice",
+      "default": "still",
+      "options": [
+        {
+          "value": "still",
+          "label": "Stationary"
+        },
+        {
+          "value": "turn",
+          "label": "Turn"
+        },
+        {
+          "value": "nod",
+          "label": "Nod"
+        },
+        {
+          "value": "translate",
+          "label": "Translate (side to side)"
+        }
+      ]
+    },
+    {
+      "id": "show_placeholder",
+      "label": "Show primitive integration placeholder",
+      "type": "bool",
+      "default": false
+    },
+    {
+      "id": "background",
+      "label": "Backdrop",
+      "type": "choice",
+      "default": "as_authored",
+      "options": [
+        {
+          "value": "as_authored",
+          "label": "As authored in scene"
+        },
+        {
+          "value": "slate",
+          "label": "Dark slate"
+        },
+        {
+          "value": "light",
+          "label": "Light neutral"
+        },
+        {
+          "value": "warm",
+          "label": "Warm contrast"
+        }
+      ]
+    }
+  ]
+}

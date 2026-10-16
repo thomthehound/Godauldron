@@ -841,6 +841,7 @@ func _capture_screenshot() -> void:
 		"playback": _playback.snapshot(),
 		"parameters": _collect_parameters(),
 		"parameter_source": "current_controls_or_preview",
+		"render_diagnostic": _diagnostic_provenance(),
 		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest)),
 		"inspection": {
 			"grid_overlay": _inspection_grid_enabled,
@@ -905,7 +906,8 @@ func _export_frame_sequence() -> void:
 		"inspection": {"grid_overlay": _inspection_grid_enabled, "bounds_overlay": _inspection_bounds_enabled},
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
-		"capture_is_not_a_benchmark": true
+		"capture_is_not_a_benchmark": true,
+		"render_diagnostic": _diagnostic_provenance()
 	}
 	_capture_sequence += 1
 	var stem: String = "sequence_%s_p%d_%d" % [
@@ -995,6 +997,7 @@ func _export_frame_sequence() -> void:
 		# Per-frame state can vary when the provider updates its renderer.
 		var frame_context: Dictionary = {
 			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
+			"render_diagnostic": _diagnostic_provenance(),
 			"scene_camera_path": _active_scene_camera_path()
 		}
 		var written: Dictionary = writer.write_frame(rendered, i, observed, frame_context)
@@ -1108,8 +1111,13 @@ func _select_experiment(index: int) -> void:
 	_last_campaign_report_path = ""
 	_last_campaign_summary.clear()
 	_inspector_drag = 0
+	_fly_pressed.clear()
 	_camera_inspector = null
 	_camera_manipulated = false
+	_diagnostic_key = "lit"
+	if _viewport != null:
+		_viewport.debug_draw = Viewport.DEBUG_DRAW_DISABLED
+	_diagnostic_picker.select(0)
 	_pixel_panel.visible = false
 	_last_pixel_sample.clear()
 	_pixel_toggle.button_pressed = false
@@ -1268,6 +1276,8 @@ func _choose_scene_camera(index: int) -> void:
 		_status.text = "The selected scene camera is unavailable"
 		return
 	camera.current = true
+	_fly_pressed.clear()
+	_inspector_drag = 0
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	_camera_manipulated = false
@@ -1409,6 +1419,7 @@ func _inspect_rendered_pixel(local_point: Vector2) -> void:
 	_last_pixel_sample = {
 		"experiment_id": String(_manifest.get("id", "")),
 		"scene_camera_path": _active_scene_camera_path(),
+		"render_diagnostic": _diagnostic_provenance(),
 		"pixel": [position.x, position.y],
 		"rgba8": rgba.duplicate(),
 		"render_size": [rendered.get_width(), rendered.get_height()]
@@ -1623,6 +1634,9 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	if _diagnostic_key != "lit":
+		_status.text = "Switch Render view to Lit before measuring a campaign"
+		return
 	if _capture_pending:
 		_status.text = "Capture in progress; campaign cannot start yet"
 		return
@@ -1804,6 +1818,9 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	if _diagnostic_key != "lit":
+		_status.text = "Switch Render view to Lit before measuring a benchmark"
+		return
 	if _capture_pending:
 		_status.text = "Capture in progress; experiment cannot start yet"
 		return
@@ -1841,6 +1858,7 @@ func _stop_run() -> void:
 
 
 func _process(delta: float) -> void:
+	_fly_tick(delta)
 	var now_usec: int = Time.get_ticks_usec()
 	var analysis_active: bool = _comparison_window != null and bool(_comparison_window.call("analysis_busy"))
 	var exclude: bool = _capture_pending or analysis_active

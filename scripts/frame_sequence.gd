@@ -45,11 +45,20 @@ func begin(root: String, stem: String, start_step: int, count: int,
 	return {"ok": true, "directory": _directory}
 
 
-func write_frame(image: Image, index: int, observed: Dictionary = {}) -> Dictionary:
+func update_context(metadata: Dictionary) -> Dictionary:
+	if not _active or not _frames.is_empty():
+		return {"ok": false, "error": "Sequence context can only change before frame capture"}
+	_base = metadata.duplicate(true)
+	return _write_summary("incomplete", "")
+
+
+func write_frame(image: Image, index: int, observed: Dictionary = {},
+		frame_context: Dictionary = {}) -> Dictionary:
 	if not _active or index != _frames.size() or index >= _expected_frames:
 		return {"ok": false, "error": "Frame index is not the next requested frame"}
 	var step: int = _start_step + index
 	var record: Dictionary = _base.duplicate(true)
+	record.merge(frame_context.duplicate(true), true)
 	record["sequence_frame_index"] = index
 	record["timeline_step_index"] = step
 	record["timeline_seconds"] = float(step) * _step_seconds
@@ -69,6 +78,11 @@ func write_frame(image: Image, index: int, observed: Dictionary = {}) -> Diction
 		"image_filename": stem + ".png",
 		"metadata_filename": stem + ".json"
 	})
+	# The manifest is a crash-recovery record: every completed frame is
+	# recorded before another render frame can begin.
+	var progress: Dictionary = _write_summary("incomplete", "")
+	if not bool(progress.get("ok", false)):
+		return progress
 	return written
 
 
@@ -94,13 +108,19 @@ func _write_summary(status: String, error: String) -> Dictionary:
 	record["frames"] = _frames.duplicate(true)
 	record["measurement"] = "none"
 	var path: String = _directory.path_join("sequence.json")
-	var out: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	var staging_path: String = _directory.path_join("sequence.json.tmp")
+	var out: FileAccess = FileAccess.open(staging_path, FileAccess.WRITE)
 	if out == null:
-		return {"ok": false, "error": "Cannot write sequence manifest"}
+		return {"ok": false, "error": "Cannot stage sequence manifest"}
 	out.store_string(JSON.stringify(record, "\t") + "\n")
 	out.flush()
 	var write_error: Error = out.get_error()
 	out.close()
 	if write_error != OK:
 		return {"ok": false, "error": "Sequence manifest write failed"}
+	# Replace the completed manifest only after the new JSON is closed.
+	# A mid-write interruption leaves the last valid sequence.json in place.
+	var replace_error: Error = DirAccess.rename_absolute(staging_path, path)
+	if replace_error != OK:
+		return {"ok": false, "error": "Sequence manifest replacement failed: %d" % int(replace_error)}
 	return {"ok": true, "manifest": path, "directory": _directory, "status": status, "frames": _frames.size()}

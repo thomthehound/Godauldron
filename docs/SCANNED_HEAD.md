@@ -25,4 +25,4 @@ The scene inherits Godauldron's ordinary camera/light stage and deterministic, a
 
 ## Visual acceptance
 
-The graphics-backed `portrait-visual-capture` CI job renders still and translated images from both subjects. Assess frontal and angled silhouette, visible scalp area, texture/material quality, lighting, motion framing, and eventual groom/root correspondence using real screenshots. Do not substitute glTF import success or image generation for this review.
+The graphics-backed `portrait-visual-capture` CI job renders still and translated images from both subjects, plus profile and rear views of the scanned head. Assess frontal and angled silhouette, visible scalp area, texture/material quality, lighting, motion framing, and eventual groom/root correspondence using real screenshots. Do not substitute glTF import success or image generation for this review.

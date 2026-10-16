@@ -65,6 +65,8 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/analysis_smoke.gd
       - name: Verify camera navigation and inspection overlays
         run: .engine/godot --headless --path . --script res://tests/inspection_smoke.gd
+      - name: Verify free-fly camera and capability-aware render diagnostics
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/free_fly_diagnostics_smoke.gd
       - name: Verify scene camera bookmarks and pixel mapping
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/inspection_views_smoke.gd
       - name: Verify technical gallery imports, previews, and report isolation

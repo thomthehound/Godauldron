@@ -117,6 +117,9 @@ func _verify() -> void:
 	var probe_manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(probe_path.path_join("sequence.json")))
 	if typeof(probe_manifest) != TYPE_DICTIONARY or \
 			probe_manifest.get("scene_camera_path", "") != "PostSetupCamera" or \
+			probe_manifest.get("render_diagnostic_basis", "") != "first_captured_frame" or \
+			int(probe_manifest.get("render_diagnostic", {}).get("effective_viewport_debug_draw", -1)) != Viewport.DEBUG_DRAW_UNSHADED or \
+			bool(probe_manifest.get("render_diagnostic", {}).get("matches_host_selection", true)) or \
 			int(probe_manifest.get("graphics", {}).get("effective", {}).get("msaa_3d", -1)) != Viewport.MSAA_DISABLED or \
 			absf(float(probe_manifest.get("graphics", {}).get("effective", {}).get("scaling_3d_scale", 0.0)) - 1.0) > 0.001 or \
 			not probe_manifest.get("graphics", {}).get("experiment_owned", []).has("msaa_3d"):
@@ -129,6 +132,7 @@ func _verify() -> void:
 		var expected_msaa: int = Viewport.MSAA_DISABLED if i == 0 else Viewport.MSAA_2X
 		if typeof(probe_sidecar) != TYPE_DICTIONARY or \
 				probe_sidecar.get("scene_camera_path", "") != "PostSetupCamera" or \
+				int(probe_sidecar.get("render_diagnostic", {}).get("effective_viewport_debug_draw", -1)) != Viewport.DEBUG_DRAW_UNSHADED or \
 				int(probe_sidecar.get("graphics", {}).get("effective", {}).get("msaa_3d", -1)) != expected_msaa:
 			_fail("Per-frame graphics metadata does not reflect provider changes")
 			return

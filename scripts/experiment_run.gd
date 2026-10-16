@@ -18,6 +18,7 @@ var sample_cpu_usec_total: int = 0
 var last_step_cpu_usec: int = 0
 var last_step_phase: String = ""
 var host_observations: Dictionary = {}
+var _invalid_reason: String = ""
 
 var _scene: Node = null
 var _parameters: Dictionary = {}
@@ -98,6 +99,14 @@ func cancel() -> void:
 		phase = Phase.CANCELLED
 
 
+func invalidate_unreported_completion(reason: String) -> void:
+	# A provider can invalidate the final callback after advance() transitions
+	# into COMPLETED but before the result is finalized/persisted.
+	if phase == Phase.COMPLETED or is_active():
+		phase = Phase.CANCELLED
+		_invalid_reason = reason
+
+
 func make_report(experiment_id: String) -> Dictionary:
 	assert(phase == Phase.COMPLETED or phase == Phase.CANCELLED)
 	var metrics := {}
@@ -130,6 +139,7 @@ func make_report(experiment_id: String) -> Dictionary:
 		"host_step_cpu_wall_usec_mean": float(sample_cpu_usec_total) / float(maxi(1, sample_steps_completed)),
 		"experiment_metrics": metrics,
 		"host_observability": host_observations.duplicate(true),
+		"invalid_reason": _invalid_reason,
 		"provider_gpu_timing": gpu_timing,
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),

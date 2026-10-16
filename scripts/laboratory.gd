@@ -12,6 +12,7 @@ const InspectionCamera = preload("res://scripts/inspection_camera.gd")
 const InspectionViews = preload("res://scripts/inspection_views.gd")
 const PixelInspector = preload("res://scripts/pixel_inspector.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
+const RenderDiagnostics = preload("res://scripts/render_diagnostics.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
 const FrameSequence = preload("res://scripts/frame_sequence.gd")
@@ -57,6 +58,13 @@ var _inspection_bounds_toggle: CheckButton
 var _inspection_bounds_enabled: bool = false
 var _inspector_drag: int = 0
 var _camera_manipulated: bool = false
+var _navigation_picker: OptionButton
+var _fly_mode: bool = false
+var _fly_pressed: Dictionary = {}
+var _fly_speed_control: SpinBox
+var _diagnostic_picker: OptionButton
+var _diagnostic_key: String = "lit"
+var _rendering_method: String = ""
 var _camera_picker: OptionButton
 var _camera_paths: Array[String] = []
 var _bookmark_picker: OptionButton
@@ -316,6 +324,28 @@ func _build_ui() -> void:
 	reset_button.text = "Reset camera"
 	reset_button.pressed.connect(_reset_inspection)
 	toolbar.add_child(reset_button)
+	var navigation_row := HBoxContainer.new()
+	viewer.add_child(navigation_row)
+	var navigation_label := Label.new()
+	navigation_label.text = "Navigation"
+	navigation_row.add_child(navigation_label)
+	_navigation_picker = OptionButton.new()
+	_navigation_picker.add_item("Orbit")
+	_navigation_picker.add_item("Fly")
+	_navigation_picker.tooltip_text = "Fly: hold right mouse button to look; WASD moves, Q/E lowers/raises, Shift accelerates"
+	_navigation_picker.item_selected.connect(_select_navigation)
+	navigation_row.add_child(_navigation_picker)
+	var speed_label := Label.new()
+	speed_label.text = "Fly speed"
+	navigation_row.add_child(speed_label)
+	_fly_speed_control = SpinBox.new()
+	_fly_speed_control.min_value = 0.1
+	_fly_speed_control.max_value = 300.0
+	_fly_speed_control.step = 0.5
+	_fly_speed_control.value = 3.0
+	_fly_speed_control.custom_minimum_size = Vector2(74, 0)
+	_fly_speed_control.tooltip_text = "Free-fly movement units per second (Shift ×4)"
+	navigation_row.add_child(_fly_speed_control)
 	_inspection_grid_toggle = CheckButton.new()
 	_inspection_grid_toggle.text = "Grid / axes"
 	_inspection_grid_toggle.toggled.connect(_toggle_inspection_grid)
@@ -324,6 +354,19 @@ func _build_ui() -> void:
 	_inspection_bounds_toggle.text = "Bounds"
 	_inspection_bounds_toggle.toggled.connect(_toggle_inspection_bounds)
 	toolbar.add_child(_inspection_bounds_toggle)
+	var diagnostic_label := Label.new()
+	diagnostic_label.text = "Render view"
+	navigation_row.add_child(diagnostic_label)
+	_diagnostic_picker = OptionButton.new()
+	_rendering_method = RenderingServer.get_current_rendering_method()
+	for entry in RenderDiagnostics.options(_rendering_method):
+		_diagnostic_picker.add_item(String(entry["label"]))
+		_diagnostic_picker.set_item_metadata(_diagnostic_picker.item_count - 1, String(entry["key"]))
+	_diagnostic_picker.select(0)
+	_diagnostic_picker.disabled = _diagnostic_picker.item_count == 1
+	_diagnostic_picker.tooltip_text = "Debug draw is renderer-dependent. Compatibility exposes authored rendering only; normal buffer requires Forward+. Depth unavailable."
+	_diagnostic_picker.item_selected.connect(_select_render_diagnostic)
+	navigation_row.add_child(_diagnostic_picker)
 	var camera_row := HBoxContainer.new()
 	viewer.add_child(camera_row)
 	var camera_label := Label.new()
@@ -423,7 +466,7 @@ func _build_ui() -> void:
 	_viewport.add_child(_inspection_overlay)
 	_apply_graphics()
 	var hint := Label.new()
-	hint.text = "Right drag: orbit   |   Middle drag: pan   |   Wheel: zoom   |   F: frame"
+	hint.text = "Orbit: RMB rotate, MMB pan, wheel zoom  |  Fly: hold RMB + WASD / Q E, Shift fast  |  F frame"
 	viewer.add_child(hint)
 
 	var comparison_panel := VBoxContainer.new()
@@ -809,6 +852,7 @@ func _capture_screenshot() -> void:
 		"playback": _playback.snapshot(),
 		"parameters": _collect_parameters(),
 		"parameter_source": "current_controls_or_preview",
+		"render_diagnostic": _diagnostic_provenance(),
 		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest)),
 		"inspection": {
 			"grid_overlay": _inspection_grid_enabled,
@@ -873,7 +917,8 @@ func _export_frame_sequence() -> void:
 		"inspection": {"grid_overlay": _inspection_grid_enabled, "bounds_overlay": _inspection_bounds_enabled},
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
-		"capture_is_not_a_benchmark": true
+		"capture_is_not_a_benchmark": true,
+		"render_diagnostic": _diagnostic_provenance()
 	}
 	_capture_sequence += 1
 	var stem: String = "sequence_%s_p%d_%d" % [
@@ -938,9 +983,11 @@ func _export_frame_sequence() -> void:
 			error = "No rendered frame available"
 			break
 		if i == 0:
-			# Bind provenance to the first actually rendered frame. Setup may
-			# replace or activate a different scene camera.
+			# Bind provenance to the first actual render: setup can replace
+			# the active camera and change viewport diagnostic rendering.
 			metadata["scene_camera_path"] = _active_scene_camera_path()
+			metadata["render_diagnostic"] = _diagnostic_provenance()
+			metadata["render_diagnostic_basis"] = "first_captured_frame"
 			# UI layout can complete after setup; use actual captured dimensions.
 			metadata["viewport_size"] = [rendered.get_width(), rendered.get_height()]
 			var context_result: Dictionary = writer.update_context(metadata)
@@ -963,6 +1010,7 @@ func _export_frame_sequence() -> void:
 		# Per-frame state can vary when the provider updates its renderer.
 		var frame_context: Dictionary = {
 			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
+			"render_diagnostic": _diagnostic_provenance(),
 			"scene_camera_path": _active_scene_camera_path()
 		}
 		var written: Dictionary = writer.write_frame(rendered, i, observed, frame_context)
@@ -1076,8 +1124,13 @@ func _select_experiment(index: int) -> void:
 	_last_campaign_report_path = ""
 	_last_campaign_summary.clear()
 	_inspector_drag = 0
+	_fly_pressed.clear()
 	_camera_inspector = null
 	_camera_manipulated = false
+	_diagnostic_key = "lit"
+	if _viewport != null:
+		_viewport.debug_draw = Viewport.DEBUG_DRAW_DISABLED
+	_diagnostic_picker.select(0)
 	_pixel_panel.visible = false
 	_last_pixel_sample.clear()
 	_pixel_toggle.button_pressed = false
@@ -1236,6 +1289,8 @@ func _choose_scene_camera(index: int) -> void:
 		_status.text = "The selected scene camera is unavailable"
 		return
 	camera.current = true
+	_fly_pressed.clear()
+	_inspector_drag = 0
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	_camera_manipulated = false
@@ -1377,6 +1432,7 @@ func _inspect_rendered_pixel(local_point: Vector2) -> void:
 	_last_pixel_sample = {
 		"experiment_id": String(_manifest.get("id", "")),
 		"scene_camera_path": _active_scene_camera_path(),
+		"render_diagnostic": _diagnostic_provenance(),
 		"pixel": [position.x, position.y],
 		"rgba8": rgba.duplicate(),
 		"render_size": [rendered.get_width(), rendered.get_height()]
@@ -1444,11 +1500,88 @@ func _toggle_inspection_bounds(enabled: bool) -> void:
 	_refresh_inspection_overlay()
 
 
+func _select_navigation(index: int) -> void:
+	if _capture_pending or _has_active_run():
+		_navigation_picker.select(1 if _fly_mode else 0)
+		_status.text = "Cannot switch navigation during a benchmark or capture"
+		return
+	_fly_mode = index == 1
+	_fly_pressed.clear()
+	_inspector_drag = 0
+	_status.text = "Fly camera: hold RMB and use WASD / Q E, Shift ×4" if _fly_mode else "Orbit camera enabled"
+
+
+func _select_render_diagnostic(index: int) -> void:
+	if index < 0 or index >= _diagnostic_picker.item_count:
+		return
+	var key: String = String(_diagnostic_picker.get_item_metadata(index))
+	if _capture_pending or _has_active_run() or \
+			(_comparison_window != null and bool(_comparison_window.call("analysis_busy"))):
+		_diagnostic_picker.select(_diagnostic_index_for_key(_diagnostic_key))
+		_status.text = "Stop benchmark, capture or analysis before changing render diagnostics"
+		return
+	if not RenderDiagnostics.apply(_viewport, _rendering_method, key):
+		_diagnostic_picker.select(_diagnostic_index_for_key(_diagnostic_key))
+		_status.text = "Unsupported render diagnostic on " + _rendering_method
+		return
+	_diagnostic_key = key
+	_status.text = "Render diagnostic: %s (%s, outside performance baselines)" % [key, _rendering_method]
+
+
+func _diagnostic_index_for_key(key: String) -> int:
+	for i in range(_diagnostic_picker.item_count):
+		if _diagnostic_picker.get_item_metadata(i) == key:
+			return i
+	return 0
+
+
+func _diagnostic_provenance() -> Dictionary:
+	var record: Dictionary = RenderDiagnostics.provenance(_rendering_method, _diagnostic_key)
+	var effective: int = int(_viewport.debug_draw) if _viewport != null else -1
+	record["effective_viewport_debug_draw"] = effective
+	record["matches_host_selection"] = effective == int(record["viewport_debug_draw"])
+	return record
+
+
+func _fly_direction() -> Vector3:
+	return Vector3(
+		float(int(_fly_pressed.has(KEY_D)) - int(_fly_pressed.has(KEY_A))),
+		float(int(_fly_pressed.has(KEY_E)) - int(_fly_pressed.has(KEY_Q))),
+		float(int(_fly_pressed.has(KEY_W)) - int(_fly_pressed.has(KEY_S)))
+	)
+
+
+func _fly_tick(delta: float) -> void:
+	if not _fly_mode or _inspector_drag != 1 or _camera_inspector == null or \
+			not _viewport_container.has_focus() or _capture_pending or _has_active_run():
+		return
+	if not is_instance_valid(_camera_inspector.camera) or \
+			_active_scene == null or (_camera_inspector.camera != _active_scene and \
+				 not _active_scene.is_ancestor_of(_camera_inspector.camera)):
+		return
+	var direction: Vector3 = _fly_direction()
+	if direction.is_zero_approx():
+		return
+	var boost: float = 4.0 if _fly_pressed.has(KEY_SHIFT) else 1.0
+	_camera_inspector.fly_translate(direction, clampf(delta, 0.0, 0.1), _fly_speed_control.value * boost)
+	_camera_manipulated = true
+
+
 func _on_inspection_input(event: InputEvent) -> void:
-	if _capture_pending:
+	if _capture_pending or _has_active_run():
 		return
 	if _camera_inspector == null:
 		return
+	if event is InputEventKey and _fly_mode:
+		var physical: InputEventKey = event
+		var code: Key = physical.physical_keycode if physical.physical_keycode != KEY_NONE else physical.keycode
+		if code in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_Q, KEY_E, KEY_SHIFT]:
+			if physical.pressed:
+				_fly_pressed[code] = true
+			else:
+				_fly_pressed.erase(code)
+			_viewport_container.accept_event()
+			return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
 		if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed and _pixel_toggle.button_pressed:
@@ -1457,6 +1590,8 @@ func _on_inspection_input(event: InputEvent) -> void:
 			return
 		if mouse.button_index == MOUSE_BUTTON_RIGHT:
 			_inspector_drag = 1 if mouse.pressed else 0
+			if not mouse.pressed:
+				_fly_pressed.clear()
 			if mouse.pressed:
 				_viewport_container.grab_focus()
 				_viewport_container.accept_event()
@@ -1476,7 +1611,10 @@ func _on_inspection_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and _inspector_drag != 0:
 		var motion: InputEventMouseMotion = event
 		if _inspector_drag == 1:
-			_camera_inspector.orbit(motion.relative)
+			if _fly_mode:
+				_camera_inspector.fly_look(motion.relative)
+			else:
+				_camera_inspector.orbit(motion.relative)
 		else:
 			_camera_inspector.pan(motion.relative, _viewport_container.size)
 		_camera_manipulated = true
@@ -1513,6 +1651,11 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	_fly_pressed.clear()
+	_inspector_drag = 0
+	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_status.text = "Switch Render view to Lit before measuring a campaign"
+		return
 	if _capture_pending:
 		_status.text = "Capture in progress; campaign cannot start yet"
 		return
@@ -1549,6 +1692,11 @@ func _begin_campaign_case() -> void:
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
+	if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_run.invalidate_unreported_completion("diagnostic_mode_enabled_during_setup")
+		_finish_run(false)
+		_status.text = "Campaign cancelled: experiment setup enabled a diagnostic render mode"
+		return
 	# Setup may change render settings and ownership between campaign cases.
 	_update_inspection_bounds()
 	_apply_graphics()
@@ -1694,6 +1842,11 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	_fly_pressed.clear()
+	_inspector_drag = 0
+	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_status.text = "Switch Render view to Lit before measuring a benchmark"
+		return
 	if _capture_pending:
 		_status.text = "Capture in progress; experiment cannot start yet"
 		return
@@ -1717,6 +1870,11 @@ func _start_run() -> void:
 		_active_scene, _collect_parameters(),
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
+	if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_run.invalidate_unreported_completion("diagnostic_mode_enabled_during_setup")
+		_finish_run(false)
+		_status.text = "Benchmark cancelled: experiment setup enabled a diagnostic render mode"
+		return
 	_update_inspection_bounds()
 	_apply_graphics()
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
@@ -1731,6 +1889,7 @@ func _stop_run() -> void:
 
 
 func _process(delta: float) -> void:
+	_fly_tick(delta)
 	var now_usec: int = Time.get_ticks_usec()
 	var analysis_active: bool = _comparison_window != null and bool(_comparison_window.call("analysis_busy"))
 	var exclude: bool = _capture_pending or analysis_active
@@ -1757,7 +1916,19 @@ func _process(delta: float) -> void:
 	var callback_usec_in_frame: int = 0
 	var steps_this_frame := 0
 	while _accumulator >= FIXED_STEP and steps_this_frame < MAX_STEPS_PER_FRAME and _has_active_run():
+		if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+			_run.invalidate_unreported_completion("viewport_debug_changed_before_step")
+			_finish_run(false)
+			_status.text = "Benchmark cancelled: viewport changed into diagnostic rendering"
+			break
 		_run.advance()
+		if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+			# Catch changes in the final sample too, after advance() has
+			# transitioned to COMPLETED but before report publication.
+			_run.invalidate_unreported_completion("viewport_debug_changed_during_step")
+			_finish_run(false)
+			_status.text = "Benchmark cancelled: provider enabled diagnostic rendering during callback"
+			break
 		_observability.observe_callback(float(_run.last_step_cpu_usec), _run.last_step_phase)
 		callback_usec_in_frame += _run.last_step_cpu_usec
 		_accumulator -= FIXED_STEP

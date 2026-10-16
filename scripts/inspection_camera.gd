@@ -42,6 +42,39 @@ func orbit(relative: Vector2) -> void:
 	_apply()
 
 
+## Fly controls: hold RMB to look/move in the host. No simulation hooks.
+## Camera's original transform/optics stay recoverable through reset().
+func fly_look(relative: Vector2) -> void:
+	if not is_instance_valid(camera):
+		return
+	var delta_yaw: float = -relative.x * 0.004
+	var current_forward: Vector3 = -camera.global_basis.z.normalized()
+	var current_pitch: float = asin(clampf(current_forward.y, -1.0, 1.0))
+	var next_pitch: float = clampf(current_pitch - relative.y * 0.004, -PITCH_LIMIT, PITCH_LIMIT)
+	camera.global_rotate(Vector3.UP, delta_yaw)
+	camera.rotate_object_local(Vector3.RIGHT, next_pitch - current_pitch)
+	_fly_align_orbit()
+
+
+func fly_translate(direction: Vector3, delta: float, speed: float) -> void:
+	if not is_instance_valid(camera) or not direction.is_finite() or \
+			not is_finite(delta) or not is_finite(speed) or delta <= 0.0 or speed <= 0.0:
+		return
+	var intent: Vector3 = direction.limit_length(1.0)
+	camera.global_position += (
+		camera.global_basis.x * intent.x + Vector3.UP * intent.y -
+		camera.global_basis.z * intent.z
+	) * speed * delta
+	_fly_align_orbit()
+
+
+func _fly_align_orbit() -> void:
+	# Keep the existing orbit controller usable when switching modes.
+	# Maintain current orbit radius but use the fly camera's forward axis.
+	target = camera.global_position - camera.global_basis.z * distance
+	_sync_from_camera()
+
+
 func _aspect_ratio(viewport_size: Vector2) -> float:
 	return maxf(1.0, viewport_size.x) / maxf(1.0, viewport_size.y)
 

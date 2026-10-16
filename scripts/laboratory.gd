@@ -12,6 +12,7 @@ const InspectionCamera = preload("res://scripts/inspection_camera.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
+const FrameSequence = preload("res://scripts/frame_sequence.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
 const ExperimentPlayback = preload("res://scripts/experiment_playback.gd")
@@ -25,6 +26,9 @@ var _playback_accumulator: float = 0.0
 var _playback_button: Button
 var _playback_time_control: SpinBox
 var _playback_delta_control: SpinBox
+var _sequence_start_control: SpinBox
+var _sequence_frames_control: SpinBox
+var _sequence_directory: String = "user://sequences"
 var _controls: Dictionary = {}
 var _active_scene: Node = null
 var _viewport: SubViewport
@@ -231,6 +235,33 @@ func _build_ui() -> void:
 	_playback_time_control.custom_minimum_size = Vector2(90, 0)
 	_playback_time_control.value_changed.connect(_seek_playback)
 	timing_row.add_child(_playback_time_control)
+	var sequence_row := HBoxContainer.new()
+	sidebar.add_child(sequence_row)
+	var first_frame_label := Label.new()
+	first_frame_label.text = "From step"
+	sequence_row.add_child(first_frame_label)
+	_sequence_start_control = SpinBox.new()
+	_sequence_start_control.min_value = 0
+	_sequence_start_control.max_value = 12000
+	_sequence_start_control.step = 1
+	_sequence_start_control.value = 0
+	_sequence_start_control.custom_minimum_size = Vector2(85, 0)
+	sequence_row.add_child(_sequence_start_control)
+	var frames_label := Label.new()
+	frames_label.text = "Frames"
+	sequence_row.add_child(frames_label)
+	_sequence_frames_control = SpinBox.new()
+	_sequence_frames_control.min_value = 1
+	_sequence_frames_control.max_value = FrameSequence.MAX_FRAMES
+	_sequence_frames_control.step = 1
+	_sequence_frames_control.value = 30
+	_sequence_frames_control.custom_minimum_size = Vector2(70, 0)
+	sequence_row.add_child(_sequence_frames_control)
+	var export_frames := Button.new()
+	export_frames.text = "Export PNG frames"
+	export_frames.tooltip_text = "Fixed-step unmeasured frame sequence to user://sequences"
+	export_frames.pressed.connect(_export_frame_sequence)
+	sidebar.add_child(export_frames)
 
 	var buttons := HBoxContainer.new()
 	sidebar.add_child(buttons)
@@ -714,6 +745,108 @@ func _capture_screenshot() -> void:
 		_status.text = "Image captured: " + String(result["image"])
 
 
+
+func _export_frame_sequence() -> void:
+	if _capture_pending or _active_scene == null:
+		_status.text = "A capture is already active or no experiment is selected"
+		return
+	if _has_active_run() or _campaign != null:
+		_status.text = "Finish the active benchmark or campaign before exporting frames"
+		return
+	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
+		_status.text = "Close image comparison before exporting frames"
+		return
+	if not _active_scene.has_method("godauldron_step"):
+		_status.text = "This experiment has no fixed-step playback callback"
+		return
+	if not _active_scene.has_method("godauldron_setup") and not _active_scene.has_method("godauldron_preview"):
+		_status.text = "This experiment cannot reset for frame export"
+		return
+	var first_step: int = int(_sequence_start_control.value)
+	var frame_count: int = int(_sequence_frames_control.value)
+	if first_step > ExperimentPlayback.MAX_REPLAY_STEPS and not _active_scene.has_method("godauldron_seek"):
+		_status.text = "Start step exceeds bounded playback replay limit"
+		return
+	var source_scene: Node = _active_scene
+	var parameters: Dictionary = _collect_parameters()
+	var camera: Camera3D = _viewport.get_camera_3d()
+	var camera_state := {}
+	if camera != null:
+		camera_state = {
+			"position": [camera.global_position.x, camera.global_position.y, camera.global_position.z],
+			"rotation_degrees": [camera.global_rotation_degrees.x, camera.global_rotation_degrees.y, camera.global_rotation_degrees.z],
+			"projection": camera.projection, "fov": camera.fov
+		}
+	var metadata: Dictionary = {
+		"experiment_id": String(_manifest.get("id", "")),
+		"parameters": parameters.duplicate(true),
+		"visualization_path": NativeExperimentPackage.display_path(_manifest),
+		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
+		"camera_at_start": camera_state,
+		"viewport_size": [_viewport.size.x, _viewport.size.y],
+		"inspection": {"grid_overlay": _inspection_grid_enabled, "bounds_overlay": _inspection_bounds_enabled},
+		"engine": Engine.get_version_info(),
+		"os": OS.get_name(),
+		"capture_is_not_a_benchmark": true
+	}
+	_capture_sequence += 1
+	var stem: String = "sequence_%s_p%d_%d" % [
+		Time.get_datetime_string_from_system().replace(":", "-"),
+		OS.get_process_id(), _capture_sequence
+	]
+	var writer = FrameSequence.new()
+	var began: Dictionary = writer.begin(
+		_sequence_directory, stem, first_step, frame_count, _playback_delta_control.value, metadata
+	)
+	if not bool(began.get("ok", false)):
+		_status.text = "Sequence failed: " + String(began.get("error", "Unknown error"))
+		return
+	_capture_pending = true
+	_playback.pause()
+	_playback.bind(source_scene, parameters, _playback_delta_control.value)
+	var error: String = ""
+	if not _playback.reset() or not _playback.seek(first_step):
+		error = "Unable to reset/seek experiment playback"
+	for i in range(frame_count):
+		if not error.is_empty():
+			break
+		if i > 0 and not _playback.step():
+			error = "Fixed-step playback failed at frame %d" % i
+			break
+		await RenderingServer.frame_post_draw
+		if not is_instance_valid(source_scene) or _active_scene != source_scene:
+			error = "Experiment changed during export"
+			break
+		var texture: ViewportTexture = _viewport.get_texture()
+		if texture == null:
+			error = "Viewport texture unavailable"
+			break
+		var observed: Dictionary = _capture_provider_state(source_scene)
+		var active_camera: Camera3D = _viewport.get_camera_3d()
+		if active_camera != null:
+			observed["camera_position"] = [
+				active_camera.global_position.x, active_camera.global_position.y, active_camera.global_position.z
+			]
+			observed["camera_rotation_degrees"] = [
+				active_camera.global_rotation_degrees.x, active_camera.global_rotation_degrees.y, active_camera.global_rotation_degrees.z
+			]
+		var written: Dictionary = writer.write_frame(texture.get_image(), i, observed)
+		if not bool(written.get("ok", false)):
+			error = String(written.get("error", "Frame write failed"))
+			break
+		_status.text = "Exporting fixed-step frame %d/%d" % [i + 1, frame_count]
+	var result: Dictionary = writer.finish(error)
+	_capture_pending = false
+	_playback_accumulator = 0.0
+	_update_playback_ui()
+	if not bool(result.get("ok", false)):
+		_status.text = "Sequence manifest failed: " + String(result.get("error", "Unknown error"))
+	elif not error.is_empty():
+		_status.text = "Incomplete sequence (%d frames): %s" % [int(result["frames"]), error]
+	else:
+		_status.text = "Exported %d PNG frames: %s" % [frame_count, String(result["directory"])]
+
+
 func _discover() -> void:
 	_experiments.clear()
 	_catalog_visible.clear()
@@ -768,6 +901,10 @@ func _select_visible_current() -> void:
 
 
 func _select_experiment(index: int) -> void:
+	if _capture_pending:
+		_status.text = "Cannot change experiments during capture"
+		_select_visible_current()
+		return
 	if index < 0 or index >= _experiments.size():
 		return
 	# Native packages are optional and installed alongside their manifest.
@@ -850,6 +987,9 @@ func _select_experiment(index: int) -> void:
 
 
 func _preview_active_scene() -> void:
+	if _capture_pending:
+		_status.text = "Cannot change parameters during capture"
+		return
 	# Choice changes affect live scene content. Finalize the current run and
 	# capture its original metrics BEFORE swapping any experiment asset.
 	# This also cancels active campaigns, which must not continue with a new asset.
@@ -906,6 +1046,8 @@ func _refresh_inspection_overlay() -> void:
 
 
 func _frame_inspection() -> void:
+	if _capture_pending:
+		return
 	if _camera_inspector == null or _active_scene == null:
 		return
 	_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
@@ -915,6 +1057,8 @@ func _frame_inspection() -> void:
 
 
 func _reset_inspection() -> void:
+	if _capture_pending:
+		return
 	if _camera_inspector == null:
 		return
 	_camera_inspector.reset()
@@ -934,6 +1078,8 @@ func _toggle_inspection_bounds(enabled: bool) -> void:
 
 
 func _on_inspection_input(event: InputEvent) -> void:
+	if _capture_pending:
+		return
 	if _camera_inspector == null:
 		return
 	if event is InputEventMouseButton:
@@ -1150,6 +1296,11 @@ func _seek_playback(seconds: float) -> void:
 
 
 func _on_playback_delta_changed(value: float) -> void:
+	if _capture_pending:
+		_playback_delta_control.set_block_signals(true)
+		_playback_delta_control.value = _playback.step_seconds
+		_playback_delta_control.set_block_signals(false)
+		return
 	if _has_active_run():
 		_playback_delta_control.set_block_signals(true)
 		_playback_delta_control.value = _playback.step_seconds

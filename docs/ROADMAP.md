@@ -40,7 +40,7 @@ The baseline is the independently authored native experiment workflow, not an ob
 - [ ] **Observable performance**: rolling per-frame CPU main-thread, callback and integration counters; GPU timers only where provider/backend supplies correctly synchronized timestamps; clear host vs provider costs, frame pacing, stable baseline and export
 - [ ] **Visual inspection**: scene-owned camera chooser/bookmarks, free-fly controls, pixel-coordinate magnifier and capability-aware wireframe/debug overlays
 - [ ] **Rendering workstation**: full applicable lighting/environment/GI/exposure/quality controls with ownership and runtime/reload/restart capability declarations; freeze/reproduce camera, light, exposure, render size and environment
-- [ ] **Capture**: deterministic numbered-frame PNG/EXR sequences from fixed-step timelines, source sidecars and comparisons across animation; offline encode to video and explicit realtime recorder backend
+- [ ] **Capture**: fixed-step numbered PNG sequences with per-frame metadata and bounded export implemented; EXR, cross-sequence animation comparisons, offline video encode and realtime recording remain pending
 - [ ] **Experiment workflow**: share/import portable session configurations, report differences when available renderers/providers/settings differ, named provider-defined custom settings and scene templates
 - [ ] **Native graphics work**: actual consumer-provided adapter and GPU synchronization, resource handoff, queue/barrier ownership and GPU-resident path; do not invent a general compute API prematurely
 

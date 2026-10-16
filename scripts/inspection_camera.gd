@@ -124,6 +124,10 @@ func snapshot() -> Dictionary:
 		"fov": camera.fov,
 		"size": camera.size,
 		"keep_aspect": camera.keep_aspect,
+		"frustum_offset": [camera.frustum_offset.x, camera.frustum_offset.y],
+		"h_offset": camera.h_offset,
+		"v_offset": camera.v_offset,
+		"cull_mask": camera.cull_mask,
 		"near": camera.near,
 		"far": camera.far,
 		"orbit_target": [target.x, target.y, target.z]
@@ -151,12 +155,18 @@ static func valid_snapshot(record: Variant) -> bool:
 			absf(x.dot(y)) > 0.01 or absf(x.dot(z)) > 0.01 or \
 			absf(y.dot(z)) > 0.01:
 		return false
-	for field in ["fov", "size", "near", "far"]:
+	if not _valid_vector2(v.get("frustum_offset")):
+		return false
+	for field in ["fov", "size", "near", "far", "h_offset", "v_offset"]:
 		if typeof(v.get(field)) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(v[field])):
 			return false
 	if float(v["fov"]) <= 0.0 or float(v["fov"]) >= 180.0 or \
 			float(v["size"]) <= 0.0 or float(v["near"]) <= 0.0 or \
 			float(v["far"]) <= float(v["near"]):
+		return false
+	if typeof(v.get("cull_mask")) not in [TYPE_INT, TYPE_FLOAT] or \
+			float(v["cull_mask"]) != floorf(float(v["cull_mask"])) or \
+			float(v["cull_mask"]) < 0.0 or float(v["cull_mask"]) > 4294967295.0:
 		return false
 	for field in ["projection", "keep_aspect"]:
 		if typeof(v.get(field)) not in [TYPE_INT, TYPE_FLOAT] or \
@@ -164,6 +174,15 @@ static func valid_snapshot(record: Variant) -> bool:
 			return false
 	return int(v["projection"]) in [Camera3D.PROJECTION_PERSPECTIVE, Camera3D.PROJECTION_ORTHOGONAL, Camera3D.PROJECTION_FRUSTUM] and \
 		int(v["keep_aspect"]) in [Camera3D.KEEP_WIDTH, Camera3D.KEEP_HEIGHT]
+
+
+static func _valid_vector2(value: Variant) -> bool:
+	if typeof(value) != TYPE_ARRAY or value.size() != 2:
+		return false
+	for axis in value:
+		if typeof(axis) not in [TYPE_FLOAT, TYPE_INT] or not is_finite(float(axis)) or absf(float(axis)) > 1.0e7:
+			return false
+	return true
 
 
 static func _valid_vector3(value: Variant) -> bool:
@@ -188,6 +207,11 @@ func restore(record: Dictionary) -> bool:
 	)
 	camera.projection = int(record["projection"])
 	camera.keep_aspect = int(record["keep_aspect"])
+	var offset: Array = record["frustum_offset"]
+	camera.frustum_offset = Vector2(offset[0], offset[1])
+	camera.h_offset = float(record["h_offset"])
+	camera.v_offset = float(record["v_offset"])
+	camera.cull_mask = int(record["cull_mask"])
 	camera.fov = float(record["fov"])
 	camera.size = float(record["size"])
 	camera.near = float(record["near"])

@@ -96,7 +96,11 @@ func _run() -> void:
 				if pixel.r > 0.97 and pixel.g > 0.97 and pixel.b > 0.97:
 					highlights += 1
 				samples += 1
-		print("Portrait nearly-white sample fraction: %.4f" % (float(highlights) / maxf(1.0, float(samples))))
+		var white_fraction: float = float(highlights) / maxf(1.0, float(samples))
+		print("Portrait nearly-white sample fraction: %.4f" % white_fraction)
+		if white_fraction > 0.02:
+			_fail("Hair reference has excessive clipped highlights")
+			return
 		var image_name: String = label + "_" + String(pose["name"])
 		var screenshot_path: String = OUTPUT_DIR + "/" + image_name + ".jpg"
 		var saved := captured.save_jpg(screenshot_path, 0.9)

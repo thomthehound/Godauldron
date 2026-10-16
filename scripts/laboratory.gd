@@ -324,12 +324,20 @@ func _build_ui() -> void:
 	reset_button.text = "Reset camera"
 	reset_button.pressed.connect(_reset_inspection)
 	toolbar.add_child(reset_button)
+	var navigation_row := HBoxContainer.new()
+	viewer.add_child(navigation_row)
+	var navigation_label := Label.new()
+	navigation_label.text = "Navigation"
+	navigation_row.add_child(navigation_label)
 	_navigation_picker = OptionButton.new()
 	_navigation_picker.add_item("Orbit")
 	_navigation_picker.add_item("Fly")
 	_navigation_picker.tooltip_text = "Fly: hold right mouse button to look; WASD moves, Q/E lowers/raises, Shift accelerates"
 	_navigation_picker.item_selected.connect(_select_navigation)
-	toolbar.add_child(_navigation_picker)
+	navigation_row.add_child(_navigation_picker)
+	var speed_label := Label.new()
+	speed_label.text = "Fly speed"
+	navigation_row.add_child(speed_label)
 	_fly_speed_control = SpinBox.new()
 	_fly_speed_control.min_value = 0.1
 	_fly_speed_control.max_value = 300.0
@@ -337,7 +345,7 @@ func _build_ui() -> void:
 	_fly_speed_control.value = 3.0
 	_fly_speed_control.custom_minimum_size = Vector2(74, 0)
 	_fly_speed_control.tooltip_text = "Free-fly movement units per second (Shift ×4)"
-	toolbar.add_child(_fly_speed_control)
+	navigation_row.add_child(_fly_speed_control)
 	_inspection_grid_toggle = CheckButton.new()
 	_inspection_grid_toggle.text = "Grid / axes"
 	_inspection_grid_toggle.toggled.connect(_toggle_inspection_grid)
@@ -346,6 +354,9 @@ func _build_ui() -> void:
 	_inspection_bounds_toggle.text = "Bounds"
 	_inspection_bounds_toggle.toggled.connect(_toggle_inspection_bounds)
 	toolbar.add_child(_inspection_bounds_toggle)
+	var diagnostic_label := Label.new()
+	diagnostic_label.text = "Render view"
+	navigation_row.add_child(diagnostic_label)
 	_diagnostic_picker = OptionButton.new()
 	_rendering_method = RenderingServer.get_current_rendering_method()
 	for entry in RenderDiagnostics.options(_rendering_method):
@@ -355,7 +366,7 @@ func _build_ui() -> void:
 	_diagnostic_picker.disabled = _diagnostic_picker.item_count == 1
 	_diagnostic_picker.tooltip_text = "Debug draw is renderer-dependent. Compatibility exposes authored rendering only; normal buffer requires Forward+. Depth unavailable."
 	_diagnostic_picker.item_selected.connect(_select_render_diagnostic)
-	toolbar.add_child(_diagnostic_picker)
+	navigation_row.add_child(_diagnostic_picker)
 	var camera_row := HBoxContainer.new()
 	viewer.add_child(camera_row)
 	var camera_label := Label.new()

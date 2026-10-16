@@ -48,10 +48,23 @@ func _run() -> void:
 		_fail("Could not create visual output directory: " + str(directory_status))
 		return
 
-	for pose in [
+	var poses: Array[Dictionary] = [
 		{"name": "still", "motion": "still", "time": 0.0},
 		{"name": "translated", "motion": "translate", "time": 0.7}
-	]:
+	]
+	if label == "scanned":
+		poses.append({
+			"name": "profile", "motion": "still", "time": 0.0,
+			"camera_position": Vector3(0.48, 1.58, 0.0)
+		})
+		poses.append({
+			"name": "rear", "motion": "still", "time": 0.0,
+			"camera_position": Vector3(0.0, 1.58, -0.48)
+		})
+	for pose in poses:
+		if pose.has("camera_position"):
+			camera.position = pose["camera_position"]
+			camera.look_at(Vector3(0.0, 1.55, 0.0), Vector3.UP)
 		stage.call("godauldron_preview", {
 			"motion": pose["motion"],
 			"background": "as_authored"

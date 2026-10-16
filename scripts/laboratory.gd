@@ -998,6 +998,13 @@ func _select_experiment(index: int) -> void:
 		_finish_run(false)
 	# Saved reports survive the switch, but their visual presentation belongs
 	# to the previous experiment and must not be attributed to the new one.
+	# Clear only after successful preflight and completion/cancellation of
+	# the previous run, never for a failed candidate.
+	_observability.reset_run()
+	_last_observability_ui_tick = -1
+	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
+	_update_observability_ui()
+	_telemetry.text = "Host stepping: idle"
 	_comparison_table.clear()
 	_last_campaign_report_path = ""
 	_last_campaign_summary.clear()
@@ -1482,6 +1489,8 @@ func _process(delta: float) -> void:
 		steps_this_frame += 1
 	if steps_this_frame > 0:
 		_update_telemetry()
+	# This interval ends before run finalization. Provider timing resolution,
+	# report preparation, and file I/O are not routine per-frame overhead.
 	_observability.observe_orchestration(maxf(0.0, float(Time.get_ticks_usec() - now_usec - callback_usec_in_frame)), exclude)
 	if _run != null and _run.phase == ExperimentRun.Phase.COMPLETED:
 		_finish_run(true)
@@ -1536,7 +1545,13 @@ func _finish_run(completed: bool) -> void:
 	if not completed:
 		finished_run.cancel()
 	finished_run.host_observations = _observability.report_snapshot()
+	# A completed provider may resolve device queries synchronously here.
+	# Keep this potentially expensive one-time work out of per-frame
+	# orchestration while explicitly recording its host-side wall duration.
+	var report_preparation_started_usec: int = Time.get_ticks_usec()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
+	report["report_preparation_host_wall_usec"] = Time.get_ticks_usec() - report_preparation_started_usec
+	report["report_preparation_boundary"] = "run report construction, experiment metrics and provider timing query; excludes JSON serialization and disk I/O"
 	var gpu: Dictionary = report["provider_gpu_timing"]
 	if bool(gpu.get("available", false)):
 		_provider_timing_label.text = "Provider GPU (%s; declared resolved): p50 %.3f / p95 %.3f ms" % [

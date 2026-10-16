@@ -97,6 +97,27 @@ func _verify() -> void:
 			roundtrip[0]["camera_path"] != entry["camera_path"]:
 		_fail("Camera bookmark persistence lost its camera identity or state")
 		return
+	var updated_view: Dictionary = entry.duplicate(true)
+	updated_view["name"] = "Revised reference"
+	var revised: Array[Dictionary] = [updated_view]
+	if not InspectionViews.write(folder, revised).get("ok", false) or \
+			InspectionViews.read(folder).size() != 1 or \
+			InspectionViews.read(folder)[0]["name"] != "Revised reference":
+		_fail("Existing camera bookmarks could not be safely replaced")
+		return
+	# A corrupt or future-schema file must not be silently erased on save.
+	var invalid_dir: String = "user://invalid-inspector-bookmarks-%d" % OS.get_process_id()
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(invalid_dir))
+	var corrupt: FileAccess = FileAccess.open(invalid_dir.path_join("bookmarks.json"), FileAccess.WRITE)
+	if corrupt == null:
+		_fail("Cannot create corrupted-bookmark fixture")
+		return
+	corrupt.store_string("{invalid-json")
+	corrupt.close()
+	if InspectionViews.write(invalid_dir, bookmarks).get("ok", true) or \
+			FileAccess.get_file_as_string(invalid_dir.path_join("bookmarks.json")) != "{invalid-json":
+		_fail("Bookmark save overwrote damaged user data")
+		return
 	var pixel := Image.create(4, 2, false, Image.FORMAT_RGBA8)
 	pixel.fill(Color.BLACK)
 	pixel.set_pixel(3, 1, Color8(25, 75, 125, 255))

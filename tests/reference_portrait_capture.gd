@@ -39,6 +39,10 @@ func _run() -> void:
 	viewport.add_child(stage)
 	var camera := stage.get_node("StageCamera") as Camera3D
 	camera.current = true
+	var stage_environment := stage.get_node("StageEnvironment") as WorldEnvironment
+	if stage_environment.environment.background_mode != Environment.BG_COLOR:
+		_fail("Studio scene does not use its authored background color")
+		return
 	if stage.get_node("SubjectMotion/NeutralSubject").visible:
 		_fail("Primitive mannequin is visible in the reference portrait")
 		return
@@ -78,6 +82,21 @@ func _run() -> void:
 				captured.get_height() != CAPTURE_SIZE.y:
 			_fail("Rendering did not produce the expected portrait image")
 			return
+		# The corner is unobstructed by the reference bust; catch an
+		# accidentally selected sky/clear mode producing a black void.
+		var backdrop_pixel: Color = captured.get_pixel(12, 12)
+		if backdrop_pixel.r < 0.12 or backdrop_pixel.g < 0.12 or backdrop_pixel.b < 0.12:
+			_fail("Reference portrait renders against a black backdrop")
+			return
+		var highlights: int = 0
+		var samples: int = 0
+		for y in range(0, captured.get_height(), 8):
+			for x in range(0, captured.get_width(), 8):
+				var pixel: Color = captured.get_pixel(x, y)
+				if pixel.r > 0.97 and pixel.g > 0.97 and pixel.b > 0.97:
+					highlights += 1
+				samples += 1
+		print("Portrait nearly-white sample fraction: %.4f" % (float(highlights) / maxf(1.0, float(samples))))
 		var image_name: String = label + "_" + String(pose["name"])
 		var screenshot_path: String = OUTPUT_DIR + "/" + image_name + ".jpg"
 		var saved := captured.save_jpg(screenshot_path, 0.9)

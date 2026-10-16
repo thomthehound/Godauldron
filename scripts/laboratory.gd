@@ -1187,6 +1187,193 @@ func _bind_inspection() -> void:
 	_refresh_view_bookmarks()
 
 
+func _refresh_scene_cameras() -> void:
+	_camera_paths.clear()
+	_camera_picker.set_block_signals(true)
+	_camera_picker.clear()
+	var candidates: Array[Dictionary] = InspectionViews.enumerate(_active_scene)
+	var selected: int = -1
+	for record in candidates:
+		var path: String = String(record["path"])
+		_camera_paths.append(path)
+		_camera_picker.add_item(String(record["label"]))
+		if _camera_inspector != null and record["camera"] == _camera_inspector.camera:
+			selected = _camera_picker.item_count - 1
+	if selected >= 0:
+		_camera_picker.select(selected)
+	elif _camera_picker.item_count == 0:
+		_camera_picker.add_item("No scene cameras")
+		_camera_picker.disabled = true
+	else:
+		_camera_picker.select(0)
+	_camera_picker.disabled = _camera_paths.is_empty()
+	_camera_picker.set_block_signals(false)
+
+
+func _choose_scene_camera(index: int) -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Camera selection is unavailable during runs or capture"
+		_refresh_scene_cameras()
+		return
+	if index < 0 or index >= _camera_paths.size():
+		return
+	var camera: Camera3D = InspectionViews.camera_for(_active_scene, _camera_paths[index])
+	if camera == null:
+		_status.text = "The selected scene camera is unavailable"
+		return
+	camera.current = true
+	_camera_inspector = InspectionCamera.new()
+	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
+	_camera_manipulated = false
+	_refresh_scene_cameras()
+
+
+func _refresh_view_bookmarks() -> void:
+	_bookmark_picker.clear()
+	var experiment: String = String(_manifest.get("id", ""))
+	for i in range(_bookmark_entries.size()):
+		var entry: Dictionary = _bookmark_entries[i]
+		if entry.get("experiment_id") != experiment:
+			continue
+		_bookmark_picker.add_item("%s · %s" % [entry["name"], entry["camera_path"]])
+		_bookmark_picker.set_item_metadata(_bookmark_picker.item_count - 1, i)
+	_bookmark_picker.disabled = _bookmark_picker.item_count == 0
+
+
+func _view_action_ready() -> bool:
+	if _capture_pending or _has_active_run() or _active_scene == null or _camera_inspector == null:
+		_status.text = "Stop the run or capture before editing scene viewpoints"
+		return false
+	return true
+
+
+func _save_inspection_view() -> void:
+	if not _view_action_ready():
+		return
+	var label: String = _bookmark_name.text.strip_edges()
+	if label.is_empty() or label.length() > InspectionViews.MAX_NAME:
+		_status.text = "View name must have 1–60 characters"
+		return
+	var camera: Camera3D = _camera_inspector.camera
+	var path: String = String(_active_scene.get_path_to(camera))
+	var candidate: Dictionary = {
+		"experiment_id": String(_manifest["id"]), "camera_path": path,
+		"name": label, "state": _camera_inspector.snapshot()
+	}
+	if not InspectionViews.valid_entry(candidate):
+		_status.text = "View contains an invalid camera state"
+		return
+	var updated: Array[Dictionary] = _bookmark_entries.duplicate(true)
+	var replaced: bool = false
+	for i in range(updated.size()):
+		if updated[i]["experiment_id"] == candidate["experiment_id"] and \
+				updated[i]["camera_path"] == path and updated[i]["name"] == label:
+			updated[i] = candidate
+			replaced = true
+			break
+	if not replaced:
+		updated.append(candidate)
+	var written: Dictionary = InspectionViews.write(_bookmarks_root, updated)
+	if not bool(written.get("ok", false)):
+		_status.text = "View save failed: " + String(written.get("error", "unknown"))
+		return
+	_bookmark_entries = updated
+	_refresh_view_bookmarks()
+	_status.text = ("Updated" if replaced else "Saved") + " viewpoint: " + label
+
+
+func _selected_bookmark_index() -> int:
+	if _bookmark_picker.selected < 0 or _bookmark_picker.selected >= _bookmark_picker.item_count:
+		return -1
+	return int(_bookmark_picker.get_item_metadata(_bookmark_picker.selected))
+
+
+func _restore_inspection_view() -> void:
+	if not _view_action_ready():
+		return
+	var index: int = _selected_bookmark_index()
+	if index < 0 or index >= _bookmark_entries.size():
+		return
+	var record: Dictionary = _bookmark_entries[index]
+	if record.get("experiment_id") != _manifest.get("id"):
+		_status.text = "View belongs to another experiment"
+		return
+	var camera: Camera3D = InspectionViews.camera_for(_active_scene, String(record["camera_path"]))
+	if camera == null:
+		_status.text = "View's scene camera no longer exists"
+		return
+	camera.current = true
+	_camera_inspector = InspectionCamera.new()
+	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
+	if not _camera_inspector.restore(record["state"]):
+		_status.text = "View camera state was rejected"
+		return
+	_camera_manipulated = true
+	_refresh_scene_cameras()
+	_status.text = "Restored viewpoint: " + String(record["name"])
+
+
+func _delete_inspection_view() -> void:
+	if not _view_action_ready():
+		return
+	var index: int = _selected_bookmark_index()
+	if index < 0 or index >= _bookmark_entries.size():
+		return
+	var updated: Array[Dictionary] = _bookmark_entries.duplicate(true)
+	var label: String = String(updated[index]["name"])
+	updated.remove_at(index)
+	var saved: Dictionary = InspectionViews.write(_bookmarks_root, updated)
+	if not bool(saved.get("ok", false)):
+		_status.text = "View deletion failed: " + String(saved.get("error", "unknown"))
+		return
+	_bookmark_entries = updated
+	_refresh_view_bookmarks()
+	_status.text = "Deleted viewpoint: " + label
+
+
+func _inspect_rendered_pixel(local_point: Vector2) -> void:
+	if _active_scene == null or _has_active_run() or _capture_pending:
+		_status.text = "Pixel inspection requires an idle or unmeasured playback scene"
+		return
+	var scene: Node = _active_scene
+	var viewport_size: Vector2 = _viewport_container.size
+	# One GPU readback per explicit click. Freeze untimed playback so the
+	# inspected image corresponds to the visible pose.
+	_playback.pause()
+	_update_playback_ui()
+	_capture_pending = true
+	await RenderingServer.frame_post_draw
+	if not is_instance_valid(scene) or _active_scene != scene:
+		_capture_pending = false
+		_status.text = "Pixel inspection cancelled: experiment changed"
+		return
+	var texture: ViewportTexture = _viewport.get_texture()
+	if texture == null:
+		_capture_pending = false
+		_status.text = "Pixel inspection failed: no viewport texture"
+		return
+	var rendered: Image = texture.get_image()
+	var result: Dictionary = PixelInspector.sample(rendered, local_point, viewport_size)
+	_capture_pending = false
+	if not bool(result.get("ok", false)):
+		_status.text = "Pixel inspection failed: " + String(result.get("error", "unknown"))
+		return
+	var position: Vector2i = result["point"]
+	var rgba: Array = result["rgba8"]
+	_last_pixel_sample = {
+		"experiment_id": String(_manifest.get("id", "")),
+		"pixel": [position.x, position.y],
+		"rgba8": rgba.duplicate(),
+		"render_size": [rendered.get_width(), rendered.get_height()]
+	}
+	_pixel_texture.texture = ImageTexture.create_from_image(result["tile"])
+	_pixel_info.text = "Rendered pixel %d, %d / %d × %d\nRGBA8: %d, %d, %d, %d\n13 × 13 texels · nearest-neighbor magnification\nDisplayed output color, not linear HDR radiance or GPU timing" % [
+		position.x, position.y, rendered.get_width(), rendered.get_height(),
+		rgba[0], rgba[1], rgba[2], rgba[3]
+	]
+	_pixel_panel.visible = true
+
+
 func _update_inspection_bounds() -> void:
 	if _active_scene == null:
 		return

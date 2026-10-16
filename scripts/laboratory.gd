@@ -1680,6 +1680,7 @@ func _begin_campaign_case() -> void:
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
 	if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_run.invalidate_unreported_completion("diagnostic_mode_enabled_during_setup")
 		_finish_run(false)
 		_status.text = "Campaign cancelled: experiment setup enabled a diagnostic render mode"
 		return
@@ -1857,6 +1858,7 @@ func _start_run() -> void:
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
 	if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_run.invalidate_unreported_completion("diagnostic_mode_enabled_during_setup")
 		_finish_run(false)
 		_status.text = "Benchmark cancelled: experiment setup enabled a diagnostic render mode"
 		return
@@ -1902,10 +1904,18 @@ func _process(delta: float) -> void:
 	var steps_this_frame := 0
 	while _accumulator >= FIXED_STEP and steps_this_frame < MAX_STEPS_PER_FRAME and _has_active_run():
 		if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+			_run.invalidate_unreported_completion("viewport_debug_changed_before_step")
 			_finish_run(false)
 			_status.text = "Benchmark cancelled: viewport changed into diagnostic rendering"
 			break
 		_run.advance()
+		if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+			# Catch changes in the final sample too, after advance() has
+			# transitioned to COMPLETED but before report publication.
+			_run.invalidate_unreported_completion("viewport_debug_changed_during_step")
+			_finish_run(false)
+			_status.text = "Benchmark cancelled: provider enabled diagnostic rendering during callback"
+			break
 		_observability.observe_callback(float(_run.last_step_cpu_usec), _run.last_step_phase)
 		callback_usec_in_frame += _run.last_step_cpu_usec
 		_accumulator -= FIXED_STEP

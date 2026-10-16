@@ -827,6 +827,7 @@ func _capture_screenshot() -> void:
 	var camera: Camera3D = _viewport.get_camera_3d()
 	if camera != null:
 		metadata["camera"] = {
+			"scene_camera_path": _active_scene_camera_path(),
 			"position": [camera.global_position.x, camera.global_position.y, camera.global_position.z],
 			"rotation_degrees": [camera.global_rotation_degrees.x, camera.global_rotation_degrees.y, camera.global_rotation_degrees.z],
 			"projection": camera.projection,
@@ -867,6 +868,7 @@ func _export_frame_sequence() -> void:
 	# Context that may be changed by setup is recorded after playback reset.
 	var metadata: Dictionary = {
 		"experiment_id": String(_manifest.get("id", "")),
+		"scene_camera_path": _active_scene_camera_path(),
 		"parameters": parameters.duplicate(true),
 		"visualization_path": NativeExperimentPackage.display_path(_manifest),
 		"inspection": {"grid_overlay": _inspection_grid_enabled, "bounds_overlay": _inspection_bounds_enabled},
@@ -958,7 +960,8 @@ func _export_frame_sequence() -> void:
 			]
 		# Per-frame state can vary when the provider updates its renderer.
 		var frame_context: Dictionary = {
-			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest))
+			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
+			"scene_camera_path": _active_scene_camera_path()
 		}
 		var written: Dictionary = writer.write_frame(rendered, i, observed, frame_context)
 		if not bool(written.get("ok", false)):
@@ -1169,6 +1172,15 @@ func _find_scene_camera(node: Node) -> Camera3D:
 	return null
 
 
+func _active_scene_camera_path() -> String:
+	if _active_scene == null or _viewport == null:
+		return ""
+	var camera: Camera3D = _viewport.get_camera_3d()
+	if camera == null or not _active_scene.is_ancestor_of(camera):
+		return ""
+	return String(_active_scene.get_path_to(camera))
+
+
 func _bind_inspection() -> void:
 	_inspection_bounds = InspectionCamera.scene_bounds(_active_scene)
 	_refresh_inspection_overlay()
@@ -1362,6 +1374,7 @@ func _inspect_rendered_pixel(local_point: Vector2) -> void:
 	var rgba: Array = result["rgba8"]
 	_last_pixel_sample = {
 		"experiment_id": String(_manifest.get("id", "")),
+		"scene_camera_path": _active_scene_camera_path(),
 		"pixel": [position.x, position.y],
 		"rgba8": rgba.duplicate(),
 		"render_size": [rendered.get_width(), rendered.get_height()]

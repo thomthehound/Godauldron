@@ -78,6 +78,16 @@ static func write(root: String, entries: Array[Dictionary]) -> Dictionary:
 	if DirAccess.make_dir_recursive_absolute(directory) != OK:
 		return {"ok": false, "error": "Cannot create view directory"}
 	var file: String = directory.path_join("bookmarks.json")
+	# Never silently overwrite old-version or damaged user bookmarks after
+	# read() has (correctly) rejected their contents.
+	if FileAccess.file_exists(file):
+		var existing: Variant = JSON.parse_string(FileAccess.get_file_as_string(file))
+		if typeof(existing) != TYPE_DICTIONARY or existing.get("version") != VERSION or \
+				typeof(existing.get("views")) != TYPE_ARRAY:
+			return {"ok": false, "error": "Existing bookmark file is invalid or from an unsupported version"}
+		for old_entry in existing["views"]:
+			if not valid_entry(old_entry):
+				return {"ok": false, "error": "Existing bookmark file contains invalid views"}
 	var staging: String = directory.path_join("bookmarks.json.tmp")
 	var out: FileAccess = FileAccess.open(staging, FileAccess.WRITE)
 	if out == null:

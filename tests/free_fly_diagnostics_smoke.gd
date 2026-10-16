@@ -72,6 +72,7 @@ func _verify() -> void:
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
 	var navig: OptionButton = host.get("_navigation_picker")
+	navig.select(1)
 	host.call("_select_navigation", 1)
 	if not bool(host.get("_fly_mode")) or navig.selected != 1:
 		_fail("Free-fly UI selection did not reach camera controller")

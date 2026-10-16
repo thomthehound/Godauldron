@@ -69,8 +69,13 @@ func _verify() -> void:
 		var sidecar: Variant = JSON.parse_string(FileAccess.get_file_as_string(path.path_join(stem + ".json")))
 		if typeof(sidecar) != TYPE_DICTIONARY or \
 				int(sidecar.get("timeline_step_index", -1)) != 10 + i or \
-				sidecar.get("experiment_id", "") != "org.godauldron.showcase-portrait":
+				sidecar.get("experiment_id", "") != "org.godauldron.showcase-portrait" or \
+				absf(float(sidecar.get("capture_state", {}).get("seconds", -1.0)) - (10 + i) / 60.0) > 0.00001:
 			_fail("A PNG frame sidecar was incorrectly attributed")
 			return
+	if int((host.get("_playback")).snapshot().get("steps", -1)) != 12 or \
+			bool((host.get("_playback")).playing):
+		_fail("Export did not leave interactive playback paused at its final frame")
+		return
 	print("Godauldron graphical frame sequence passed: 3 fixed-step PNGs with metadata")
 	quit(0)

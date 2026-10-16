@@ -783,7 +783,7 @@ func _export_frame_sequence() -> void:
 		"experiment_id": String(_manifest.get("id", "")),
 		"parameters": parameters.duplicate(true),
 		"visualization_path": NativeExperimentPackage.display_path(_manifest),
- 		"viewport_size": [_viewport.size.x, _viewport.size.y],
+		"viewport_size": [_viewport.size.x, _viewport.size.y],
 		"inspection": {"grid_overlay": _inspection_grid_enabled, "bounds_overlay": _inspection_bounds_enabled},
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),

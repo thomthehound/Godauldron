@@ -2,6 +2,8 @@ extends RefCounted
 ## Experiment lifecycle and CPU-side timing, independent of UI and SDK adapters.
 ## GPU completion and rendering time are NOT measured here.
 
+const Observability = preload("res://scripts/performance_observability.gd")
+
 enum Phase { IDLE, WARMUP, SAMPLE, COMPLETED, CANCELLED }
 
 var phase: Phase = Phase.IDLE
@@ -13,6 +15,9 @@ var setup_cpu_usec: int = 0
 var sample_begin_cpu_usec: int = 0
 var warmup_cpu_usec_total: int = 0
 var sample_cpu_usec_total: int = 0
+var last_step_cpu_usec: int = 0
+var last_step_phase: String = ""
+var host_observations: Dictionary = {}
 
 var _scene: Node = null
 var _parameters: Dictionary = {}
@@ -70,10 +75,12 @@ func advance() -> void:
 	if not is_active():
 		return
 	var was_warmup: bool = phase == Phase.WARMUP
+	last_step_phase = "warmup" if was_warmup else "sample"
 	var began: int = Time.get_ticks_usec()
 	if _scene.has_method("godauldron_step"):
 		_scene.call("godauldron_step", _fixed_step_seconds)
 	var elapsed: int = Time.get_ticks_usec() - began
+	last_step_cpu_usec = elapsed
 	if was_warmup:
 		warmup_cpu_usec_total += elapsed
 		warmup_steps_completed += 1
@@ -98,6 +105,12 @@ func make_report(experiment_id: String) -> Dictionary:
 		var reported: Variant = _scene.call("godauldron_metrics")
 		if typeof(reported) == TYPE_DICTIONARY:
 			metrics = reported.duplicate(true)
+	var gpu_timing: Dictionary = {"available": false, "reason": "run_not_completed"}
+	if phase == Phase.COMPLETED:
+		gpu_timing = Observability.resolved_gpu_report(null)
+		if _scene != null and _scene.has_method("godauldron_resolved_gpu_timings"):
+			# Evaluated only after sampling; never charged to host callback timing.
+			gpu_timing = Observability.resolved_gpu_report(_scene.call("godauldron_resolved_gpu_timings"))
 	return {
 		"format_version": 1,
 		"experiment_id": experiment_id,
@@ -116,6 +129,8 @@ func make_report(experiment_id: String) -> Dictionary:
 		"host_step_cpu_wall_usec_total": sample_cpu_usec_total,
 		"host_step_cpu_wall_usec_mean": float(sample_cpu_usec_total) / float(maxi(1, sample_steps_completed)),
 		"experiment_metrics": metrics,
+		"host_observability": host_observations.duplicate(true),
+		"provider_gpu_timing": gpu_timing,
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
 		"timestamp": Time.get_datetime_string_from_system()

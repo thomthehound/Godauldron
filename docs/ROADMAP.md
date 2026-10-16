@@ -37,7 +37,7 @@ Exit gate: a third party adds and compares an unrelated experiment without modif
 
 The baseline is the independently authored native experiment workflow, not an obligation to reimplement a second rendering engine. See [Session and parity acceptance](EXPERIMENT_SESSIONS.md).
 
-- [ ] **Observable performance**: rolling per-frame CPU main-thread, callback and integration counters; GPU timers only where provider/backend supplies correctly synchronized timestamps; clear host vs provider costs, frame pacing, stable baseline and export
+- [ ] **Observable performance**: rolling host frame pacing, callback CPU, and host orchestration distributions with live plot and report provenance implemented; optional declared-resolved provider device timings accepted. Full engine-thread/render/queue attribution, device synchronization validation, and hardware-comparable baselines remain pending. See [Performance observability](PERFORMANCE_OBSERVABILITY.md).
 - [ ] **Visual inspection**: scene-owned camera chooser/bookmarks, free-fly controls, pixel-coordinate magnifier and capability-aware wireframe/debug overlays
 - [ ] **Rendering workstation**: full applicable lighting/environment/GI/exposure/quality controls with ownership and runtime/reload/restart capability declarations; freeze/reproduce camera, light, exposure, render size and environment
 - [ ] **Capture**: fixed-step numbered PNG sequences with per-frame metadata and bounded export implemented; EXR, cross-sequence animation comparisons, offline video encode and realtime recording remain pending

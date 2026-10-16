@@ -13,6 +13,8 @@ const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
 const FrameSequence = preload("res://scripts/frame_sequence.gd")
+const Observability = preload("res://scripts/performance_observability.gd")
+const PerformancePlot = preload("res://scripts/performance_plot.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
 const ExperimentPlayback = preload("res://scripts/experiment_playback.gd")
@@ -64,6 +66,11 @@ var _session_sequence: int = 0
 var _parameters: VBoxContainer
 var _status: Label
 var _telemetry: Label
+var _observability = Observability.new()
+var _observability_plot: Control
+var _observability_label: Label
+var _provider_timing_label: Label
+var _last_observability_ui_tick: int = -1
 var _run_steps: SpinBox
 var _warmup_steps: SpinBox
 var _campaign_picker: OptionButton
@@ -375,6 +382,23 @@ func _build_ui() -> void:
 	_telemetry = Label.new()
 	_telemetry.text = "Host stepping: idle"
 	root.add_child(_telemetry)
+	var performance_panel := HBoxContainer.new()
+	root.add_child(performance_panel)
+	var performance_text := VBoxContainer.new()
+	performance_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	performance_panel.add_child(performance_text)
+	_observability_label = Label.new()
+	_observability_label.text = "Host frame pacing / callback CPU: waiting for samples"
+	_observability_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	performance_text.add_child(_observability_label)
+	_provider_timing_label = Label.new()
+	_provider_timing_label.text = "Provider GPU: unavailable (no resolved device report)"
+	_provider_timing_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	performance_text.add_child(_provider_timing_label)
+	_observability_plot = PerformancePlot.new()
+	_observability_plot.custom_minimum_size = Vector2(260, 76)
+	_observability_plot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	performance_panel.add_child(_observability_plot)
 
 	_comparison_window = VisualComparisonWindow.new()
 	_comparison_window.capture_directory = _capture_directory
@@ -974,6 +998,13 @@ func _select_experiment(index: int) -> void:
 		_finish_run(false)
 	# Saved reports survive the switch, but their visual presentation belongs
 	# to the previous experiment and must not be attributed to the new one.
+	# Clear only after successful preflight and completion/cancellation of
+	# the previous run, never for a failed candidate.
+	_observability.reset_run()
+	_last_observability_ui_tick = -1
+	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
+	_update_observability_ui()
+	_telemetry.text = "Host stepping: idle"
 	_comparison_table.clear()
 	_last_campaign_report_path = ""
 	_last_campaign_summary.clear()
@@ -1237,6 +1268,8 @@ func _start_campaign() -> void:
 
 
 func _begin_campaign_case() -> void:
+	_observability.reset_run()
+	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
 	var next_case: Dictionary = _campaign.next_case()
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
@@ -1402,6 +1435,8 @@ func _start_run() -> void:
 	if _has_active_run():
 		_finish_run(false)
 	_campaign = null
+	_observability.reset_run()
+	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
 	_run = ExperimentRun.new()
 	_run.begin(
 		_active_scene, _collect_parameters(),
@@ -1421,6 +1456,13 @@ func _stop_run() -> void:
 
 
 func _process(delta: float) -> void:
+	var now_usec: int = Time.get_ticks_usec()
+	var analysis_active: bool = _comparison_window != null and bool(_comparison_window.call("analysis_busy"))
+	var exclude: bool = _capture_pending or analysis_active
+	_observability.observe_frame_tick(now_usec, exclude)
+	if _last_observability_ui_tick < 0 or now_usec - _last_observability_ui_tick > 250000:
+		_last_observability_ui_tick = now_usec
+		_update_observability_ui()
 	if not _has_active_run():
 		if _playback.playing:
 			_playback_accumulator += minf(delta, 0.25)
@@ -1434,17 +1476,54 @@ func _process(delta: float) -> void:
 				frames += 1
 			if frames > 0:
 				_update_playback_ui()
+		_observability.observe_orchestration(float(Time.get_ticks_usec() - now_usec), exclude)
 		return
 	_accumulator += minf(delta, 0.25)
+	var callback_usec_in_frame: int = 0
 	var steps_this_frame := 0
 	while _accumulator >= FIXED_STEP and steps_this_frame < MAX_STEPS_PER_FRAME and _has_active_run():
 		_run.advance()
+		_observability.observe_callback(float(_run.last_step_cpu_usec), _run.last_step_phase)
+		callback_usec_in_frame += _run.last_step_cpu_usec
 		_accumulator -= FIXED_STEP
 		steps_this_frame += 1
 	if steps_this_frame > 0:
 		_update_telemetry()
+	# This interval ends before run finalization. Provider timing resolution,
+	# report preparation, and file I/O are not routine per-frame overhead.
+	_observability.observe_orchestration(maxf(0.0, float(Time.get_ticks_usec() - now_usec - callback_usec_in_frame)), exclude)
 	if _run != null and _run.phase == ExperimentRun.Phase.COMPLETED:
 		_finish_run(true)
+
+
+func _update_observability_ui() -> void:
+	if _observability_label == null or _observability_plot == null:
+		return
+	var snapshot: Dictionary = _observability.live_snapshot()
+	var frames: Dictionary = snapshot["frame_interval"]
+	var callback: Dictionary = snapshot["sample_callback"]
+	var orchestration: Dictionary = snapshot["host_orchestration"]
+	var frame_text: String = "warming up"
+	if int(frames["count"]) > 0:
+		frame_text = "p50 %.2f / p95 %.2f / p99 %.2f ms" % [
+			float(frames["p50_usec"]) / 1000.0, float(frames["p95_usec"]) / 1000.0,
+			float(frames["p99_usec"]) / 1000.0
+		]
+	var callback_text: String = "no measured steps"
+	if int(callback["count"]) > 0:
+		callback_text = "p50 %.3f / p95 %.3f / p99 %.3f ms" % [
+			float(callback["p50_usec"]) / 1000.0, float(callback["p95_usec"]) / 1000.0,
+			float(callback["p99_usec"]) / 1000.0
+		]
+	var orchestration_text: String = "no samples"
+	if int(orchestration["count"]) > 0:
+		orchestration_text = "p50 %.3f / p95 %.3f ms" % [
+			float(orchestration["p50_usec"]) / 1000.0, float(orchestration["p95_usec"]) / 1000.0
+		]
+	_observability_label.text = "Host _process intervals: %s\nHost orchestration (excl callbacks): %s\nStep callback CPU wall: %s | warmup %d | excluded frames %d" % [
+		frame_text, orchestration_text, callback_text, int(snapshot["warmup_callback_total"]), int(snapshot["excluded_frame_intervals"])
+	]
+	_observability_plot.call("update_samples", snapshot["frame_intervals_usec"], snapshot["sample_callbacks_usec"])
 
 
 func _update_telemetry() -> void:
@@ -1465,7 +1544,23 @@ func _finish_run(completed: bool) -> void:
 	_run = null
 	if not completed:
 		finished_run.cancel()
+	finished_run.host_observations = _observability.report_snapshot()
+	# A completed provider may resolve device queries synchronously here.
+	# Keep this potentially expensive one-time work out of per-frame
+	# orchestration while explicitly recording its host-side wall duration.
+	var report_preparation_started_usec: int = Time.get_ticks_usec()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
+	report["report_preparation_host_wall_usec"] = Time.get_ticks_usec() - report_preparation_started_usec
+	report["report_preparation_boundary"] = "run report construction, experiment metrics and provider timing query; excludes JSON serialization and disk I/O"
+	var gpu: Dictionary = report["provider_gpu_timing"]
+	if bool(gpu.get("available", false)):
+		_provider_timing_label.text = "Provider GPU (%s; declared resolved): p50 %.3f / p95 %.3f ms" % [
+			String(gpu["provenance"]["scope"]),
+			float(gpu["duration"]["p50_usec"]) / 1000.0,
+			float(gpu["duration"]["p95_usec"]) / 1000.0
+		]
+	else:
+		_provider_timing_label.text = "Provider GPU: unavailable (%s)" % String(gpu.get("reason", "not reported"))
 	report["graphics"] = _graphics_run_snapshot.duplicate(true)
 	report["visualization_path"] = NativeExperimentPackage.display_path(_manifest)
 	report["measurement_boundary"] = "host_godauldron_step_callback_cpu_wall_only; excludes native GPU execution, completion and presentation"

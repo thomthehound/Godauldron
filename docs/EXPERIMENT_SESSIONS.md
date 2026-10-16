@@ -14,7 +14,7 @@ Existing manifests and custom provider scenes remain unchanged. A new session fi
 
 ## Next Cauldron-class gates
 
-**1. Performance observability (P0).** Give the developer a clear live chart with frame-time percentiles and measured CPU callback duration, explicitly separate any host overhead from provider timing. Show GPU timestamps only when a real backend/provider has supplied a resolved, correctly synchronized measurement. Acceptance: a background image diff, an active capture, or a debug overlay cannot silently become 'native GPU time'; per-phase work and sample exclusions appear in exported metadata. Aggregate frame CPU/render time must not be confused with total asynchronous GPU execution.
+**1. Performance observability (P0).** Initial rolling host process intervals, orchestration remainder, callback distributions, percentiles, and run-export metadata are implemented. Optional completed device-sourced provider reports are validated and labeled provider-declared, never inferred from host timings. Remaining: real native synchronization validation, full engine-thread/render timelines, CPU/GPU correlation and hardware baseline methodology. See [Performance observability](PERFORMANCE_OBSERVABILITY.md).
 
 **2. Camera and visual inspection (P1).** Camera selector and saved bookmarks, free-fly controls, pixel-coordinate zoom/magnifier, meaningful nonintrusive debug overlays. Acceptance: the same subject may be inspected from two named cameras and restored exactly; debug costs are visible/opt-in rather than included silently in production performance.
 

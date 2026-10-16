@@ -12,6 +12,7 @@ const InspectionCamera = preload("res://scripts/inspection_camera.gd")
 const InspectionViews = preload("res://scripts/inspection_views.gd")
 const PixelInspector = preload("res://scripts/pixel_inspector.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
+const RenderDiagnostics = preload("res://scripts/render_diagnostics.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
 const FrameSequence = preload("res://scripts/frame_sequence.gd")
@@ -57,6 +58,13 @@ var _inspection_bounds_toggle: CheckButton
 var _inspection_bounds_enabled: bool = false
 var _inspector_drag: int = 0
 var _camera_manipulated: bool = false
+var _navigation_picker: OptionButton
+var _fly_mode: bool = false
+var _fly_pressed: Dictionary = {}
+var _fly_speed_control: SpinBox
+var _diagnostic_picker: OptionButton
+var _diagnostic_key: String = "lit"
+var _rendering_method: String = ""
 var _camera_picker: OptionButton
 var _camera_paths: Array[String] = []
 var _bookmark_picker: OptionButton
@@ -316,6 +324,20 @@ func _build_ui() -> void:
 	reset_button.text = "Reset camera"
 	reset_button.pressed.connect(_reset_inspection)
 	toolbar.add_child(reset_button)
+	_navigation_picker = OptionButton.new()
+	_navigation_picker.add_item("Orbit")
+	_navigation_picker.add_item("Fly")
+	_navigation_picker.tooltip_text = "Fly: hold right mouse button to look; WASD moves, Q/E lowers/raises, Shift accelerates"
+	_navigation_picker.item_selected.connect(_select_navigation)
+	toolbar.add_child(_navigation_picker)
+	_fly_speed_control = SpinBox.new()
+	_fly_speed_control.min_value = 0.1
+	_fly_speed_control.max_value = 300.0
+	_fly_speed_control.step = 0.5
+	_fly_speed_control.value = 3.0
+	_fly_speed_control.custom_minimum_size = Vector2(74, 0)
+	_fly_speed_control.tooltip_text = "Free-fly movement units per second (Shift ×4)"
+	toolbar.add_child(_fly_speed_control)
 	_inspection_grid_toggle = CheckButton.new()
 	_inspection_grid_toggle.text = "Grid / axes"
 	_inspection_grid_toggle.toggled.connect(_toggle_inspection_grid)
@@ -324,6 +346,16 @@ func _build_ui() -> void:
 	_inspection_bounds_toggle.text = "Bounds"
 	_inspection_bounds_toggle.toggled.connect(_toggle_inspection_bounds)
 	toolbar.add_child(_inspection_bounds_toggle)
+	_diagnostic_picker = OptionButton.new()
+	_rendering_method = RenderingServer.get_current_rendering_method()
+	for entry in RenderDiagnostics.options(_rendering_method):
+		_diagnostic_picker.add_item(String(entry["label"]))
+		_diagnostic_picker.set_item_metadata(_diagnostic_picker.item_count - 1, String(entry["key"]))
+	_diagnostic_picker.select(0)
+	_diagnostic_picker.disabled = _diagnostic_picker.item_count == 1
+	_diagnostic_picker.tooltip_text = "Debug draw is renderer-dependent. Compatibility exposes authored rendering only; normal buffer requires Forward+. Depth unavailable."
+	_diagnostic_picker.item_selected.connect(_select_render_diagnostic)
+	toolbar.add_child(_diagnostic_picker)
 	var camera_row := HBoxContainer.new()
 	viewer.add_child(camera_row)
 	var camera_label := Label.new()
@@ -423,7 +455,7 @@ func _build_ui() -> void:
 	_viewport.add_child(_inspection_overlay)
 	_apply_graphics()
 	var hint := Label.new()
-	hint.text = "Right drag: orbit   |   Middle drag: pan   |   Wheel: zoom   |   F: frame"
+	hint.text = "Orbit: RMB rotate, MMB pan, wheel zoom  |  Fly: hold RMB + WASD / Q E, Shift fast  |  F frame"
 	viewer.add_child(hint)
 
 	var comparison_panel := VBoxContainer.new()

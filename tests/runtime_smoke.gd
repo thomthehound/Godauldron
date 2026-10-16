@@ -48,7 +48,8 @@ func _check_report(data: Dictionary, completed: bool, samples: int, warmup: int)
 		_fail("Host observability counted the wrong benchmark phases")
 		return false
 	var gpu: Dictionary = report.get("provider_gpu_timing", {})
-	if bool(gpu.get("available", true)) or gpu.get("reason") != "provider_resolved_timings_not_reported":
+	var expected_gpu_reason: String = "provider_resolved_timings_not_reported" if completed else "run_not_completed"
+	if bool(gpu.get("available", true)) or gpu.get("reason") != expected_gpu_reason:
 		_fail("A fixture without GPU timings acquired invented device measurements")
 		return false
 	var metrics: Dictionary = report.get("experiment_metrics", {})

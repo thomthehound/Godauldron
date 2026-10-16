@@ -17,7 +17,15 @@ func _fail(message: String) -> void:
 
 
 func _run() -> void:
-	var packed := load(SCENE_PATH) as PackedScene
+	var scene_path: String = SCENE_PATH
+	var label: String = "makehuman"
+	for user_arg in OS.get_cmdline_user_args():
+		var argument: String = String(user_arg)
+		if argument.begins_with("--scene="):
+			scene_path = argument.substr(8)
+		elif argument.begins_with("--label="):
+			label = argument.substr(8)
+	var packed := load(scene_path) as PackedScene
 	if packed == null:
 		_fail("Reference portrait scene could not be loaded")
 		return
@@ -57,7 +65,8 @@ func _run() -> void:
 				captured.get_height() != CAPTURE_SIZE.y:
 			_fail("Rendering did not produce the expected portrait image")
 			return
-		var screenshot_path: String = OUTPUT_DIR + "/reference_" + String(pose["name"]) + ".jpg"
+		var image_name: String = label + "_" + String(pose["name"])
+		var screenshot_path: String = OUTPUT_DIR + "/" + image_name + ".jpg"
 		var saved := captured.save_jpg(screenshot_path, 0.9)
 		if saved != OK:
 			_fail("Could not write portrait screenshot: " + str(saved))
@@ -68,9 +77,9 @@ func _run() -> void:
 		if preview_bytes.is_empty():
 			_fail("Could not encode portrait thumbnail")
 			return
-		print("GODAULDRON_PREVIEW_BEGIN:" + String(pose["name"]))
+		print("GODAULDRON_PREVIEW_BEGIN:" + image_name)
 		print(Marshalls.raw_to_base64(preview_bytes))
-		print("GODAULDRON_PREVIEW_END:" + String(pose["name"]))
+		print("GODAULDRON_PREVIEW_END:" + image_name)
 		print("Portrait screenshot: " + screenshot_path)
 	print("Reference portrait graphical capture complete")
 	quit(0)

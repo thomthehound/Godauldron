@@ -98,5 +98,59 @@ func _verify() -> void:
 	if PixelInspector.sample(pixel, Vector2(400, 100), Vector2(400, 200)).get("ok", true):
 		_fail("Click outside viewport was treated as valid pixel")
 		return
+	# Drive the actual laboratory camera/view UI with two independently
+	# selectable scene cameras, not only the standalone service.
+	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	root.add_child(host)
+	var viewport: SubViewport = host.get("_viewport")
+	var host_scene: Node = host.get("_active_scene")
+	var alternate := Camera3D.new()
+	alternate.name = "ResearchCamera"
+	alternate.position = Vector3(-7.0, 3.5, 6.0)
+	host_scene.add_child(alternate)
+	host.call("_refresh_scene_cameras")
+	var picker: OptionButton = host.get("_camera_picker")
+	var paths: Array[String] = host.get("_camera_paths")
+	var alternate_index: int = paths.find("ResearchCamera")
+	if alternate_index < 0 or picker.item_count < 2:
+		_fail("Host UI did not discover a second scene camera")
+		return
+	host.call("_choose_scene_camera", alternate_index)
+	var active: Camera3D = viewport.get_camera_3d()
+	if active != alternate:
+		_fail("Host camera selection did not activate the chosen scene camera")
+		return
+	var inspector_host = host.get("_camera_inspector")
+	inspector_host.orbit(Vector2(65, -20))
+	var saved_pose: Transform3D = alternate.global_transform
+	var selected_target: Vector3 = inspector_host.target
+	var name_field: LineEdit = host.get("_bookmark_name")
+	name_field.text = "Research view"
+	var save_root: String = "user://host-view-smoke-%d" % OS.get_process_id()
+	host.set("_bookmarks_root", save_root)
+	host.set("_bookmark_entries", [])
+	host.call("_save_inspection_view")
+	if InspectionViews.read(save_root).size() != 1:
+		_fail("Host Save view did not persist the selected camera")
+		return
+	inspector_host.orbit(Vector2(105, 43))
+	host.call("_restore_inspection_view")
+	var rebound = host.get("_camera_inspector")
+	if not alternate.global_transform.is_equal_approx(saved_pose) or \
+			not rebound.target.is_equal_approx(selected_target) or viewport.get_camera_3d() != alternate:
+		_fail("Host Restore view changed the selected camera or its saved orbit pose")
+		return
+	(host.get("_run_steps") as SpinBox).value = 50
+	host.call("_start_run")
+	name_field.text = "Forbidden during run"
+	host.call("_save_inspection_view")
+	if InspectionViews.read(save_root).size() != 1:
+		_fail("Measured benchmark allowed bookmark mutation")
+		return
+	host.call("_stop_run")
+	host.call("_delete_inspection_view")
+	if not InspectionViews.read(save_root).is_empty():
+		_fail("Host Delete view left persisted bookmark data")
+		return
 	print("Godauldron inspection view smoke passed: scene cameras, bookmarks, pixel coordinates")
 	quit(0)

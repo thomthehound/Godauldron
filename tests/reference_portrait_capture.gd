@@ -2,7 +2,7 @@ extends SceneTree
 ## Capture the actual reference portrait with a graphics-backed Godot renderer.
 ## This is visual evidence for scene acceptance, not a simulation benchmark.
 
-const SCENE_PATH := "res://scenes/showcase/portrait_reference_head.tscn"
+const SCENE_PATH := "res://scenes/showcase/scanned_reference_head.tscn"
 const OUTPUT_DIR := "res://visual-artifacts"
 const CAPTURE_SIZE := Vector2i(960, 720)
 
@@ -18,7 +18,7 @@ func _fail(message: String) -> void:
 
 func _run() -> void:
 	var scene_path: String = SCENE_PATH
-	var label: String = "makehuman"
+	var label: String = "head"
 	for user_arg in OS.get_cmdline_user_args():
 		var argument: String = String(user_arg)
 		if argument.begins_with("--scene="):
@@ -56,19 +56,19 @@ func _run() -> void:
 		{"name": "still", "motion": "still", "time": 0.0},
 		{"name": "translated", "motion": "translate", "time": 0.7}
 	]
-	if label == "scanned":
+	if label == "head":
 		poses.append({
 			"name": "profile", "motion": "still", "time": 0.0,
-			"camera_position": Vector3(0.48, 1.58, 0.0)
+			"camera_position": Vector3(0.40, 1.59, 0.0)
 		})
 		poses.append({
 			"name": "rear", "motion": "still", "time": 0.0,
-			"camera_position": Vector3(0.0, 1.58, -0.48)
+			"camera_position": Vector3(0.0, 1.59, -0.40)
 		})
 	for pose in poses:
 		if pose.has("camera_position"):
 			camera.position = pose["camera_position"]
-			camera.look_at(Vector3(0.0, 1.55, 0.0), Vector3.UP)
+			camera.look_at(Vector3(0.0, 1.57, 0.0), Vector3.UP)
 		stage.call("godauldron_preview", {
 			"motion": pose["motion"],
 			"background": "as_authored"

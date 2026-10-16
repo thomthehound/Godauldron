@@ -1073,6 +1073,9 @@ func _select_experiment(index: int) -> void:
 	_inspector_drag = 0
 	_camera_inspector = null
 	_camera_manipulated = false
+	_pixel_panel.visible = false
+	_last_pixel_sample.clear()
+	_pixel_toggle.button_pressed = false
 	if _active_scene != null:
 		_viewport.remove_child(_active_scene)
 		_active_scene.queue_free()
@@ -1175,9 +1178,13 @@ func _bind_inspection() -> void:
 		view_camera = _find_scene_camera(_active_scene)
 	if view_camera == null:
 		_camera_inspector = null
+		_refresh_scene_cameras()
+		_refresh_view_bookmarks()
 		return
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(view_camera, _inspection_bounds)
+	_refresh_scene_cameras()
+	_refresh_view_bookmarks()
 
 
 func _update_inspection_bounds() -> void:
@@ -1242,6 +1249,10 @@ func _on_inspection_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
+		if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed and _pixel_toggle.button_pressed:
+			_viewport_container.accept_event()
+			_inspect_rendered_pixel(mouse.position)
+			return
 		if mouse.button_index == MOUSE_BUTTON_RIGHT:
 			_inspector_drag = 1 if mouse.pressed else 0
 			if mouse.pressed:

@@ -6,7 +6,7 @@ Godauldron provides three independent host-side observations and an optional pro
 
 The small rolling plot shows the **interval between successive host `_process` entries** (blue, upper band) and the **CPU wall time spent inside `godauldron_step`** during measured steps (amber, lower band). These are separate sample-index axes and have independent vertical scales; they do not imply that a callback corresponds to a particular displayed frame. The adjacent text reports rolling p50/p95/p99 values. The rolling window holds the most recent 240 observations per series. A gray guide in the plot marks 16.67 ms (60 Hz), but is not a performance pass/fail threshold.
 
-The text also reports the **host `_process` remainder after timed step callbacks**, measured by the monotonic clock around the callback dispatch loop. This remainder covers local orchestration and reporting work inside that method; it is **not** whole-process CPU utilization, GPU time, or all of Godot's rendering/main-thread work. Its p50/p95 is displayed separately. The main-thread scheduling/presentation interval is not CPU busy time.
+The text also reports the **host `_process` remainder after timed step callbacks**, measured by the monotonic clock around the callback dispatch loop. This remainder covers routine local orchestration and live telemetry **before** run finalization; it deliberately excludes completed-run metrics collection, provider timing resolution, report construction, JSON serialization and disk writes. Those one-time operations are not part of ordinary frame pacing. it is **not** whole-process CPU utilization, GPU time, or all of Godot's rendering/main-thread work. Its p50/p95 is displayed separately. The main-thread scheduling/presentation interval is not CPU busy time.
 
 - Setup and sample-begin callback times remain separately reported by the runner.
 - Warmup callback observations have their own series and never enter the measured-sample callback percentiles.
@@ -14,8 +14,9 @@ The text also reports the **host `_process` remainder after timed step callbacks
 - Capture/readback or image analysis excludes corresponding host interval and orchestration observations from the rolling samples. The report records the excluded frame count.
 - The chart runs at a bounded refresh cadence outside the measured callback region, but its normal host/UI overhead can still affect visible frame pacing. Use headless/campaign baselines where necessary.
 - Missing observations remain absent, not zeroes or inferred GPU timings.
+- A successful experiment switch clears previous provider timings and rolling traces. A failed preflight preserves the current experiment's observations.
 
-Every benchmark result retains the existing host-step CPU mean/total metrics, plus `host_observability` with rolling distribution summaries and sampling/exclusion counts. Percentiles represent the bounded **recent window**; their reported count may be smaller than the completed step count.
+Every benchmark result retains the existing host-step CPU mean/total metrics, plus `host_observability` with rolling distribution summaries and sampling/exclusion counts. The report also records `report_preparation_host_wall_usec`, including experiment metrics and optional provider timing resolution but not serialization or filesystem writes. Percentiles represent the bounded **recent window**; their reported count may be smaller than the completed step count.
 
 ## Optional device timing contract
 

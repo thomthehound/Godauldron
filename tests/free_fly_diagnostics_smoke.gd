@@ -128,5 +128,36 @@ func _verify() -> void:
 		_fail("Diagnostic provenance concealed an effective viewport override")
 		return
 	active_viewport.debug_draw = Viewport.DEBUG_DRAW_DISABLED
+	var source_scene: Node = host.get("_active_scene")
+	active_viewport.remove_child(source_scene)
+	source_scene.queue_free()
+	var contaminated: Node3D = preload("res://tests/fixtures/debug_flip_provider.gd").new()
+	active_viewport.add_child(contaminated)
+	host.set("_active_scene", contaminated)
+	var isolated_reports: String = "user://debug-run-rejection-%d" % OS.get_process_id()
+	host.set("_results_directory", isolated_reports)
+	(host.get("_warmup_steps") as SpinBox).value = 0
+	(host.get("_run_steps") as SpinBox).value = 1
+	host.call("_start_run")
+	if not bool(host.call("_has_active_run")):
+		_fail("Contamination test could not start a normal lit benchmark")
+		return
+	host.call("_process", 1.0 / 60.0)
+	if bool(host.call("_has_active_run")) or int(contaminated.get("gpu_calls")) != 0:
+		_fail("Provider debug mode change in final callback was published as completed GPU work")
+		return
+	var report_names: PackedStringArray = DirAccess.get_files_at(isolated_reports)
+	if report_names.size() != 1:
+		_fail("Contaminated final sample did not create an auditable cancelled report")
+		return
+	var report: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(isolated_reports.path_join(report_names[0]))
+	)
+	if typeof(report) != TYPE_DICTIONARY or bool(report.get("completed", true)) or \
+			report.get("run_status") != "cancelled" or \
+			report.get("invalid_reason") != "viewport_debug_changed_during_step" or \
+			report.get("provider_gpu_timing", {}).get("available", true):
+		_fail("Diagnostic contamination was not identified in final sample report")
+		return
 	print("Godauldron free-fly and renderer capability smoke passed")
 	quit(0)

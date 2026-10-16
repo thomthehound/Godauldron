@@ -8,6 +8,7 @@ const VALID_GPU_SOURCES := ["device_timestamp", "device_event"]
 
 var _frame_usec: Array[float] = []
 var _callback_usec: Array[float] = []
+var _orchestration_usec: Array[float] = []
 var _warmup_usec: Array[float] = []
 var _last_host_tick: int = -1
 var _excluded_intervals: int = 0
@@ -19,6 +20,7 @@ var _excluded_callbacks: int = 0
 func reset_run() -> void:
 	_frame_usec.clear()
 	_callback_usec.clear()
+	_orchestration_usec.clear()
 	_warmup_usec.clear()
 	_last_host_tick = -1
 	_excluded_intervals = 0
@@ -35,6 +37,12 @@ func observe_frame_tick(timestamp_usec: int, excluded: bool = false) -> void:
 	if _last_host_tick >= 0 and timestamp_usec >= _last_host_tick:
 		_append(_frame_usec, float(timestamp_usec - _last_host_tick))
 	_last_host_tick = timestamp_usec
+
+
+func observe_orchestration(duration_usec: float, excluded: bool = false) -> void:
+	if excluded or not is_finite(duration_usec) or duration_usec < 0.0:
+		return
+	_append(_orchestration_usec, duration_usec)
 
 
 func observe_callback(duration_usec: float, phase: String) -> void:
@@ -86,16 +94,19 @@ func live_snapshot() -> Dictionary:
 	return {
 		"frame_interval": describe(_frame_usec),
 		"sample_callback": describe(_callback_usec),
+		"host_orchestration": describe(_orchestration_usec),
 		"warmup_callback": describe(_warmup_usec),
 		"frame_intervals_usec": _frame_usec.duplicate(),
 		"sample_callbacks_usec": _callback_usec.duplicate(),
+		"orchestration_usec": _orchestration_usec.duplicate(),
 		"excluded_frame_intervals": _excluded_intervals,
 		"excluded_callbacks": _excluded_callbacks,
 		"sample_callback_total": _sample_count,
 		"warmup_callback_total": _warmup_count,
 		"window_capacity": WINDOW,
 		"frame_time_boundary": "monotonic interval between host _process entry points; includes scheduling/presentation delay; not GPU time",
-		"callback_boundary": "host wall time inside godauldron_step invocation; async GPU completion excluded"
+		"callback_boundary": "host wall time inside godauldron_step invocation; async GPU completion excluded",
+		"orchestration_boundary": "host _process body wall time minus timed step callbacks; excludes Godot renderer and off-hook engine work"
 	}
 
 
@@ -103,6 +114,7 @@ func report_snapshot() -> Dictionary:
 	var report: Dictionary = live_snapshot()
 	report.erase("frame_intervals_usec")
 	report.erase("sample_callbacks_usec")
+	report.erase("orchestration_usec")
 	report["purpose"] = "descriptive_host_observability_not_gpu_benchmark"
 	return report
 
@@ -112,7 +124,8 @@ static func resolved_gpu_report(value: Variant) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
 		return unavailable
 	var data: Dictionary = value
-	if data.get("status") != "resolved" or data.get("synchronization") != "completed" or \
+	if data.get("status") != "resolved" or data.get("phase") != "sample" or \
+			data.get("synchronization") != "completed" or \
 			data.get("unit") != "microseconds" or \
 			not VALID_GPU_SOURCES.has(String(data.get("measurement_source", ""))):
 		return {"available": false, "reason": "gpu_timing_not_resolved_or_not_device_sourced"}

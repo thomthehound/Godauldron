@@ -68,6 +68,7 @@ func _verify() -> void:
 			_fail("Graphics-backed sequence wrote an empty or unreadable image")
 			return
 		var sidecar: Variant = JSON.parse_string(FileAccess.get_file_as_string(path.path_join(stem + ".json")))
+		print("Sequence frame %d provenance: %s" % [i, JSON.stringify(sidecar)])
 		if typeof(sidecar) != TYPE_DICTIONARY or \
 				int(sidecar.get("timeline_step_index", -1)) != 10 + i or \
 				sidecar.get("experiment_id", "") != "org.godauldron.showcase-portrait" or \

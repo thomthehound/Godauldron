@@ -16,7 +16,7 @@ experiments/loxfx/
     ...groom and head assets...
 ```
 
-Illustrative manifest (adjust ID, paths and native classes to the actual adapter):
+Illustrative manifest. The `LoxFXGroom3D` native class name is taken from LoxFX's explicit integration feedback; **all paths, parameters, and the remaining manifest structure are examples**, not assertions about LoxFX's internal API:
 
 ```json
 {
@@ -30,7 +30,7 @@ Illustrative manifest (adjust ID, paths and native classes to the actual adapter
     "res://experiments/loxfx/loxfx.gdextension"
   ],
   "required_native_classes": [
-    "LoxFXHairAdapter"
+    "LoxFXGroom3D"
   ],
   "visualization_path": "diagnostic_cpu_bridge",
   "graphics_owned_settings": [

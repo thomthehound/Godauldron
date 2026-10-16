@@ -122,6 +122,32 @@ func _verify() -> void:
 		if not clock.seek(90) or stage.get_node("SubjectMotion").rotation.distance_to(moved) > 0.000001:
 			_fail("Stage did not reproduce the same pose at a specified frame")
 			return
+		# Pure translational motion is independently reproducible and moves
+		# provider-owned attachments without rotating their transforms.
+		clock.bind(stage, {"motion": "translate", "show_placeholder": false}, 1.0 / 60.0)
+		if not clock.reset():
+			_fail("Cannot reset stage translation fixture")
+			return
+		var authored_origin: Vector3 = stage.get_node("SubjectMotion").position
+		var original_subject_rotation: Vector3 = stage.get_node("SubjectMotion").rotation
+		if not clock.seek(60):
+			_fail("Translation timeline could not seek to frame 60")
+			return
+		var translated: Vector3 = stage.get_node("SubjectMotion").position
+		if translated.distance_to(authored_origin) < 0.10 or \
+				not stage.get_node("SubjectMotion").rotation.is_equal_approx(original_subject_rotation):
+			_fail("Generic translation was missing or inadvertently rotated subject")
+			return
+		if not clock.seek(0) or not stage.get_node("SubjectMotion").position.is_equal_approx(authored_origin):
+			_fail("Translation reset did not preserve authored rig origin")
+			return
+		if not clock.seek(60) or stage.get_node("SubjectMotion").position.distance_to(translated) > 0.000001:
+			_fail("Identical fixed input did not reproduce translation")
+			return
+		if provided.get_parent() != anchor:
+			_fail("Translation displaced provider-owned attached node")
+			return
+
 		stage.call("godauldron_preview", {
 			"motion": "still", "show_placeholder": true, "background": "slate"
 		})
@@ -157,6 +183,98 @@ func _verify() -> void:
 	if example_node.get_parent() != authored.get_node("SubjectMotion/SubjectAnchor"):
 		_fail("Stage motion displaced externally authored content")
 		return
+
+	# Standalone and inherited scenes must retain their authored defaults,
+	# even when no experiment manifest supplies show_placeholder.
+	var standalone_portrait: Node3D = (load("res://scenes/showcase/portrait_reference_head.tscn") as PackedScene).instantiate()
+	var standalone_motion: Node3D = standalone_portrait.get_node("SubjectMotion")
+	standalone_motion.rotation.y = 0.125
+	root.add_child(standalone_portrait)
+	var standalone_placeholder: Node3D = standalone_portrait.get_node("SubjectMotion/NeutralSubject")
+	if standalone_placeholder.visible:
+		_fail("Standalone reference restored the primitive mannequin during _ready")
+		return
+	standalone_portrait.call("godauldron_preview", {"motion": "translate"})
+	standalone_portrait.call("godauldron_seek", 0.5)
+	if standalone_placeholder.visible or not is_equal_approx(standalone_motion.rotation.y, 0.125):
+		_fail("Preview without overrides lost authored visibility or rotation")
+		return
+	standalone_portrait.call("godauldron_preview", {"motion": "still", "show_placeholder": true})
+	if not standalone_placeholder.visible:
+		_fail("Explicit placeholder override could not enable the mannequin")
+		return
+	standalone_portrait.call("godauldron_preview", {"motion": "still"})
+	if standalone_placeholder.visible:
+		_fail("Omitted placeholder setting did not return to authored visibility")
+		return
+	standalone_portrait.free()
+
+	# The optional portrait reference must be a real imported textured
+	# MakeHuman GLB rather than another group of procedural spheres.
+	if not _select(host, "org.godauldron.portrait-reference-head"):
+		_fail("Bundled CC0 portrait head is not discoverable")
+		return
+	var portrait: Node3D = host.get("_active_scene")
+	var portrait_camera: Camera3D = portrait.get_node("StageCamera")
+	# This catches a reversed yaw: a renderable scene can otherwise pass
+	# every mesh-import test while placing the head entirely off-screen.
+	var head_target_in_camera: Vector3 = portrait_camera.to_local(Vector3(0.0, 1.57, 0.0))
+	if head_target_in_camera.z >= -0.2 or \
+			absf(head_target_in_camera.x) > -head_target_in_camera.z * 0.24 or \
+			absf(head_target_in_camera.y) > -head_target_in_camera.z * 0.25:
+		_fail("Reference portrait camera does not frame the head")
+		return
+	var human_root: Node = portrait.get_node_or_null(
+		"SubjectMotion/SubjectAnchor/MakeHumanBodyOrigin/MakeHumanReference"
+	)
+	if human_root == null:
+		_fail("CC0 reference model did not load into portrait stage")
+		return
+	var nodes: Array[Node] = [human_root]
+	var meshes: int = 0
+	var vertices: int = 0
+	var textured_surfaces: int = 0
+	if portrait.get_node("SubjectMotion/NeutralSubject").visible:
+		_fail("Primitive mannequin overlaps the real reference head")
+		return
+	while not nodes.is_empty():
+		var node: Node = nodes.pop_back()
+		if node is MeshInstance3D:
+			var item: MeshInstance3D = node
+			if item.mesh != null:
+				meshes += 1
+				vertices += item.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX].size()
+				for surface in range(item.mesh.get_surface_count()):
+					var material: Material = item.get_active_material(surface)
+					if material is BaseMaterial3D and (material as BaseMaterial3D).albedo_texture != null:
+						textured_surfaces += 1
+		for child in node.get_children():
+			nodes.append(child)
+	if meshes == 0 or vertices < 4000 or textured_surfaces == 0:
+		_fail("Imported reference lacks substantive textured human geometry")
+		return
+	var markers: Node3D = portrait.get_node("SubjectMotion/SubjectAnchor/ScalpLandmarks_PROVISIONAL")
+	if markers.visible or markers.get_child_count() < 5:
+		_fail("Provisional scalp locations must be available but hidden by default")
+		return
+	var human_origin: Node3D = portrait.get_node("SubjectMotion/SubjectAnchor/MakeHumanBodyOrigin")
+	if not is_equal_approx(human_origin.position.y, -1.55):
+		_fail("Reference character scale/rig origin changed unexpectedly")
+		return
+	var portrait_playback = Playback.new()
+	portrait_playback.bind(portrait, {
+		"motion": "translate", "show_placeholder": false, "background": "as_authored"
+	}, 1.0 / 60.0)
+	portrait_playback.reset()
+	var portrait_root_origin: Vector3 = human_root.global_position
+	if not portrait_playback.seek(60) or human_root.global_position.distance_to(portrait_root_origin) < 0.10:
+		_fail("Reference portrait did not follow generic attachment translation")
+		return
+	if not portrait_playback.seek(0) or human_root.global_position.distance_to(portrait_root_origin) > 0.000001:
+		_fail("Imported reference changed position after translation rewind")
+		return
+	# This validates Godot import and scene composition only; image quality
+	# and vertex-accurate scalp attachment remain hardware visual checks.
 
 	# Confirm the actual host playback UI remains independent of timed runs.
 	if not _select(host, "org.godauldron.showcase-portrait"):

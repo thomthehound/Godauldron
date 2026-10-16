@@ -24,6 +24,10 @@
         {
           "value": "nod",
           "label": "Nod"
+        },
+        {
+          "value": "translate",
+          "label": "Translate (side to side)"
         }
       ]
     },

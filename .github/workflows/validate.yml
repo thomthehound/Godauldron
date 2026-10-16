@@ -51,6 +51,8 @@ jobs:
           fi
       - name: Import project
         run: .engine/godot --headless --path . --editor --import --quit
+      - name: Validate CC0 reference glTF structure
+        run: python tools/inspect_reference_asset.py
       - name: Verify scene and script loading
         run: .engine/godot --headless --path . --quit-after 15
       - name: Verify fixed-step run and exported results

@@ -1,0 +1,38 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/showcase/portrait_stage.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://assets/showcase/makehuman_reference.glb" id="2"]
+
+[node name="PortraitReferenceHead" instance=ExtResource("1")]
+translation_amplitude_m = 0.18
+
+[node name="StageCamera" parent="." index="1"]
+position = Vector3(0.24, 1.68, 0.92)
+rotation_degrees = Vector3(-10.0, 15.0, 0)
+fov = 38.0
+
+[node name="NeutralSubject" parent="SubjectMotion" index="0"]
+visible = false
+
+[node name="MakeHumanBodyOrigin" type="Node3D" parent="SubjectMotion/SubjectAnchor" index="0"]
+position = Vector3(0, -1.55, 0)
+
+[node name="MakeHumanReference" parent="SubjectMotion/SubjectAnchor/MakeHumanBodyOrigin" index="0" instance=ExtResource("2")]
+
+[node name="ScalpLandmarks_PROVISIONAL" type="Node3D" parent="SubjectMotion/SubjectAnchor" index="1"]
+visible = false
+
+[node name="CrownApprox" type="Marker3D" parent="SubjectMotion/SubjectAnchor/ScalpLandmarks_PROVISIONAL"]
+position = Vector3(0, 0.075, 0)
+
+[node name="ForeheadApprox" type="Marker3D" parent="SubjectMotion/SubjectAnchor/ScalpLandmarks_PROVISIONAL"]
+position = Vector3(0, -0.105, 0.135)
+
+[node name="LeftTempleApprox" type="Marker3D" parent="SubjectMotion/SubjectAnchor/ScalpLandmarks_PROVISIONAL"]
+position = Vector3(-0.095, -0.18, 0.025)
+
+[node name="RightTempleApprox" type="Marker3D" parent="SubjectMotion/SubjectAnchor/ScalpLandmarks_PROVISIONAL"]
+position = Vector3(0.095, -0.18, 0.025)
+
+[node name="NapeApprox" type="Marker3D" parent="SubjectMotion/SubjectAnchor/ScalpLandmarks_PROVISIONAL"]
+position = Vector3(0, -0.31, -0.085)

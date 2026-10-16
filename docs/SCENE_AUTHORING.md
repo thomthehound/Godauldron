@@ -4,12 +4,13 @@ Godauldron is a **host**, not the author of an experiment's geometry, art assets
 
 ## Start from an existing stage
 
-Two optional templates are bundled:
+Three optional presentation stages are bundled (the third is a reference portrait variant):
 
 - `res://scenes/showcase/portrait_stage.tscn`: a portrait camera and soft key/fill/rim lights, with a plain head/bust **placeholder but no hair**. Convenient for hair, face, skin, cloth, and animation.
+- `res://scenes/showcase/portrait_reference_head.tscn`: a portrait variant with a bundled CC0 MakeHuman human model, documented physical scale, closer head camera and optional **provisional** scalp markers. No hair simulation. See [reference head](REFERENCE_HEAD_SCENE.md).
 - `res://scenes/showcase/inspection_stage.tscn`: a wider platform, inspection camera, neutral scale/placement reference and the same editable lighting. Convenient for render passes, collision visualization, physics objects, props and unfamiliar technologies.
 
-Each contains `StageCamera`, `StageEnvironment`, `KeySoft`, `FillSoft`, `RimBack`, `SubjectMotion`, `SubjectMotion/NeutralSubject` and `SubjectMotion/SubjectAnchor`. The placeholder can be hidden through `show_placeholder`. The default `as_authored` backdrop preserves the scene's own editable `WorldEnvironment` color; alternative presets are explicit user overrides. The stage does not rotate/retarget the camera at runtime: its authored `StageCamera` transform is authoritative. `SubjectAnchor` belongs to the project: attach your real native hair node, mesh, character, volumes or overlays there. The `SubjectMotion` parent runs reproducible analytic turn/nod motion, so provider content attached to it moves with the mannequin. Static mode never applies motion.
+Each contains `StageCamera`, `StageEnvironment`, `KeySoft`, `FillSoft`, `RimBack`, `SubjectMotion`, `SubjectMotion/NeutralSubject` and `SubjectMotion/SubjectAnchor`. The placeholder can be hidden through `show_placeholder`. The default `as_authored` backdrop preserves the scene's own editable `WorldEnvironment` color; alternative presets are explicit user overrides. The stage does not rotate/retarget the camera at runtime: its authored `StageCamera` transform is authoritative. `SubjectAnchor` belongs to the project: attach your real native hair node, mesh, character, volumes or overlays there. The `SubjectMotion` parent runs reproducible analytic turn/nod/**translation** motion, so provider content attached to it moves with the mannequin. Translation is a pure positional trajectory; it does not generate or modify hair. Static mode never applies motion. The authored rig origin is preserved and restored on every seek/reset, avoiding positional drift across repeated runs.
 
 **Two simple workflows:**
 

@@ -34,6 +34,9 @@ func _reset(setup: bool) -> void:
 		var viewport: SubViewport = get_viewport() as SubViewport
 		viewport.msaa_3d = Viewport.MSAA_DISABLED
 		viewport.scaling_3d_scale = 0.6
+		# Provider deliberately changes effective debug draw after the host
+		# opened the writer, exposing stale sequence summary provenance.
+		viewport.debug_draw = Viewport.DEBUG_DRAW_UNSHADED
 		var post_setup: Camera3D = get_node_or_null("PostSetupCamera") as Camera3D
 		if post_setup == null:
 			post_setup = Camera3D.new()

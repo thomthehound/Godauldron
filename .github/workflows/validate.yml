@@ -96,8 +96,10 @@ jobs:
           fi
       - name: Import assets
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --editor --import --quit
-      - name: Capture still and translated reference portraits
+      - name: Capture MakeHuman baseline
         run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/reference_portrait_capture.gd
+      - name: Capture Lee Perry-Smith scanned head
+        run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/reference_portrait_capture.gd -- --scene=res://scenes/showcase/scanned_reference_head.tscn --label=scanned
       - name: Preserve full-size visual evidence
         if: always()
         uses: actions/upload-artifact@v4

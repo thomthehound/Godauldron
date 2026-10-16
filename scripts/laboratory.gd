@@ -1551,7 +1551,7 @@ func _fly_tick(delta: float) -> void:
 
 
 func _on_inspection_input(event: InputEvent) -> void:
-	if _capture_pending:
+	if _capture_pending or _has_active_run():
 		return
 	if _camera_inspector == null:
 		return
@@ -1634,6 +1634,8 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	_fly_pressed.clear()
+	_inspector_drag = 0
 	if _diagnostic_key != "lit":
 		_status.text = "Switch Render view to Lit before measuring a campaign"
 		return
@@ -1818,6 +1820,8 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	_fly_pressed.clear()
+	_inspector_drag = 0
 	if _diagnostic_key != "lit":
 		_status.text = "Switch Render view to Lit before measuring a benchmark"
 		return

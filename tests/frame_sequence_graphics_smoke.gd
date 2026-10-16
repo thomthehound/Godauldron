@@ -71,6 +71,7 @@ func _verify() -> void:
 		if typeof(sidecar) != TYPE_DICTIONARY or \
 				int(sidecar.get("timeline_step_index", -1)) != 10 + i or \
 				sidecar.get("experiment_id", "") != "org.godauldron.showcase-portrait" or \
+				String(sidecar.get("scene_camera_path", "")).is_empty() or \
 				absf(float(sidecar.get("capture_state", {}).get("seconds", -1.0)) - float(sidecar.get("timeline_seconds", -1.0))) > 0.00001 or \
 				int(sidecar.get("viewport_size", [0, 0])[0]) != actual_image.get_width() or \
 				int(sidecar.get("viewport_size", [0, 0])[1]) != actual_image.get_height():

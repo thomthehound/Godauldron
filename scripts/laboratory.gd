@@ -1476,11 +1476,84 @@ func _toggle_inspection_bounds(enabled: bool) -> void:
 	_refresh_inspection_overlay()
 
 
+func _select_navigation(index: int) -> void:
+	if _capture_pending or _has_active_run():
+		_navigation_picker.select(1 if _fly_mode else 0)
+		_status.text = "Cannot switch navigation during a benchmark or capture"
+		return
+	_fly_mode = index == 1
+	_fly_pressed.clear()
+	_inspector_drag = 0
+	_status.text = "Fly camera: hold RMB and use WASD / Q E, Shift ×4" if _fly_mode else "Orbit camera enabled"
+
+
+func _select_render_diagnostic(index: int) -> void:
+	if index < 0 or index >= _diagnostic_picker.item_count:
+		return
+	var key: String = String(_diagnostic_picker.get_item_metadata(index))
+	if _capture_pending or _has_active_run() or \
+			(_comparison_window != null and bool(_comparison_window.call("analysis_busy"))):
+		_diagnostic_picker.select(_diagnostic_index_for_key(_diagnostic_key))
+		_status.text = "Stop benchmark, capture or analysis before changing render diagnostics"
+		return
+	if not RenderDiagnostics.apply(_viewport, _rendering_method, key):
+		_diagnostic_picker.select(_diagnostic_index_for_key(_diagnostic_key))
+		_status.text = "Unsupported render diagnostic on " + _rendering_method
+		return
+	_diagnostic_key = key
+	_status.text = "Render diagnostic: %s (%s, outside performance baselines)" % [key, _rendering_method]
+
+
+func _diagnostic_index_for_key(key: String) -> int:
+	for i in range(_diagnostic_picker.item_count):
+		if _diagnostic_picker.get_item_metadata(i) == key:
+			return i
+	return 0
+
+
+func _diagnostic_provenance() -> Dictionary:
+	return RenderDiagnostics.provenance(_rendering_method, _diagnostic_key)
+
+
+func _fly_direction() -> Vector3:
+	return Vector3(
+		float(int(_fly_pressed.has(KEY_D)) - int(_fly_pressed.has(KEY_A))),
+		float(int(_fly_pressed.has(KEY_E)) - int(_fly_pressed.has(KEY_Q))),
+		float(int(_fly_pressed.has(KEY_W)) - int(_fly_pressed.has(KEY_S)))
+	)
+
+
+func _fly_tick(delta: float) -> void:
+	if not _fly_mode or _inspector_drag != 1 or _camera_inspector == null or \
+			not _viewport_container.has_focus() or _capture_pending or _has_active_run():
+		return
+	if not is_instance_valid(_camera_inspector.camera) or \
+			_active_scene == null or (_camera_inspector.camera != _active_scene and \
+				 not _active_scene.is_ancestor_of(_camera_inspector.camera)):
+		return
+	var direction: Vector3 = _fly_direction()
+	if direction.is_zero_approx():
+		return
+	var boost: float = 4.0 if _fly_pressed.has(KEY_SHIFT) else 1.0
+	_camera_inspector.fly_translate(direction, clampf(delta, 0.0, 0.1), _fly_speed_control.value * boost)
+	_camera_manipulated = true
+
+
 func _on_inspection_input(event: InputEvent) -> void:
 	if _capture_pending:
 		return
 	if _camera_inspector == null:
 		return
+	if event is InputEventKey and _fly_mode:
+		var physical: InputEventKey = event
+		var code: Key = physical.physical_keycode if physical.physical_keycode != KEY_NONE else physical.keycode
+		if code in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_Q, KEY_E, KEY_SHIFT]:
+			if physical.pressed:
+				_fly_pressed[code] = true
+			else:
+				_fly_pressed.erase(code)
+			_viewport_container.accept_event()
+			return
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
 		if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed and _pixel_toggle.button_pressed:
@@ -1489,6 +1562,8 @@ func _on_inspection_input(event: InputEvent) -> void:
 			return
 		if mouse.button_index == MOUSE_BUTTON_RIGHT:
 			_inspector_drag = 1 if mouse.pressed else 0
+			if not mouse.pressed:
+				_fly_pressed.clear()
 			if mouse.pressed:
 				_viewport_container.grab_focus()
 				_viewport_container.accept_event()
@@ -1508,7 +1583,10 @@ func _on_inspection_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and _inspector_drag != 0:
 		var motion: InputEventMouseMotion = event
 		if _inspector_drag == 1:
-			_camera_inspector.orbit(motion.relative)
+			if _fly_mode:
+				_camera_inspector.fly_look(motion.relative)
+			else:
+				_camera_inspector.orbit(motion.relative)
 		else:
 			_camera_inspector.pan(motion.relative, _viewport_container.size)
 		_camera_manipulated = true

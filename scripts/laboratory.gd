@@ -783,7 +783,6 @@ func _export_frame_sequence() -> void:
 		"experiment_id": String(_manifest.get("id", "")),
 		"parameters": parameters.duplicate(true),
 		"visualization_path": NativeExperimentPackage.display_path(_manifest),
-		"viewport_size": [_viewport.size.x, _viewport.size.y],
 		"inspection": {"grid_overlay": _inspection_grid_enabled, "bounds_overlay": _inspection_bounds_enabled},
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
@@ -830,9 +829,6 @@ func _export_frame_sequence() -> void:
 				"rotation_degrees": [camera_after_setup.global_rotation_degrees.x, camera_after_setup.global_rotation_degrees.y, camera_after_setup.global_rotation_degrees.z],
 				"projection": camera_after_setup.projection, "fov": camera_after_setup.fov
 			}
-		var context_result: Dictionary = writer.update_context(metadata)
-		if not bool(context_result.get("ok", false)):
-			error = String(context_result.get("error", "Cannot persist capture context"))
 	for i in range(frame_count):
 		if not error.is_empty():
 			break
@@ -847,6 +843,21 @@ func _export_frame_sequence() -> void:
 		if texture == null:
 			error = "Viewport texture unavailable"
 			break
+		var rendered: Image = texture.get_image()
+		if rendered == null or rendered.is_empty():
+			error = "No rendered frame available"
+			break
+		if i == 0:
+			# UI layout can complete after setup; use actual captured dimensions.
+			metadata["viewport_size"] = [rendered.get_width(), rendered.get_height()]
+			var context_result: Dictionary = writer.update_context(metadata)
+			if not bool(context_result.get("ok", false)):
+				error = String(context_result.get("error", "Cannot persist capture context"))
+				break
+		elif rendered.get_width() != int(metadata["viewport_size"][0]) or \
+				rendered.get_height() != int(metadata["viewport_size"][1]):
+			error = "Viewport dimensions changed during sequence export"
+			break
 		var observed: Dictionary = _capture_provider_state(source_scene)
 		var active_camera: Camera3D = _viewport.get_camera_3d()
 		if active_camera != null:
@@ -860,7 +871,7 @@ func _export_frame_sequence() -> void:
 		var frame_context: Dictionary = {
 			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest))
 		}
-		var written: Dictionary = writer.write_frame(texture.get_image(), i, observed, frame_context)
+		var written: Dictionary = writer.write_frame(rendered, i, observed, frame_context)
 		if not bool(written.get("ok", false)):
 			error = String(written.get("error", "Frame write failed"))
 			break

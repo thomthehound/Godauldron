@@ -105,10 +105,12 @@ func make_report(experiment_id: String) -> Dictionary:
 		var reported: Variant = _scene.call("godauldron_metrics")
 		if typeof(reported) == TYPE_DICTIONARY:
 			metrics = reported.duplicate(true)
-	var gpu_timing: Dictionary = Observability.resolved_gpu_report(null)
-	if phase == Phase.COMPLETED and _scene != null and _scene.has_method("godauldron_resolved_gpu_timings"):
-		# Evaluated only after sampling; never charged to host callback timing.
-		gpu_timing = Observability.resolved_gpu_report(_scene.call("godauldron_resolved_gpu_timings"))
+	var gpu_timing: Dictionary = {"available": false, "reason": "run_not_completed"}
+	if phase == Phase.COMPLETED:
+		gpu_timing = Observability.resolved_gpu_report(null)
+		if _scene != null and _scene.has_method("godauldron_resolved_gpu_timings"):
+			# Evaluated only after sampling; never charged to host callback timing.
+			gpu_timing = Observability.resolved_gpu_report(_scene.call("godauldron_resolved_gpu_timings"))
 	return {
 		"format_version": 1,
 		"experiment_id": experiment_id,

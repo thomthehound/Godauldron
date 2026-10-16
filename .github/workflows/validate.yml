@@ -73,3 +73,35 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/loxfx_onboarding_smoke.gd
       - name: Verify searchable experiments and saved configurations
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/session_smoke.gd
+
+  portrait-visual-capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download Godot 4
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/fetch_preview.py --major 4
+      - name: Ensure virtual display and software OpenGL
+        run: |
+          if ! command -v xvfb-run >/dev/null || ! dpkg -s libgl1-mesa-dri >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb libgl1-mesa-dri
+          fi
+      - name: Import assets under graphics-backed renderer
+        run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --editor --import --quit --rendering-method gl_compatibility
+      - name: Capture still and translated reference portraits
+        run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/reference_portrait_capture.gd
+      - name: Preserve full-size visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reference-portrait-captures
+          path: visual-artifacts/*.jpg
+          if-no-files-found: warn

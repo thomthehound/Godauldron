@@ -46,6 +46,7 @@ func _verify() -> void:
 		return
 	var inspector = InspectionCamera.new()
 	inspector.bind(camera, AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2)))
+	var initial_state: Dictionary = inspector.snapshot()
 	inspector.orbit(Vector2(42.0, -19.0))
 	inspector.pan(Vector2(18.0, 8.0), Vector2(800, 600))
 	var captured: Dictionary = inspector.snapshot()
@@ -67,6 +68,24 @@ func _verify() -> void:
 			absf(camera.h_offset - 0.13) > 0.00001 or \
 			absf(camera.v_offset + 0.09) > 0.00001 or camera.cull_mask != 1023:
 		_fail("Restoring bookmark did not recover exact camera optics and orbit")
+		return
+	# Reset must restore the complete optics of the originally selected
+	# camera, even after a bookmark overwrote them.
+	inspector.reset()
+	if not camera.global_transform.is_equal_approx(Transform3D(
+		Basis(
+			Vector3(initial_state["basis"][0][0], initial_state["basis"][0][1], initial_state["basis"][0][2]),
+			Vector3(initial_state["basis"][1][0], initial_state["basis"][1][1], initial_state["basis"][1][2]),
+			Vector3(initial_state["basis"][2][0], initial_state["basis"][2][1], initial_state["basis"][2][2])
+		),
+		Vector3(initial_state["position"][0], initial_state["position"][1], initial_state["position"][2])
+	)) or not inspector.target.is_equal_approx(Vector3(
+		initial_state["orbit_target"][0], initial_state["orbit_target"][1], initial_state["orbit_target"][2]
+	)) or camera.keep_aspect != int(initial_state["keep_aspect"]) or \
+			camera.cull_mask != int(initial_state["cull_mask"]) or \
+			camera.frustum_offset != Vector2(initial_state["frustum_offset"][0], initial_state["frustum_offset"][1]) or \
+			absf(camera.fov - float(initial_state["fov"])) > 0.00001:
+		_fail("Reset camera retained bookmark optics or an altered orbit target")
 		return
 	var entry: Dictionary = {
 		"experiment_id": "org.godauldron.example", "camera_path": "CameraRig/Portrait",

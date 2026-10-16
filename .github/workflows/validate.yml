@@ -94,8 +94,8 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y xvfb libgl1-mesa-dri
           fi
-      - name: Import assets under graphics-backed renderer
-        run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --editor --import --quit --rendering-method gl_compatibility
+      - name: Import assets
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --editor --import --quit
       - name: Capture still and translated reference portraits
         run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/reference_portrait_capture.gd
       - name: Preserve full-size visual evidence

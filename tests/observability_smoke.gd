@@ -35,6 +35,7 @@ func _verify() -> void:
 	monitor.observe_frame_tick(1025000, true)
 	monitor.observe_frame_tick(1100000)
 	monitor.observe_frame_tick(1116000)
+	monitor.observe_orchestration(70.0)
 	monitor.observe_callback(35.0, "warmup")
 	monitor.observe_callback(50.0, "sample")
 	monitor.observe_callback(30.0, "sample")
@@ -44,6 +45,7 @@ func _verify() -> void:
 			int(live["excluded_frame_intervals"]) != 1 or \
 			int(live["sample_callback"]["count"]) != 2 or \
 			int(live["warmup_callback"]["count"]) != 1 or \
+			int(live["host_orchestration"]["count"]) != 1 or \
 			int(live["excluded_callbacks"]) != 1:
 		_fail("Frame exclusions or warmup isolation are incorrect")
 		return
@@ -65,7 +67,7 @@ func _verify() -> void:
 		_fail("Missing GPU data was presented as available")
 		return
 	var declared: Dictionary = {
-		"status": "resolved", "synchronization": "completed", "unit": "microseconds",
+		"status": "resolved", "phase": "sample", "synchronization": "completed", "unit": "microseconds",
 		"measurement_source": "device_timestamp", "provider": "synthetic-test-provider",
 		"backend": "test-device", "scope": "simulated_dispatch",
 		"samples": [50.0, 100.0, 150.0]
@@ -76,6 +78,7 @@ func _verify() -> void:
 		return
 	for invalid in [
 		{"status": "pending"},
+		{"phase": "warmup"},
 		{"synchronization": "pending"},
 		{"measurement_source": "host_wall_clock"},
 		{"samples": [-1.0]},

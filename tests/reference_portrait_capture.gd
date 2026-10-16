@@ -57,7 +57,7 @@ func _run() -> void:
 				captured.get_height() != CAPTURE_SIZE.y:
 			_fail("Rendering did not produce the expected portrait image")
 			return
-		var screenshot_path := OUTPUT_DIR + "/reference_" + pose["name"] + ".jpg"
+		var screenshot_path: String = OUTPUT_DIR + "/reference_" + String(pose["name"]) + ".jpg"
 		var saved := captured.save_jpg(screenshot_path, 0.9)
 		if saved != OK:
 			_fail("Could not write portrait screenshot: " + str(saved))
@@ -68,9 +68,9 @@ func _run() -> void:
 		if preview_bytes.is_empty():
 			_fail("Could not encode portrait thumbnail")
 			return
-		print("GODAULDRON_PREVIEW_BEGIN:" + pose["name"])
+		print("GODAULDRON_PREVIEW_BEGIN:" + String(pose["name"]))
 		print(Marshalls.raw_to_base64(preview_bytes))
-		print("GODAULDRON_PREVIEW_END:" + pose["name"])
+		print("GODAULDRON_PREVIEW_END:" + String(pose["name"]))
 		print("Portrait screenshot: " + screenshot_path)
 	print("Reference portrait graphical capture complete")
 	quit(0)

@@ -30,6 +30,7 @@ func _verify() -> void:
 	(host.get("_sequence_start_control") as SpinBox).value = 10
 	(host.get("_sequence_frames_control") as SpinBox).value = 3
 	var scene: Node = host.get("_active_scene")
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://results"))
 	var reports: PackedStringArray = DirAccess.get_files_at("user://results")
 	host.call("_export_frame_sequence")
 	if not bool(host.get("_capture_pending")):

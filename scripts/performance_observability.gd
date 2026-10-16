@@ -106,7 +106,7 @@ func live_snapshot() -> Dictionary:
 		"window_capacity": WINDOW,
 		"frame_time_boundary": "monotonic interval between host _process entry points; includes scheduling/presentation delay; not GPU time",
 		"callback_boundary": "host wall time inside godauldron_step invocation; async GPU completion excluded",
-		"orchestration_boundary": "host _process body wall time minus timed step callbacks; excludes Godot renderer and off-hook engine work"
+		"orchestration_boundary": "host _process wall time until routine dispatch/telemetry completion minus timed step callbacks; excludes run finalization (provider timing resolution, report construction, file I/O), Godot rendering and off-hook engine work"
 	}
 
 

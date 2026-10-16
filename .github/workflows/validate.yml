@@ -65,6 +65,8 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/analysis_smoke.gd
       - name: Verify camera navigation and inspection overlays
         run: .engine/godot --headless --path . --script res://tests/inspection_smoke.gd
+      - name: Verify scene camera bookmarks and pixel mapping
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/inspection_views_smoke.gd
       - name: Verify technical gallery imports, previews, and report isolation
         run: .engine/godot --headless --path . --script res://tests/gallery_smoke.gd
       - name: Verify graphics ownership, presets and image persistence
@@ -104,6 +106,8 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/reference_portrait_capture.gd
       - name: Verify production fixed-step PNG sequence export
         run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/frame_sequence_graphics_smoke.gd
+      - name: Verify one-shot graphical pixel inspection and benchmark exclusion
+        run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/pixel_inspection_graphics_smoke.gd
       - name: Preserve full-size visual evidence
         if: always()
         uses: actions/upload-artifact@v4

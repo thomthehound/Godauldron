@@ -73,6 +73,8 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/loxfx_onboarding_smoke.gd
       - name: Verify searchable experiments and saved configurations
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/session_smoke.gd
+      - name: Verify fixed-step sequence writer, provenance and host exclusion
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/frame_sequence_smoke.gd
 
   portrait-visual-capture:
     runs-on: ubuntu-latest
@@ -98,6 +100,8 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --editor --import --quit
       - name: Capture neutral scalp head
         run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/reference_portrait_capture.gd
+      - name: Verify production fixed-step PNG sequence export
+        run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/frame_sequence_graphics_smoke.gd
       - name: Preserve full-size visual evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -3,6 +3,7 @@ extends Node
 
 var _steps: int = 0
 var timing_calls: int = 0
+var delayed_resolution: bool = false
 
 
 func godauldron_setup(_params: Dictionary) -> void:
@@ -15,6 +16,8 @@ func godauldron_step(_delta: float) -> void:
 
 func godauldron_resolved_gpu_timings() -> Dictionary:
 	timing_calls += 1
+	if delayed_resolution:
+		OS.delay_msec(12)
 	return {
 		"status": "resolved", "phase": "sample",
 		"synchronization": "completed",

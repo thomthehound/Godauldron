@@ -2,7 +2,7 @@ extends Node3D
 ## Neutral inspection material for a head/scalp geometry reference.
 ## The scan's photographic textures are intentionally not used.
 
-@export var matte_color: Color = Color(0.70, 0.73, 0.75)
+@export var matte_color: Color = Color(0.45, 0.48, 0.51)
 
 
 func _ready() -> void:

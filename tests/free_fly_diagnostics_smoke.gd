@@ -119,5 +119,14 @@ func _verify() -> void:
 		_fail("Returning to lit mode did not restore measured run")
 		return
 	host.call("_stop_run")
+	# A provider could override Viewport.debug_draw; attribution must
+	# describe the actual viewport setting rather than silently report lit.
+	var active_viewport: SubViewport = host.get("_viewport")
+	active_viewport.debug_draw = Viewport.DEBUG_DRAW_UNSHADED
+	if host.call("_diagnostic_provenance")["matches_host_selection"] or \
+			int(host.call("_diagnostic_provenance")["effective_viewport_debug_draw"]) != Viewport.DEBUG_DRAW_UNSHADED:
+		_fail("Diagnostic provenance concealed an effective viewport override")
+		return
+	active_viewport.debug_draw = Viewport.DEBUG_DRAW_DISABLED
 	print("Godauldron free-fly and renderer capability smoke passed")
 	quit(0)

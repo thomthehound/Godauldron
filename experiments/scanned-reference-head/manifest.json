@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "id": "org.godauldron.scanned-reference-head",
-  "display_name": "Showcase / Scanned Reference Head (CC BY 3.0)",
+  "display_name": "Showcase / Neutral Scalp Head",
   "category": "Reusable stage templates",
-  "description": "Lee Perry-Smith photogrammetry head for hair silhouette and scalp inspection; attributed CC BY 3.0. No native hair or physics simulation; scale and landmarks require calibration.",
+  "description": "Neutral matte head for inspecting LoxFX hair placement and motion. Scanned geometry by Lee Perry-Smith (CC BY 3.0); no photographic skin, native hair, or simulation included.",
   "entry_scene": "res://scenes/showcase/scanned_reference_head.tscn",
   "visualization_path": "godot_scene",
   "parameters": [

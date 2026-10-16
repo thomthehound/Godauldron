@@ -1640,7 +1640,7 @@ func _discover_campaigns() -> void:
 func _start_campaign() -> void:
 	_fly_pressed.clear()
 	_inspector_drag = 0
-	if _diagnostic_key != "lit":
+	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
 		_status.text = "Switch Render view to Lit before measuring a campaign"
 		return
 	if _capture_pending:
@@ -1679,6 +1679,10 @@ func _begin_campaign_case() -> void:
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
+	if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_finish_run(false)
+		_status.text = "Campaign cancelled: experiment setup enabled a diagnostic render mode"
+		return
 	# Setup may change render settings and ownership between campaign cases.
 	_update_inspection_bounds()
 	_apply_graphics()
@@ -1826,7 +1830,7 @@ func _has_active_run() -> bool:
 func _start_run() -> void:
 	_fly_pressed.clear()
 	_inspector_drag = 0
-	if _diagnostic_key != "lit":
+	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
 		_status.text = "Switch Render view to Lit before measuring a benchmark"
 		return
 	if _capture_pending:
@@ -1852,6 +1856,10 @@ func _start_run() -> void:
 		_active_scene, _collect_parameters(),
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
+	if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_finish_run(false)
+		_status.text = "Benchmark cancelled: experiment setup enabled a diagnostic render mode"
+		return
 	_update_inspection_bounds()
 	_apply_graphics()
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
@@ -1893,6 +1901,10 @@ func _process(delta: float) -> void:
 	var callback_usec_in_frame: int = 0
 	var steps_this_frame := 0
 	while _accumulator >= FIXED_STEP and steps_this_frame < MAX_STEPS_PER_FRAME and _has_active_run():
+		if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+			_finish_run(false)
+			_status.text = "Benchmark cancelled: viewport changed into diagnostic rendering"
+			break
 		_run.advance()
 		_observability.observe_callback(float(_run.last_step_cpu_usec), _run.last_step_phase)
 		callback_usec_in_frame += _run.last_step_cpu_usec

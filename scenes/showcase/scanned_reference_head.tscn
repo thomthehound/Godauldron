@@ -1,0 +1,53 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/showcase/portrait_stage.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://assets/showcase/lee_perry_smith.glb" id="2"]
+[ext_resource type="Texture2D" path="res://assets/showcase/lee_perry_smith_color.jpg" id="3"]
+[ext_resource type="Texture2D" path="res://assets/showcase/lee_perry_smith_normal.jpg" id="4"]
+[ext_resource type="Script" path="res://scripts/scanned_reference_surface.gd" id="5"]
+
+[sub_resource type="Environment" id="reference_environment"]
+background_mode = 2
+background_color = Color(0.15, 0.18, 0.22, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.78, 0.83, 0.88, 1)
+ambient_light_energy = 0.24
+reflected_light_source = 2
+tonemap_mode = 2
+
+[node name="ScannedReferenceHead" instance=ExtResource("1")]
+translation_amplitude_m = 0.09
+
+[node name="StageEnvironment" parent="." index="0"]
+environment = SubResource("reference_environment")
+
+[node name="StageCamera" parent="." index="1"]
+position = Vector3(0.08, 1.58, 0.48)
+rotation_degrees = Vector3(-3.6, 9.5, 0)
+fov = 38.0
+
+[node name="KeySoft" parent="." index="2"]
+light_energy = 0.42
+
+[node name="RimBack" parent="." index="3"]
+light_energy = 0.24
+
+[node name="FillSoft" parent="." index="4"]
+light_energy = 0.18
+
+[node name="Floor" parent="." index="5"]
+visible = false
+
+[node name="Platform" parent="." index="6"]
+visible = false
+
+[node name="NeutralSubject" parent="SubjectMotion" index="0"]
+visible = false
+
+[node name="ScannedHeadMount" type="Node3D" parent="SubjectMotion/SubjectAnchor" index="0"]
+script = ExtResource("5")
+scale = Vector3(0.03, 0.03, 0.03)
+color_texture = ExtResource("3")
+normal_texture = ExtResource("4")
+
+[node name="ScannedHead" parent="SubjectMotion/SubjectAnchor/ScannedHeadMount" index="0" instance=ExtResource("2")]

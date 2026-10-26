@@ -24,7 +24,8 @@ func _verify() -> void:
 	sdr.fill(Color.WHITE)
 	if Writer.validate(sdr, source).get("ok", true) or \
 			Writer.validate(hdr, {"source": "viewport_texture", "stage": "post_transparent_pre_postprocess", "transfer": "scene_linear"}).get("ok", true) or \
-			Writer.validate(hdr, {"source": "godot_render_scene_buffers_rd", "stage": "post_tonemap", "transfer": "scene_linear"}).get("ok", true):
+			Writer.validate(hdr, {"source": "godot_render_scene_buffers_rd", "stage": "post_tonemap", "transfer": "scene_linear"}).get("ok", true) or \
+			Writer.validate(hdr, {"source": "native_provider_verified", "stage": "post_transparent_pre_postprocess", "transfer": "scene_linear"}).get("ok", true):
 		_fail("HDR file writer accepted SDR pixels or unverified render-buffer provenance")
 		return
 	var invalid: Image = hdr.duplicate()

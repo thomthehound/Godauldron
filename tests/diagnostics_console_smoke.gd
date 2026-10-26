@@ -72,6 +72,10 @@ func _verify() -> void:
 		return
 	(host.get("_console_filter") as OptionButton).select(0)
 	host.call("_refresh_diagnostics_console")
+	# Global ring eviction should not imply loss of a newer run's events.
+	for i in range(HostDiagnostics.CAPACITY):
+		host.get("_diagnostics").record("info", "old-run", "background", "Older experiment event")
+	host.call("_refresh_diagnostics_console")
 	var source_scene: Node = host.get("_active_scene")
 	var viewport: SubViewport = host.get("_viewport")
 	viewport.remove_child(source_scene)
@@ -91,6 +95,16 @@ func _verify() -> void:
 	if not console.visible:
 		_fail("Benchmark was allowed to reflow diagnostics console")
 		return
+	var filter: OptionButton = host.get("_console_filter")
+	var snapshot_text: String = (host.get("_console_text") as TextEdit).text
+	if not filter.disabled:
+		_fail("Severity selector remained interactive during measured work")
+		return
+	filter.select(3)
+	host.call("_refresh_diagnostics_console")
+	if (host.get("_console_text") as TextEdit).text != snapshot_text:
+		_fail("Changing log filter redrew the console during a benchmark")
+		return
 	var run: RefCounted = host.get("_run")
 	for i in range(2):
 		run.advance()
@@ -106,9 +120,41 @@ func _verify() -> void:
 	if typeof(report) != TYPE_DICTIONARY or \
 			int(report.get("diagnostic_events", {}).get("provider_ingestion", {}).get("accepted", -1)) != 1 or \
 			int(report.get("diagnostic_events", {}).get("provider_ingestion", {}).get("rejected", -1)) != 1 or \
-			report.get("diagnostic_events", {}).get("events", []).is_empty():
+			report.get("diagnostic_events", {}).get("events", []).is_empty() or \
+			report["diagnostic_events"]["truncated"] or filter.disabled:
 		_fail("Completed run did not preserve validated post-run diagnostic evidence")
 		return
+	# Setup can immediately invalidate a run. Its log excerpt must start
+	# before setup, never reuse the previous run's cursor.
+	viewport.remove_child(probe)
+	probe.queue_free()
+	var reject_probe: Node3D = preload("res://tests/fixtures/diagnostic_setup_reject.gd").new()
+	viewport.add_child(reject_probe)
+	host.set("_active_scene", reject_probe)
+	var prior_cursor: int = int(host.get("_diagnostics").snapshot()["total_recorded"])
+	var setup_folder: String = "user://diagnostic-setup-reject-%d" % OS.get_process_id()
+	host.set("_results_directory", setup_folder)
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")) or filter.disabled:
+		_fail("Setup-diagnostic rejection did not finalize and release the console")
+		return
+	var setup_files: PackedStringArray = DirAccess.get_files_at(setup_folder)
+	if setup_files.size() != 1:
+		_fail("Early setup rejection did not persist an auditable report")
+		return
+	var cancelled: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(setup_folder.path_join(setup_files[0]))
+	)
+	if typeof(cancelled) != TYPE_DICTIONARY or cancelled.get("completed", true) or \
+			cancelled["diagnostic_events"]["truncated"] or \
+			cancelled["diagnostic_events"]["events"].is_empty():
+		_fail("Immediate setup cancellation inherited previous run diagnostics")
+		return
+	for item in cancelled["diagnostic_events"]["events"]:
+		if int(item["sequence"]) <= prior_cursor:
+			_fail("Early cancelled run included unrelated historical events")
+			return
+	viewport.debug_draw = Viewport.DEBUG_DRAW_DISABLED
 	var export_folder: String = "user://ui-diagnostics-test-%d" % OS.get_process_id()
 	host.set("_diagnostics_directory", export_folder)
 	host.call("_export_diagnostics_console")

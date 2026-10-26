@@ -1373,12 +1373,22 @@ func _export_frame_sequence(image_format: String = "png") -> void:
 				error = "HDR frame %d: %s" % [i, String(started_hdr.get("error", "cannot arm compositor"))]
 				break
 			frame_hdr_source = _hdr_capture.source()
+			var intended_transform: Transform3D = current_camera.global_transform
+			var intended_projection: int = int(current_camera.projection)
+			var intended_fov: float = current_camera.fov
+			var intended_step: int = first_step + i
 			var read_result: Dictionary = {}
 			for deadline in range(180):
 				await RenderingServer.frame_post_draw
 				if not is_instance_valid(source_scene) or _active_scene != source_scene or \
 						not is_instance_valid(current_camera) or _viewport.get_camera_3d() != current_camera:
 					read_result = {"ok": false, "error": "Scene/camera changed during HDR readback"}
+					break
+				if _playback.step_index != intended_step or \
+						not current_camera.global_transform.is_equal_approx(intended_transform) or \
+						int(current_camera.projection) != intended_projection or \
+						absf(current_camera.fov - intended_fov) > 0.00001:
+					read_result = {"ok": false, "error": "Source simulation/camera changed during HDR readback"}
 					break
 				var reading: Dictionary = _hdr_capture.status()
 				if reading.get("state") == "ready":

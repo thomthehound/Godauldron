@@ -79,6 +79,8 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/gallery_smoke.gd
       - name: Verify graphics ownership, presets and image persistence
         run: .engine/godot --headless --path . --script res://tests/capture_graphics_smoke.gd
+      - name: Verify camera-only exposure grading and provider Environment preservation
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/environment_inspection_smoke.gd
       - name: Verify saved image comparisons and visual diff UI
         run: .engine/godot --headless --path . --script res://tests/visual_comparison_smoke.gd
       - name: Verify native package isolation and deterministic showcase stages
@@ -116,6 +118,8 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/frame_sequence_graphics_smoke.gd
       - name: Verify one-shot graphical pixel inspection and benchmark exclusion
         run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/pixel_inspection_graphics_smoke.gd
+      - name: Verify graded camera exposure across rendered PNG stills and sequences
+        run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/environment_graphics_smoke.gd
       - name: Verify actual graphical viewport renderer CPU/GPU reporting
         run: timeout --signal=TERM --kill-after=5s 90s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --script res://tests/engine_viewport_graphics_smoke.gd
       - name: Preserve full-size visual evidence

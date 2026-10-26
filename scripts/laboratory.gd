@@ -11,6 +11,7 @@ const CAMPAIGN_ROOT := "res://campaigns"
 const InspectionCamera = preload("res://scripts/inspection_camera.gd")
 const InspectionViews = preload("res://scripts/inspection_views.gd")
 const CameraTracks = preload("res://scripts/camera_tracks.gd")
+const EnvironmentInspection = preload("res://scripts/environment_inspection.gd")
 const PixelInspector = preload("res://scripts/pixel_inspector.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const RenderDiagnostics = preload("res://scripts/render_diagnostics.gd")
@@ -46,6 +47,12 @@ var _quality_picker: OptionButton
 var _graphics_advanced: GridContainer
 var _graphics_inputs: Dictionary = {}
 var _graphics_values: Dictionary = GraphicsSettings.PROFILES["High"].duplicate(true)
+var _grade_controller = EnvironmentInspection.new()
+var _grade_enabled: CheckButton
+var _grade_exposure: SpinBox
+var _grade_contrast: SpinBox
+var _grade_saturation: SpinBox
+var _grade_last: Dictionary = {"exposure": 0.0, "contrast": 1.0, "saturation": 1.0}
 var _graphics_owned: PackedStringArray = PackedStringArray()
 var _graphics_run_snapshot: Dictionary = {}
 var _capture_sequence: int = 0
@@ -145,6 +152,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_grade_controller.release()
 	_engine_render.deactivate(_viewport)
 
 
@@ -499,6 +507,17 @@ func _build_ui() -> void:
 	_add_quality_boolean("use_taa", "Temporal AA")
 	_add_quality_boolean("use_debanding", "Debanding")
 	_add_quality_number("positional_shadow_atlas_size", "Local shadow atlas", 0, 16384, 1024)
+	var grading_label := Label.new()
+	grading_label.text = "Host inspection grading"
+	_graphics_advanced.add_child(grading_label)
+	_grade_enabled = CheckButton.new()
+	_grade_enabled.text = "Camera-only (unmeasured)"
+	_grade_enabled.tooltip_text = "Clone the resolved authored Environment; never edit provider resources"
+	_grade_enabled.toggled.connect(_update_environment_grade)
+	_graphics_advanced.add_child(_grade_enabled)
+	_grade_exposure = _grade_spin("Exposure offset (EV)", -4.0, 4.0, 0.25, 0.0)
+	_grade_contrast = _grade_spin("Post-tonemap contrast", 0.5, 1.5, 0.05, 1.0)
+	_grade_saturation = _grade_spin("Post-tonemap saturation", 0.0, 2.0, 0.05, 1.0)
 
 	_viewport = SubViewport.new()
 	_viewport.size = Vector2i(960, 720)
@@ -676,6 +695,71 @@ func _clear_diagnostics_console() -> void:
 	_diagnostics.clear()
 	_refresh_diagnostics_console()
 	_status.text = "Host diagnostic event list cleared"
+
+
+func _environment_grade_parameters() -> Dictionary:
+	return {
+		"exposure": _grade_exposure.value,
+		"contrast": _grade_contrast.value,
+		"saturation": _grade_saturation.value
+	}
+
+
+func _apply_grade_after_setup() -> bool:
+	if _active_scene == null:
+		return false
+	var params: Dictionary = _environment_grade_parameters()
+	var status: Dictionary = _grade_controller.apply(_active_scene, _viewport,
+		float(params["exposure"]), float(params["contrast"]), float(params["saturation"]))
+	if not bool(status.get("ok", false)):
+		_status.text = "Inspection grading unavailable: " + String(status.get("error", "unknown"))
+		return false
+	_grade_last = params
+	return true
+
+
+func _update_environment_grade(enabled: bool) -> void:
+	if _grade_enabled == null:
+		return
+	if _capture_pending or _has_active_run() or _campaign != null:
+		_grade_enabled.set_pressed_no_signal(_grade_controller.enabled())
+		for pair in [
+			[_grade_exposure, "exposure"], [_grade_contrast, "contrast"],
+			[_grade_saturation, "saturation"]
+		]:
+			(pair[0] as SpinBox).set_block_signals(true)
+			(pair[0] as SpinBox).value = float(_grade_last[pair[1]])
+			(pair[0] as SpinBox).set_block_signals(false)
+		_status.text = "Cannot change inspection grading during benchmark or capture"
+		return
+	if not enabled:
+		_grade_controller.release()
+		_status.text = "Authored scene/environment restored"
+		return
+	if not _apply_grade_after_setup():
+		_grade_controller.release()
+		_grade_enabled.set_pressed_no_signal(false)
+
+
+func _environment_provenance() -> Dictionary:
+	if _active_scene == null:
+		return {"available": false}
+	return _grade_controller.state(_active_scene, _viewport)
+
+
+func _grade_spin(label_text: String, minimum: float, maximum: float,
+		increment: float, initial: float) -> SpinBox:
+	var label := Label.new()
+	label.text = label_text
+	_graphics_advanced.add_child(label)
+	var input := SpinBox.new()
+	input.min_value = minimum
+	input.max_value = maximum
+	input.step = increment
+	input.value = initial
+	input.value_changed.connect(func(_unused: float) -> void: _update_environment_grade(_grade_enabled.button_pressed))
+	_graphics_advanced.add_child(input)
+	return input
 
 
 func _session_snapshot(name: String) -> Dictionary:
@@ -1017,6 +1101,7 @@ func _capture_screenshot() -> void:
 		"playback": _playback.snapshot(),
 		"parameters": _collect_parameters(),
 		"parameter_source": "current_controls_or_preview",
+		"environment": _environment_provenance(),
 		"render_diagnostic": _diagnostic_provenance(),
 		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest)),
 		"inspection": {
@@ -1092,6 +1177,7 @@ func _export_frame_sequence() -> void:
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
 		"capture_is_not_a_benchmark": true,
+		"environment": _environment_provenance(),
 		"render_diagnostic": _diagnostic_provenance(),
 		"camera_track": _track_provenance(first_step, true)
 	}
@@ -1125,10 +1211,15 @@ func _export_frame_sequence() -> void:
 	_sequence_frames_control.editable = false
 	_playback.bind(source_scene, parameters, _playback_delta_control.value)
 	var error: String = ""
+	var regrade: bool = _grade_enabled.button_pressed
+	if regrade:
+		_grade_controller.release()
 	if not _playback.reset() or not _playback.seek(first_step):
 		error = "Unable to reset/seek experiment playback"
 	elif track_for_capture and not _apply_camera_track(first_step):
 		error = "Unable to bind saved camera track after provider setup"
+	elif regrade and not _apply_grade_after_setup():
+		error = "Unable to bind authored Environment grading after provider setup"
 	else:
 		# Setup may mutate graphics and its ownership contract. Reconcile
 		# host-controlled settings before collecting the rendered baseline.
@@ -1167,6 +1258,8 @@ func _export_frame_sequence() -> void:
 			# the active camera and change viewport diagnostic rendering.
 			metadata["scene_camera_path"] = _active_scene_camera_path()
 			metadata["render_diagnostic"] = _diagnostic_provenance()
+			metadata["environment"] = _environment_provenance()
+			metadata["environment_basis"] = "first_captured_frame"
 			metadata["render_diagnostic_basis"] = "first_captured_frame"
 			# UI layout can complete after setup; use actual captured dimensions.
 			metadata["viewport_size"] = [rendered.get_width(), rendered.get_height()]
@@ -1191,6 +1284,7 @@ func _export_frame_sequence() -> void:
 		var frame_context: Dictionary = {
 			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
 			"render_diagnostic": _diagnostic_provenance(),
+			"environment": _environment_provenance(),
 			"scene_camera_path": _active_scene_camera_path(),
 			"camera_track": _track_provenance(first_step + i)
 		}
@@ -1308,6 +1402,8 @@ func _select_experiment(index: int) -> void:
 	_comparison_table.clear()
 	_last_campaign_report_path = ""
 	_last_campaign_summary.clear()
+	_grade_controller.release()
+	_grade_enabled.set_pressed_no_signal(false)
 	_inspector_drag = 0
 	_fly_pressed.clear()
 	_camera_inspector = null
@@ -1397,7 +1493,11 @@ func _preview_active_scene() -> void:
 		_status.text = "Scene choice changed; active run cancelled. " + _status.text
 	# Preview itself does not create a measured run.
 	if _active_scene != null and _active_scene.has_method("godauldron_preview"):
+		var regrade: bool = _grade_enabled.button_pressed
+		_grade_controller.release()
 		_active_scene.call("godauldron_preview", _collect_parameters())
+		if regrade and not _apply_grade_after_setup():
+			_grade_enabled.set_pressed_no_signal(false)
 		_playback.bind(_active_scene, _collect_parameters(), _playback_delta_control.value)
 		_playback_accumulator = 0.0
 		_update_playback_ui()
@@ -1479,12 +1579,16 @@ func _choose_scene_camera(index: int) -> void:
 	if camera == null:
 		_status.text = "The selected scene camera is unavailable"
 		return
+	var regrade: bool = _grade_enabled.button_pressed
+	_grade_controller.release()
 	camera.current = true
 	_fly_pressed.clear()
 	_inspector_drag = 0
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	_camera_manipulated = false
+	if regrade and not _apply_grade_after_setup():
+		_grade_enabled.set_pressed_no_signal(false)
 	_refresh_scene_cameras()
 	_refresh_camera_tracks()
 
@@ -1645,13 +1749,23 @@ func _apply_camera_track(step: int) -> bool:
 		_active_scene, String(_active_track["camera_path"]))
 	if camera == null:
 		return false
+	var regrade: bool = _grade_enabled.button_pressed
+	var grade_switch: bool = regrade and _grade_controller.bound_camera() != camera
+	if grade_switch:
+		_grade_controller.release()
 	if _camera_inspector == null or _camera_inspector.camera != camera:
 		_camera_inspector = InspectionCamera.new()
 		_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	camera.current = true
 	var state: Dictionary = CameraTracks.evaluate(_active_track, step)
 	if state.is_empty() or not _camera_inspector.restore(state):
+		if grade_switch:
+			_grade_enabled.set_pressed_no_signal(false)
 		return false
+	if regrade and (grade_switch or not _grade_controller.enabled()):
+		if not _apply_grade_after_setup():
+			_grade_enabled.set_pressed_no_signal(false)
+			return false
 	_camera_manipulated = true
 	return true
 
@@ -1747,12 +1861,20 @@ func _restore_inspection_view() -> void:
 	if camera == null:
 		_status.text = "View's scene camera no longer exists"
 		return
+	var regrade: bool = _grade_enabled.button_pressed
+	if regrade and _grade_controller.bound_camera() != camera:
+		_grade_controller.release()
 	camera.current = true
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	if not _camera_inspector.restore(record["state"]):
+		if regrade:
+			_grade_controller.release()
+			_grade_enabled.set_pressed_no_signal(false)
 		_status.text = "View camera state was rejected"
 		return
+	if regrade and not _apply_grade_after_setup():
+		_grade_enabled.set_pressed_no_signal(false)
 	_camera_manipulated = true
 	_refresh_scene_cameras()
 	_status.text = "Restored viewpoint: " + String(record["name"])
@@ -2027,6 +2149,9 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	if _grade_enabled.button_pressed:
+		_status.text = "Disable host inspection grading before measuring a campaign"
+		return
 	_fly_pressed.clear()
 	_inspector_drag = 0
 	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
@@ -2233,6 +2358,9 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	if _grade_enabled.button_pressed:
+		_status.text = "Disable host inspection grading before measuring a benchmark"
+		return
 	_fly_pressed.clear()
 	_inspector_drag = 0
 	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
@@ -2478,6 +2606,7 @@ func _finish_run(completed: bool) -> void:
 		_provider_timing_label.text = "Provider GPU: unavailable (%s)" % String(gpu.get("reason", "not reported"))
 	report["engine_viewport_telemetry"] = _engine_render.sample_report()
 	report["runtime_environment"] = _runtime_environment.duplicate(true)
+	report["environment"] = _environment_provenance()
 	report["graphics"] = _graphics_run_snapshot.duplicate(true)
 	report["visualization_path"] = NativeExperimentPackage.display_path(_manifest)
 	report["measurement_boundary"] = "host_godauldron_step_callback_cpu_wall_only; excludes native GPU execution, completion and presentation"

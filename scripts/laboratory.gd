@@ -116,6 +116,7 @@ var _console_text: TextEdit
 var _console_filter: OptionButton
 var _diagnostics_directory: String = "user://diagnostics"
 var _run_diagnostic_cursor: int = 0
+var _run_diagnostic_drops: int = 0
 var _report_sequence: int = 0
 # Configurable result location also allows integration tests to simulate I/O failure.
 var _results_directory: String = "user://results"
@@ -584,7 +585,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _log_event(level: String, source: String, code: String, message: String,
 		context: Dictionary = {}) -> void:
-	if _diagnostics.record(level, source, code, message, context) and \
+	var safe_message: String = message.replace("\n", " ").replace("\r", " ").replace("\t", " ").left(HostDiagnostics.MAX_MESSAGE)
+	if _diagnostics.record(level, source, code, safe_message, context) and \
 			_console_panel != null and _console_panel.visible and not _capture_pending and not _has_active_run():
 		_refresh_diagnostics_console()
 
@@ -1837,6 +1839,7 @@ func _begin_campaign_case() -> void:
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
 	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
+	_run_diagnostic_drops = int(_diagnostics.snapshot()["dropped_oldest"])
 	_log_event("info", "campaign", "case_started", "Measured campaign case started",
 		{"experiment_id": String(_manifest.get("id", "")),
 		"case_index": int(next_case["case_index"]), "repetition": int(next_case["repetition"])})
@@ -2024,6 +2027,7 @@ func _start_run() -> void:
 	_accumulator = 0.0
 	_status.text = "Running %s" % String(_manifest["display_name"])
 	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
+	_run_diagnostic_drops = int(_diagnostics.snapshot()["dropped_oldest"])
 	_log_event("info", "benchmark", "started", "Measured run started",
 		{"experiment_id": String(_manifest["id"]), "requested_steps": int(_run_steps.value),
 		"warmup_steps": int(_warmup_steps.value)})
@@ -2195,16 +2199,18 @@ func _finish_run(completed: bool) -> void:
 		{"experiment_id": String(_manifest.get("id", "")),
 		"sample_steps": int(report.get("steps", 0))})
 	var run_events: Array[Dictionary] = []
+	var run_events_truncated: bool = false
 	for entry in _diagnostics.entries():
 		if int(entry["sequence"]) > _run_diagnostic_cursor:
 			run_events.append(entry)
 			if run_events.size() > 100:
 				run_events.pop_front()
+				run_events_truncated = true
 	report["diagnostic_events"] = {
 		"source_scope": "structured host lifecycle and post-run provider hook only",
 		"provider_ingestion": provider_events,
 		"events": run_events,
-		"truncated": _diagnostics.snapshot()["dropped_oldest"] > 0 or run_events.size() >= 100
+		"truncated": run_events_truncated or int(_diagnostics.snapshot()["dropped_oldest"]) > _run_diagnostic_drops
 	}
 	report["report_preparation_host_wall_usec"] = Time.get_ticks_usec() - report_preparation_started_usec
 	report["report_preparation_boundary"] = "run report construction, experiment metrics, provider timing and optional diagnostics queries; excludes JSON serialization and disk I/O"

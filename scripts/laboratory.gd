@@ -23,6 +23,7 @@ const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.g
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
 const ExperimentPlayback = preload("res://scripts/experiment_playback.gd")
 const LabSession = preload("res://scripts/lab_session.gd")
+const HostDiagnostics = preload("res://scripts/host_diagnostics.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
@@ -109,6 +110,12 @@ var _last_campaign_summary: Dictionary = {}
 
 var _run: ExperimentRun = null
 var _accumulator: float = 0.0
+var _diagnostics = HostDiagnostics.new()
+var _console_panel: VBoxContainer
+var _console_text: TextEdit
+var _console_filter: OptionButton
+var _diagnostics_directory: String = "user://diagnostics"
+var _run_diagnostic_cursor: int = 0
 var _report_sequence: int = 0
 # Configurable result location also allows integration tests to simulate I/O failure.
 var _results_directory: String = "user://results"
@@ -117,6 +124,7 @@ var _results_directory: String = "user://results"
 func _ready() -> void:
 	_bookmark_entries = InspectionViews.read(_bookmarks_root)
 	_build_ui()
+	_diagnostics.record("info", "host", "started", "Godauldron laboratory initialized")
 	_engine_render.activate(_viewport)
 	_runtime_environment = EngineViewportTelemetry.runtime_environment()
 	_update_runtime_environment_label()
@@ -142,6 +150,11 @@ func _build_ui() -> void:
 	title.text = "GODAULDRON  |  Technology Laboratory"
 	title.add_theme_font_size_override("font_size", 21)
 	header.add_child(title)
+	var log_toggle := Button.new()
+	log_toggle.text = "Messages (F3)"
+	log_toggle.tooltip_text = "Show structured host and post-run provider diagnostic events"
+	log_toggle.pressed.connect(_toggle_diagnostics_console)
+	header.add_child(log_toggle)
 
 	var content := HBoxContainer.new()
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -525,12 +538,104 @@ func _build_ui() -> void:
 	_observability_plot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	performance_panel.add_child(_observability_plot)
 
+	_console_panel = VBoxContainer.new()
+	_console_panel.visible = false
+	root.add_child(_console_panel)
+	var console_bar := HBoxContainer.new()
+	_console_panel.add_child(console_bar)
+	var console_title := Label.new()
+	console_title.text = "Diagnostic events (host and post-run provider only)"
+	console_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	console_bar.add_child(console_title)
+	_console_filter = OptionButton.new()
+	for level in ["all", "info", "warning", "error"]:
+		_console_filter.add_item(level.capitalize())
+		_console_filter.set_item_metadata(_console_filter.item_count - 1, level)
+	_console_filter.item_selected.connect(func(_index: int) -> void: _refresh_diagnostics_console())
+	console_bar.add_child(_console_filter)
+	var export_button := Button.new()
+	export_button.text = "Export JSON"
+	export_button.pressed.connect(_export_diagnostics_console)
+	console_bar.add_child(export_button)
+	var clear_button := Button.new()
+	clear_button.text = "Clear"
+	clear_button.pressed.connect(_clear_diagnostics_console)
+	console_bar.add_child(clear_button)
+	_console_text = TextEdit.new()
+	_console_text.editable = false
+	_console_text.scroll_fit_content_height = false
+	_console_text.custom_minimum_size = Vector2(0, 115)
+	_console_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_console_panel.add_child(_console_text)
+
 	_comparison_window = VisualComparisonWindow.new()
 	_comparison_window.capture_directory = _capture_directory
 	_comparison_window.visible = false
 	_comparison_window.transient = true
 	_comparison_window.exclusive = true
 	add_child(_comparison_window)
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F3:
+		_toggle_diagnostics_console()
+		get_viewport().set_input_as_handled()
+
+
+func _log_event(level: String, source: String, code: String, message: String,
+		context: Dictionary = {}) -> void:
+	var safe_message: String = message.replace("\n", " ").replace("\r", " ").replace("\t", " ").left(HostDiagnostics.MAX_MESSAGE)
+	if _diagnostics.record(level, source, code, safe_message, context) and \
+			_console_panel != null and _console_panel.visible and not _capture_pending and not _has_active_run():
+		_refresh_diagnostics_console()
+
+
+func _refresh_diagnostics_console() -> void:
+	if _capture_pending or _has_active_run():
+		return
+	if _console_text == null or _console_filter == null:
+		return
+	var level: String = String(_console_filter.get_item_metadata(_console_filter.selected))
+	var visible_entries: Array[Dictionary] = _diagnostics.entries(level)
+	var lines: PackedStringArray = PackedStringArray()
+	var start: int = maxi(0, visible_entries.size() - 100)
+	for i in range(start, visible_entries.size()):
+		var item: Dictionary = visible_entries[i]
+		lines.append("%s  %-7s  [%s:%s] %s" % [
+			String(item["utc_time"]), String(item["level"]).to_upper(),
+			String(item["source"]), String(item["code"]), String(item["message"])
+		])
+	_console_text.text = "\n".join(lines)
+	_console_text.set_caret_line(_console_text.get_line_count() - 1)
+
+
+func _toggle_diagnostics_console() -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Finish benchmark or capture before opening/closing messages"
+		return
+	_console_panel.visible = not _console_panel.visible
+	if _console_panel.visible:
+		_refresh_diagnostics_console()
+
+
+func _export_diagnostics_console() -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Finish benchmark or capture before exporting diagnostics"
+		return
+	var result: Dictionary = _diagnostics.export(_diagnostics_directory)
+	if bool(result.get("ok", false)):
+		_status.text = "Diagnostic events exported: " + String(result["path"])
+	else:
+		_status.text = "Diagnostic export failed: " + String(result.get("error", "unknown"))
+
+
+func _clear_diagnostics_console() -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Finish benchmark or capture before clearing diagnostics"
+		return
+	_diagnostics.clear()
+	_refresh_diagnostics_console()
+	_status.text = "Host diagnostic event list cleared"
 
 
 func _session_snapshot(name: String) -> Dictionary:
@@ -901,8 +1006,11 @@ func _capture_screenshot() -> void:
 	_capture_pending = false
 	if not bool(result["ok"]):
 		_status.text = "Capture failed: " + String(result["error"])
+		_log_event("error", "capture", "image_failed", String(result["error"]))
 	else:
 		_status.text = "Image captured: " + String(result["image"])
+		_log_event("info", "capture", "image_saved", "Screenshot and provenance saved",
+			{"experiment_id": String(_manifest.get("id", ""))})
 
 
 
@@ -1126,6 +1234,9 @@ func _select_experiment(index: int) -> void:
 	var candidate: Dictionary = _experiments[index]
 	var native_status: Dictionary = NativeExperimentPackage.preflight(candidate)
 	if not bool(native_status.get("ok", false)):
+		_log_event("warning", "native", "preflight_rejected",
+			String(native_status.get("error", "Native package unavailable")),
+			{"experiment_id": String(candidate.get("id", ""))})
 		_status.text = String(native_status.get("error", "Native package unavailable"))
 		_select_visible_current()
 		return
@@ -1214,6 +1325,8 @@ func _select_experiment(index: int) -> void:
 	_apply_graphics()
 	_status.text = String(_manifest.get("description", _manifest["display_name"]))
 	_discover_campaigns()
+	_log_event("info", "experiment", "selected", String(_manifest.get("display_name", "Experiment selected")),
+		{"experiment_id": String(_manifest["id"])})
 
 
 func _preview_active_scene() -> void:
@@ -1703,6 +1816,8 @@ func _start_campaign() -> void:
 		_status.text = "Invalid campaign: " + ", ".join(errors)
 		_campaign = null
 		return
+	_log_event("info", "campaign", "started", "Campaign configured",
+		{"experiment_id": String(_manifest.get("id", ""))})
 	_begin_campaign_case()
 
 
@@ -1711,6 +1826,8 @@ func _begin_campaign_case() -> void:
 	_engine_render.reset()
 	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
 	var next_case: Dictionary = _campaign.next_case()
+	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
+	_console_filter.disabled = true
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
@@ -1724,6 +1841,9 @@ func _begin_campaign_case() -> void:
 	_apply_graphics()
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
+	_log_event("info", "campaign", "case_started", "Measured campaign case started",
+		{"experiment_id": String(_manifest.get("id", "")),
+		"case_index": int(next_case["case_index"]), "repetition": int(next_case["repetition"])})
 	_status.text = "Campaign case %d, repetition %d" % [
 		int(next_case["case_index"]) + 1, int(next_case["repetition"]) + 1
 	]
@@ -1735,6 +1855,10 @@ func _finish_campaign(completed: bool) -> void:
 	_show_comparison(_last_campaign_summary)
 	var path: String = _save_report(_last_campaign_summary, "campaign_" + String(_last_campaign_summary["campaign_id"]))
 	_last_campaign_report_path = path
+	_log_event("info" if completed and not path.is_empty() else "warning",
+		"campaign", "completed" if completed else "cancelled",
+		"Campaign summary persisted" if completed and not path.is_empty() else "Campaign ended or could not persist",
+		{"experiment_id": String(_manifest.get("id", ""))})
 	_campaign = null
 	if path.is_empty():
 		# _save_report set the concrete I/O error. Never replace it with success.
@@ -1888,6 +2012,8 @@ func _start_run() -> void:
 	_observability.reset_run()
 	_engine_render.reset()
 	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
+	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
+	_console_filter.disabled = true
 	_run = ExperimentRun.new()
 	_run.begin(
 		_active_scene, _collect_parameters(),
@@ -1903,6 +2029,9 @@ func _start_run() -> void:
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
 	_status.text = "Running %s" % String(_manifest["display_name"])
+	_log_event("info", "benchmark", "started", "Measured run started",
+		{"experiment_id": String(_manifest["id"]), "requested_steps": int(_run_steps.value),
+		"warmup_steps": int(_warmup_steps.value)})
 	_update_telemetry()
 
 
@@ -2047,6 +2176,7 @@ func _finish_run(completed: bool) -> void:
 		return
 	var finished_run: ExperimentRun = _run
 	_run = null
+	_console_filter.disabled = false
 	if not completed:
 		finished_run.cancel()
 	finished_run.host_observations = _observability.report_snapshot()
@@ -2055,8 +2185,43 @@ func _finish_run(completed: bool) -> void:
 	# orchestration while explicitly recording its host-side wall duration.
 	var report_preparation_started_usec: int = Time.get_ticks_usec()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
+	var provider_events: Dictionary = {"accepted": 0, "rejected": 0}
+	if is_instance_valid(_active_scene) and _active_scene.has_method("godauldron_diagnostics"):
+		# Optional producer diagnostics run outside sampled callbacks.
+		# The host validates data; no arbitrary scripts or commands are loaded.
+		provider_events = _diagnostics.ingest_provider(
+			_active_scene.call("godauldron_diagnostics"), "provider")
+		if int(provider_events["rejected"]) != 0:
+			_log_event("warning", "provider", "diagnostics_rejected",
+				"Provider returned malformed or excessive diagnostic records",
+				{"rejected_count": int(provider_events["rejected"])})
+	_log_event("info" if report.get("completed", false) else "warning",
+		"benchmark", "completed" if report.get("completed", false) else "cancelled",
+		"Measured callbacks finished; report preparation complete",
+		{"experiment_id": String(_manifest.get("id", "")),
+		"sample_steps": int(report.get("steps", 0))})
+	var run_events: Array[Dictionary] = []
+	var run_events_truncated: bool = false
+	var all_events: Array[Dictionary] = _diagnostics.entries()
+	# A full global ring may evict old experiments without losing any
+	# messages from this run. Only an eviction past this run's first sequence
+	# constitutes loss of its evidence.
+	var ring_evicted_current_run: bool = not all_events.is_empty() and \
+		int(all_events.front()["sequence"]) > _run_diagnostic_cursor + 1
+	for entry in all_events:
+		if int(entry["sequence"]) > _run_diagnostic_cursor:
+			run_events.append(entry)
+			if run_events.size() > 100:
+				run_events.pop_front()
+				run_events_truncated = true
+	report["diagnostic_events"] = {
+		"source_scope": "structured host lifecycle and post-run provider hook only",
+		"provider_ingestion": provider_events,
+		"events": run_events,
+		"truncated": run_events_truncated or ring_evicted_current_run
+	}
 	report["report_preparation_host_wall_usec"] = Time.get_ticks_usec() - report_preparation_started_usec
-	report["report_preparation_boundary"] = "run report construction, experiment metrics and provider timing query; excludes JSON serialization and disk I/O"
+	report["report_preparation_boundary"] = "run report construction, experiment metrics, provider timing and optional diagnostics queries; excludes JSON serialization and disk I/O"
 	var gpu: Dictionary = report["provider_gpu_timing"]
 	if bool(gpu.get("available", false)):
 		_provider_timing_label.text = "Provider GPU (%s; declared resolved): p50 %.3f / p95 %.3f ms" % [
@@ -2094,6 +2259,8 @@ func _finish_run(completed: bool) -> void:
 		return
 	if result_path.is_empty():
 		# Keep _save_report's error; this run executed but its data was NOT saved.
+		_log_event("error", "report", "persist_failed", "Measured run report could not be written",
+			{"experiment_id": String(_manifest.get("id", ""))})
 		return
 	_status.text = "%s: %d measured steps, %d warmup steps. Report: %s" % [
 		"Complete" if completed else "Stopped",

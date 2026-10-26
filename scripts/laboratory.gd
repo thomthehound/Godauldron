@@ -17,6 +17,8 @@ const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const RenderDiagnostics = preload("res://scripts/render_diagnostics.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
+const HdrSceneCapture = preload("res://scripts/hdr_scene_capture.gd")
+const HdrExrCapture = preload("res://scripts/hdr_exr_capture.gd")
 const FrameSequence = preload("res://scripts/frame_sequence.gd")
 const Observability = preload("res://scripts/performance_observability.gd")
 const EngineViewportTelemetry = preload("res://scripts/engine_viewport_telemetry.gd")
@@ -58,6 +60,8 @@ var _graphics_run_snapshot: Dictionary = {}
 var _capture_sequence: int = 0
 var _capture_pending: bool = false
 var _capture_directory: String = "user://captures"
+var _hdr_capture = HdrSceneCapture.new()
+var _hdr_directory: String = "user://captures"
 var _comparison_window: Window
 var _camera_inspector: RefCounted = null
 var _inspection_overlay: Node3D
@@ -152,6 +156,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_hdr_capture.release()
 	_grade_controller.release()
 	_engine_render.deactivate(_viewport)
 
@@ -492,6 +497,11 @@ func _build_ui() -> void:
 	capture_button.text = "Capture PNG"
 	capture_button.pressed.connect(_capture_screenshot)
 	toolbar.add_child(capture_button)
+	var hdr_button := Button.new()
+	hdr_button.text = "Capture linear EXR"
+	hdr_button.tooltip_text = "One-shot pre-tonemap RGBA16F/32F scene color on Forward+/Mobile; fails explicitly if unavailable"
+	hdr_button.pressed.connect(_capture_linear_exr)
+	toolbar.add_child(hdr_button)
 	var compare_button := Button.new()
 	compare_button.text = "Compare images…"
 	compare_button.pressed.connect(_open_visual_comparison)
@@ -1055,6 +1065,96 @@ func _capture_provider_state(scene: Node) -> Dictionary:
 		return {}
 	var observed: Variant = scene.call("godauldron_capture_metadata")
 	return observed.duplicate(true) if typeof(observed) == TYPE_DICTIONARY else {}
+
+
+func _capture_linear_exr() -> void:
+	if _capture_pending or _active_scene == null or _has_active_run() or _campaign != null:
+		_status.text = "Finish current capture/benchmark/campaign before HDR capture"
+		return
+	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
+		_status.text = "Close image comparison before HDR readback"
+		return
+	var scene: Node = _active_scene
+	var camera: Camera3D = _viewport.get_camera_3d()
+	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
+		_status.text = "HDR capture requires a scene-owned active Camera3D"
+		return
+	# Freeze simulation and camera intent before arming asynchronous HDR work.
+	# The frame and its JSON sidecar must describe one immutable timeline step.
+	_playback.pause()
+	_playback_accumulator = 0.0
+	_update_playback_ui()
+	var capture_step: int = _playback.step_index
+	if _track_enabled != null and _track_enabled.button_pressed and not _apply_camera_track(capture_step):
+		_status.text = "HDR capture requires the selected camera track to resolve at the frozen step"
+		return
+	# Applying a camera track may change the currently active scene camera.
+	camera = _viewport.get_camera_3d()
+	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
+		_status.text = "HDR capture camera ownership changed while freezing the track"
+		return
+	var frozen_playback: Dictionary = _playback.snapshot()
+	var frozen_track: Dictionary = _track_provenance(capture_step)
+	var frozen_camera_path: String = _active_scene_camera_path()
+	var frozen_graphics: Dictionary = GraphicsSettings.read(_viewport,
+		GraphicsSettings.owned_keys(scene, _manifest))
+	var frozen_environment: Dictionary = _environment_provenance()
+	var frozen_diagnostic: Dictionary = _diagnostic_provenance()
+	var frozen_request_time: String = Time.get_datetime_string_from_system()
+	var started: Dictionary = _hdr_capture.begin(_rendering_method, _viewport, camera, scene)
+	if not bool(started.get("ok", false)):
+		_status.text = String(started.get("error", "HDR capture unsupported"))
+		return
+	_capture_pending = true
+	_status.text = "Capturing unprocessed scene-linear color (asynchronous GPU readback)"
+	var result: Dictionary = {}
+	for frame in range(180):
+		await RenderingServer.frame_post_draw
+		if not is_instance_valid(scene) or _active_scene != scene or \
+				not is_instance_valid(camera) or _viewport.get_camera_3d() != camera:
+			result = {"ok": false, "error": "Scene or camera changed during HDR readback"}
+			break
+		var state: Dictionary = _hdr_capture.status()
+		if state.get("state") == "ready":
+			result = _hdr_capture.take_image()
+			break
+		if state.get("state") == "failed":
+			result = {"ok": false, "error": String(state.get("error", ""))}
+			break
+	if result.is_empty():
+		result = {"ok": false, "error": "HDR compositor did not complete within 180 rendered frames"}
+	if bool(result.get("ok", false)):
+		_capture_sequence += 1
+		var stem: String = "scene_linear_%s_p%d_%d" % [
+			Time.get_datetime_string_from_system().replace(":", "-"),
+			OS.get_process_id(), _capture_sequence]
+		var metadata: Dictionary = {
+			"experiment_id": String(_manifest.get("id", "")),
+			"camera_scene_path": frozen_camera_path,
+			"viewport_rendering_method": _rendering_method,
+			"engine": Engine.get_version_info(),
+			"playback": frozen_playback,
+			"capture_timeline_step": capture_step,
+			"capture_time_basis": "frozen_interactive_fixed_step",
+			"graphics": frozen_graphics,
+			"environment": frozen_environment,
+			"camera_track": frozen_track,
+			"render_diagnostic": frozen_diagnostic,
+			"timestamp": frozen_request_time,
+			"timestamp_basis": "capture_requested_after_fixed_step_freeze_before_gpu_readback"
+		}
+		result = HdrExrCapture.write(result["image"], _hdr_directory, stem,
+			_hdr_capture.source(), metadata)
+	_hdr_capture.release()
+	_capture_pending = false
+	if bool(result.get("ok", false)):
+		_status.text = "Scene-linear EXR saved: " + String(result["image"])
+		_log_event("info", "capture", "linear_exr_saved", "Real scene-linear EXR capture saved",
+			{"experiment_id": String(_manifest.get("id", ""))})
+	else:
+		_status.text = "HDR/EXR capture unavailable: " + String(result.get("error", "unknown"))
+		_log_event("warning", "capture", "linear_exr_failed",
+			String(result.get("error", "HDR scene buffer unavailable")))
 
 
 func _capture_screenshot() -> void:

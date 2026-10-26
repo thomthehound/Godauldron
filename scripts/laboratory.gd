@@ -1072,6 +1072,12 @@ func _export_frame_sequence() -> void:
 		return
 	var first_step: int = int(_sequence_start_control.value)
 	var frame_count: int = int(_sequence_frames_control.value)
+	var track_for_capture: bool = _track_enabled.button_pressed
+	if track_for_capture and (not CameraTracks.valid_track(_active_track) or \
+			_active_track["experiment_id"] != _manifest.get("id") or \
+			InspectionViews.camera_for(_active_scene, String(_active_track["camera_path"])) == null):
+		_status.text = "Selected camera track is invalid or its camera is unavailable"
+		return
 	if first_step > ExperimentPlayback.MAX_REPLAY_STEPS and not _active_scene.has_method("godauldron_seek"):
 		_status.text = "Start step exceeds bounded playback replay limit"
 		return
@@ -1086,7 +1092,8 @@ func _export_frame_sequence() -> void:
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
 		"capture_is_not_a_benchmark": true,
-		"render_diagnostic": _diagnostic_provenance()
+		"render_diagnostic": _diagnostic_provenance(),
+		"camera_track": _track_provenance(first_step, true)
 	}
 	_capture_sequence += 1
 	var stem: String = "sequence_%s_p%d_%d" % [
@@ -1120,6 +1127,8 @@ func _export_frame_sequence() -> void:
 	var error: String = ""
 	if not _playback.reset() or not _playback.seek(first_step):
 		error = "Unable to reset/seek experiment playback"
+	elif track_for_capture and not _apply_camera_track(first_step):
+		error = "Unable to bind saved camera track after provider setup"
 	else:
 		# Setup may mutate graphics and its ownership contract. Reconcile
 		# host-controlled settings before collecting the rendered baseline.
@@ -1137,6 +1146,9 @@ func _export_frame_sequence() -> void:
 			break
 		if i > 0 and not _playback.step():
 			error = "Fixed-step playback failed at frame %d" % i
+			break
+		if track_for_capture and not _apply_camera_track(first_step + i):
+			error = "Camera track cannot evaluate at frame %d" % i
 			break
 		await RenderingServer.frame_post_draw
 		if not is_instance_valid(source_scene) or _active_scene != source_scene:
@@ -1179,7 +1191,8 @@ func _export_frame_sequence() -> void:
 		var frame_context: Dictionary = {
 			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
 			"render_diagnostic": _diagnostic_provenance(),
-			"scene_camera_path": _active_scene_camera_path()
+			"scene_camera_path": _active_scene_camera_path(),
+			"camera_track": _track_provenance(first_step + i)
 		}
 		var written: Dictionary = writer.write_frame(rendered, i, observed, frame_context)
 		if not bool(written.get("ok", false)):
@@ -1643,19 +1656,21 @@ func _apply_camera_track(step: int) -> bool:
 	return true
 
 
-func _track_provenance(step: int) -> Dictionary:
+func _track_provenance(step: int, include_keys: bool = false) -> Dictionary:
 	if _track_enabled == null or not _track_enabled.button_pressed or \
 			not CameraTracks.valid_track(_active_track):
 		return {"active": false}
-	return {
+	var record: Dictionary = {
 		"active": true, "name": String(_active_track["name"]),
 		"experiment_id": String(_active_track["experiment_id"]),
 		"camera_path": String(_active_track["camera_path"]),
 		"step": step,
 		"key_count": _active_track["keys"].size(),
-		"step_basis": "absolute_fixed_step_index",
-		"track": _active_track.duplicate(true)
+		"step_basis": "absolute_fixed_step_index"
 	}
+	if include_keys:
+		record["track"] = _active_track.duplicate(true)
+	return record
 
 
 func _refresh_view_bookmarks() -> void:

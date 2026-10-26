@@ -8,6 +8,12 @@ const MAX_KEYS := 64
 const MAX_STEP := 12000
 const MAX_NAME := 60
 
+static func valid_step(value: Variant) -> bool:
+	return typeof(value) in [TYPE_INT, TYPE_FLOAT] and is_finite(float(value)) and \
+		float(value) == floorf(float(value)) and float(value) >= 0.0 and \
+		float(value) <= MAX_STEP
+
+
 static func valid_track(value: Variant) -> bool:
 	if typeof(value) != TYPE_DICTIONARY:
 		return false
@@ -23,9 +29,8 @@ static func valid_track(value: Variant) -> bool:
 		return false
 	var previous: int = -1
 	for key in track["keys"]:
-		if typeof(key) != TYPE_DICTIONARY or typeof(key.get("step")) != TYPE_INT or \
-			int(key["step"]) <= previous or int(key["step"]) > MAX_STEP or \
-			int(key["step"]) < 0 or not Inspector.valid_snapshot(key.get("state")):
+		if typeof(key) != TYPE_DICTIONARY or not valid_step(key.get("step")) or int(key["step"]) <= previous or \
+			not Inspector.valid_snapshot(key.get("state")):
 			return false
 		previous = int(key["step"])
 	return true
@@ -37,7 +42,7 @@ static func upsert_key(keys: Array, step: int, state: Dictionary) -> Array:
 	var output: Array = keys.duplicate(true)
 	var found: bool = false
 	for i in range(output.size()):
-		if typeof(output[i]) != TYPE_DICTIONARY or typeof(output[i].get("step")) != TYPE_INT or \
+		if typeof(output[i]) != TYPE_DICTIONARY or not valid_step(output[i].get("step")) or \
 				not Inspector.valid_snapshot(output[i].get("state")):
 			return []
 		if int(output[i]["step"]) == step:

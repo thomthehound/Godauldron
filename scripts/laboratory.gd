@@ -343,8 +343,8 @@ func _build_ui() -> void:
 	export_hdr_frames.text = "Export linear EXR frames"
 	export_hdr_frames.tooltip_text = "Export scene-linear RGBA16F/32F at fixed simulation steps; requires Forward+/Mobile"
 	export_hdr_frames.pressed.connect(func() -> void: _export_frame_sequence("exr"))
-	playback_controls.add_child(export_hdr_frames)
 	sidebar.add_child(export_frames)
+	sidebar.add_child(export_hdr_frames)
 
 	var buttons := HBoxContainer.new()
 	sidebar.add_child(buttons)

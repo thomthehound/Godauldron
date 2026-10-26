@@ -11,6 +11,7 @@ const CAMPAIGN_ROOT := "res://campaigns"
 const InspectionCamera = preload("res://scripts/inspection_camera.gd")
 const InspectionViews = preload("res://scripts/inspection_views.gd")
 const CameraTracks = preload("res://scripts/camera_tracks.gd")
+const EnvironmentInspection = preload("res://scripts/environment_inspection.gd")
 const PixelInspector = preload("res://scripts/pixel_inspector.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const RenderDiagnostics = preload("res://scripts/render_diagnostics.gd")
@@ -46,6 +47,12 @@ var _quality_picker: OptionButton
 var _graphics_advanced: GridContainer
 var _graphics_inputs: Dictionary = {}
 var _graphics_values: Dictionary = GraphicsSettings.PROFILES["High"].duplicate(true)
+var _grade_controller = EnvironmentInspection.new()
+var _grade_enabled: CheckButton
+var _grade_exposure: SpinBox
+var _grade_contrast: SpinBox
+var _grade_saturation: SpinBox
+var _grade_last: Dictionary = {"exposure": 0.0, "contrast": 1.0, "saturation": 1.0}
 var _graphics_owned: PackedStringArray = PackedStringArray()
 var _graphics_run_snapshot: Dictionary = {}
 var _capture_sequence: int = 0
@@ -499,6 +506,17 @@ func _build_ui() -> void:
 	_add_quality_boolean("use_taa", "Temporal AA")
 	_add_quality_boolean("use_debanding", "Debanding")
 	_add_quality_number("positional_shadow_atlas_size", "Local shadow atlas", 0, 16384, 1024)
+	var grading_label := Label.new()
+	grading_label.text = "Host inspection grading"
+	_graphics_advanced.add_child(grading_label)
+	_grade_enabled = CheckButton.new()
+	_grade_enabled.text = "Camera-only (unmeasured)"
+	_grade_enabled.tooltip_text = "Clone the resolved authored Environment; never edit provider resources"
+	_grade_enabled.toggled.connect(_update_environment_grade)
+	_graphics_advanced.add_child(_grade_enabled)
+	_grade_exposure = _grade_spin("Exposure offset (EV)", -4.0, 4.0, 0.25, 0.0)
+	_grade_contrast = _grade_spin("Post-tonemap contrast", 0.5, 1.5, 0.05, 1.0)
+	_grade_saturation = _grade_spin("Post-tonemap saturation", 0.0, 2.0, 0.05, 1.0)
 
 	_viewport = SubViewport.new()
 	_viewport.size = Vector2i(960, 720)
@@ -676,6 +694,21 @@ func _clear_diagnostics_console() -> void:
 	_diagnostics.clear()
 	_refresh_diagnostics_console()
 	_status.text = "Host diagnostic event list cleared"
+
+
+func _grade_spin(label_text: String, minimum: float, maximum: float,
+		increment: float, initial: float) -> SpinBox:
+	var label := Label.new()
+	label.text = label_text
+	_graphics_advanced.add_child(label)
+	var input := SpinBox.new()
+	input.min_value = minimum
+	input.max_value = maximum
+	input.step = increment
+	input.value = initial
+	input.value_changed.connect(func(_unused: float) -> void: _update_environment_grade(_grade_enabled.button_pressed))
+	_graphics_advanced.add_child(input)
+	return input
 
 
 func _session_snapshot(name: String) -> Dictionary:

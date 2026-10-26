@@ -7,17 +7,25 @@ var _original: Environment = null
 var _override: Environment = null
 var _source: String = ""
 var _source_path: String = ""
+var _source_environment: Environment = null
 
 
-static func _find_world_environment(scene: Node) -> WorldEnvironment:
-	if scene == null:
+static func _find_matching_world_environment(scene: Node,
+		viewport: Viewport, effective: Environment) -> WorldEnvironment:
+	# Only attribute a WorldEnvironment from the camera's own viewport tree.
+	# A nested SubViewport has a different world and cannot own this camera's
+	# actual environment, even if the experiment contains that node.
+	if scene == null or effective == null:
 		return null
 	var pending: Array[Node] = [scene]
 	while not pending.is_empty():
 		var node: Node = pending.pop_back()
-		if node is WorldEnvironment and (node as WorldEnvironment).environment != null:
+		if node is WorldEnvironment and (node as WorldEnvironment).environment == effective and \
+				node.get_viewport() == viewport:
 			return node as WorldEnvironment
 		for child in node.get_children():
+			if child is Viewport and child != viewport:
+				continue
 			pending.append(child)
 	return null
 
@@ -36,14 +44,19 @@ static func environment_source(scene: Node, viewport: Viewport) -> Dictionary:
 	if camera.environment != null:
 		return {"environment": camera.environment, "camera": camera,
 			"source": "camera", "path": String(scene.get_path_to(camera))}
-	var world: WorldEnvironment = _find_world_environment(scene)
-	if world != null:
-		return {"environment": world.environment, "camera": camera,
-			"source": "scene_world_environment", "path": String(scene.get_path_to(world))}
-	if viewport.world_3d != null and viewport.world_3d.environment != null:
-		return {"environment": viewport.world_3d.environment, "camera": camera,
-			"source": "viewport_world_environment", "path": ""}
-	return {}
+	# The camera's actual world is authoritative, not arbitrary
+	# WorldEnvironment nodes encountered while traversing provider subtrees.
+	var actual_world: World3D = camera.get_world_3d()
+	if actual_world == null or actual_world.environment == null:
+		return {}
+	var effective: Environment = actual_world.environment
+	var world_node: WorldEnvironment = _find_matching_world_environment(
+		scene, camera.get_viewport(), effective)
+	if world_node != null:
+		return {"environment": effective, "camera": camera,
+			"source": "scene_world_environment", "path": String(scene.get_path_to(world_node))}
+	return {"environment": effective, "camera": camera,
+		"source": "camera_world_3d", "path": ""}
 
 
 static func _env_values(resource: Environment) -> Dictionary:
@@ -77,6 +90,10 @@ static func inspect(scene: Node, viewport: Viewport) -> Dictionary:
 		"capture_scope": "Godot Environment settings; not physical HDR radiance or actual display HDR output"}
 
 
+func bound_camera() -> Camera3D:
+	return _camera if is_instance_valid(_camera) else null
+
+
 func enabled() -> bool:
 	return is_instance_valid(_camera) and _override != null and _camera.environment == _override
 
@@ -89,6 +106,7 @@ func release() -> void:
 	_override = null
 	_source = ""
 	_source_path = ""
+	_source_environment = null
 
 
 func apply(scene: Node, viewport: Viewport, exposure_ev: float,
@@ -118,6 +136,7 @@ func apply(scene: Node, viewport: Viewport, exposure_ev: float,
 			return {"ok": false, "error": "Cannot clone resolved Environment"}
 		_source = String(resolved["source"])
 		_source_path = String(resolved["path"])
+		_source_environment = resolved["environment"]
 		_camera.environment = _override
 	elif _camera.environment != _override:
 		# Never overwrite a provider that replaced the camera Environment
@@ -125,7 +144,7 @@ func apply(scene: Node, viewport: Viewport, exposure_ev: float,
 		release()
 		return {"ok": false, "error": "Scene camera Environment changed ownership"}
 	# EV is relative to the original authored exposure, not a hidden reset.
-	var base_environment: Environment = _original
+	var base_environment: Environment = _source_environment
 	if base_environment == null:
 		var world: WorldEnvironment = _find_world_environment(scene)
 		if world != null:

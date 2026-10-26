@@ -1749,13 +1749,23 @@ func _apply_camera_track(step: int) -> bool:
 		_active_scene, String(_active_track["camera_path"]))
 	if camera == null:
 		return false
+	var regrade: bool = _grade_enabled.button_pressed
+	var grade_switch: bool = regrade and _grade_controller.bound_camera() != camera
+	if grade_switch:
+		_grade_controller.release()
 	if _camera_inspector == null or _camera_inspector.camera != camera:
 		_camera_inspector = InspectionCamera.new()
 		_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	camera.current = true
 	var state: Dictionary = CameraTracks.evaluate(_active_track, step)
 	if state.is_empty() or not _camera_inspector.restore(state):
+		if grade_switch:
+			_grade_enabled.set_pressed_no_signal(false)
 		return false
+	if regrade and (grade_switch or not _grade_controller.enabled()):
+		if not _apply_grade_after_setup():
+			_grade_enabled.set_pressed_no_signal(false)
+			return false
 	_camera_manipulated = true
 	return true
 
@@ -1851,12 +1861,20 @@ func _restore_inspection_view() -> void:
 	if camera == null:
 		_status.text = "View's scene camera no longer exists"
 		return
+	var regrade: bool = _grade_enabled.button_pressed
+	if regrade and _grade_controller.bound_camera() != camera:
+		_grade_controller.release()
 	camera.current = true
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	if not _camera_inspector.restore(record["state"]):
+		if regrade:
+			_grade_controller.release()
+			_grade_enabled.set_pressed_no_signal(false)
 		_status.text = "View camera state was rejected"
 		return
+	if regrade and not _apply_grade_after_setup():
+		_grade_enabled.set_pressed_no_signal(false)
 	_camera_manipulated = true
 	_refresh_scene_cameras()
 	_status.text = "Restored viewpoint: " + String(record["name"])

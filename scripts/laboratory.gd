@@ -1079,7 +1079,7 @@ func _capture_linear_exr() -> void:
 	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
 		_status.text = "HDR capture requires a scene-owned active Camera3D"
 		return
-	var started: Dictionary = _hdr_capture.begin(_rendering_method, _viewport, camera)
+	var started: Dictionary = _hdr_capture.begin(_rendering_method, _viewport, camera, scene)
 	if not bool(started.get("ok", false)):
 		_status.text = String(started.get("error", "HDR capture unsupported"))
 		return

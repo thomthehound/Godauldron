@@ -696,6 +696,56 @@ func _clear_diagnostics_console() -> void:
 	_status.text = "Host diagnostic event list cleared"
 
 
+func _environment_grade_parameters() -> Dictionary:
+	return {
+		"exposure": _grade_exposure.value,
+		"contrast": _grade_contrast.value,
+		"saturation": _grade_saturation.value
+	}
+
+
+func _apply_grade_after_setup() -> bool:
+	if _active_scene == null:
+		return false
+	var params: Dictionary = _environment_grade_parameters()
+	var status: Dictionary = _grade_controller.apply(_active_scene, _viewport,
+		float(params["exposure"]), float(params["contrast"]), float(params["saturation"]))
+	if not bool(status.get("ok", false)):
+		_status.text = "Inspection grading unavailable: " + String(status.get("error", "unknown"))
+		return false
+	_grade_last = params
+	return true
+
+
+func _update_environment_grade(enabled: bool) -> void:
+	if _grade_enabled == null:
+		return
+	if _capture_pending or _has_active_run() or _campaign != null:
+		_grade_enabled.set_pressed_no_signal(_grade_controller.enabled())
+		for pair in [
+			[_grade_exposure, "exposure"], [_grade_contrast, "contrast"],
+			[_grade_saturation, "saturation"]
+		]:
+			(pair[0] as SpinBox).set_block_signals(true)
+			(pair[0] as SpinBox).value = float(_grade_last[pair[1]])
+			(pair[0] as SpinBox).set_block_signals(false)
+		_status.text = "Cannot change inspection grading during benchmark or capture"
+		return
+	if not enabled:
+		_grade_controller.release()
+		_status.text = "Authored scene/environment restored"
+		return
+	if not _apply_grade_after_setup():
+		_grade_controller.release()
+		_grade_enabled.set_pressed_no_signal(false)
+
+
+func _environment_provenance() -> Dictionary:
+	if _active_scene == null:
+		return {"available": false}
+	return _grade_controller.state(_active_scene, _viewport)
+
+
 func _grade_spin(label_text: String, minimum: float, maximum: float,
 		increment: float, initial: float) -> SpinBox:
 	var label := Label.new()
@@ -1341,6 +1391,8 @@ func _select_experiment(index: int) -> void:
 	_comparison_table.clear()
 	_last_campaign_report_path = ""
 	_last_campaign_summary.clear()
+	_grade_controller.release()
+	_grade_enabled.set_pressed_no_signal(false)
 	_inspector_drag = 0
 	_fly_pressed.clear()
 	_camera_inspector = null
@@ -1430,7 +1482,11 @@ func _preview_active_scene() -> void:
 		_status.text = "Scene choice changed; active run cancelled. " + _status.text
 	# Preview itself does not create a measured run.
 	if _active_scene != null and _active_scene.has_method("godauldron_preview"):
+		var regrade: bool = _grade_enabled.button_pressed
+		_grade_controller.release()
 		_active_scene.call("godauldron_preview", _collect_parameters())
+		if regrade and not _apply_grade_after_setup():
+			_grade_enabled.set_pressed_no_signal(false)
 		_playback.bind(_active_scene, _collect_parameters(), _playback_delta_control.value)
 		_playback_accumulator = 0.0
 		_update_playback_ui()
@@ -1512,12 +1568,16 @@ func _choose_scene_camera(index: int) -> void:
 	if camera == null:
 		_status.text = "The selected scene camera is unavailable"
 		return
+	var regrade: bool = _grade_enabled.button_pressed
+	_grade_controller.release()
 	camera.current = true
 	_fly_pressed.clear()
 	_inspector_drag = 0
 	_camera_inspector = InspectionCamera.new()
 	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	_camera_manipulated = false
+	if regrade and not _apply_grade_after_setup():
+		_grade_enabled.set_pressed_no_signal(false)
 	_refresh_scene_cameras()
 	_refresh_camera_tracks()
 
@@ -2060,6 +2120,9 @@ func _discover_campaigns() -> void:
 
 
 func _start_campaign() -> void:
+	if _grade_enabled.button_pressed:
+		_status.text = "Disable host inspection grading before measuring a campaign"
+		return
 	_fly_pressed.clear()
 	_inspector_drag = 0
 	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
@@ -2266,6 +2329,9 @@ func _has_active_run() -> bool:
 
 
 func _start_run() -> void:
+	if _grade_enabled.button_pressed:
+		_status.text = "Disable host inspection grading before measuring a benchmark"
+		return
 	_fly_pressed.clear()
 	_inspector_drag = 0
 	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
@@ -2511,6 +2577,7 @@ func _finish_run(completed: bool) -> void:
 		_provider_timing_label.text = "Provider GPU: unavailable (%s)" % String(gpu.get("reason", "not reported"))
 	report["engine_viewport_telemetry"] = _engine_render.sample_report()
 	report["runtime_environment"] = _runtime_environment.duplicate(true)
+	report["environment"] = _environment_provenance()
 	report["graphics"] = _graphics_run_snapshot.duplicate(true)
 	report["visualization_path"] = NativeExperimentPackage.display_path(_manifest)
 	report["measurement_boundary"] = "host_godauldron_step_callback_cpu_wall_only; excludes native GPU execution, completion and presentation"

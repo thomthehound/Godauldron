@@ -1100,6 +1100,7 @@ func _capture_linear_exr() -> void:
 		GraphicsSettings.owned_keys(scene, _manifest))
 	var frozen_environment: Dictionary = _environment_provenance()
 	var frozen_diagnostic: Dictionary = _diagnostic_provenance()
+	var frozen_request_time: String = Time.get_datetime_string_from_system()
 	var started: Dictionary = _hdr_capture.begin(_rendering_method, _viewport, camera, scene)
 	if not bool(started.get("ok", false)):
 		_status.text = String(started.get("error", "HDR capture unsupported"))
@@ -1139,7 +1140,8 @@ func _capture_linear_exr() -> void:
 			"environment": frozen_environment,
 			"camera_track": frozen_track,
 			"render_diagnostic": frozen_diagnostic,
-			"timestamp": Time.get_datetime_string_from_system()
+			"timestamp": frozen_request_time,
+			"timestamp_basis": "capture_requested_after_fixed_step_freeze_before_gpu_readback"
 		}
 		result = HdrExrCapture.write(result["image"], _hdr_directory, stem,
 			_hdr_capture.source(), metadata)

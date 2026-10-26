@@ -40,6 +40,7 @@ var _playback_delta_control: SpinBox
 var _sequence_start_control: SpinBox
 var _sequence_frames_control: SpinBox
 var _sequence_directory: String = "user://sequences"
+var _hdr_sequence_directory: String = "user://hdr_sequences"
 var _sequence_quality_index: int = -1
 var _controls: Dictionary = {}
 var _active_scene: Node = null
@@ -338,6 +339,11 @@ func _build_ui() -> void:
 	export_frames.text = "Export PNG frames"
 	export_frames.tooltip_text = "Fixed-step unmeasured frame sequence to user://sequences"
 	export_frames.pressed.connect(_export_frame_sequence)
+	var export_hdr_frames := Button.new()
+	export_hdr_frames.text = "Export linear EXR frames"
+	export_hdr_frames.tooltip_text = "Export scene-linear RGBA16F/32F at fixed simulation steps; requires Forward+/Mobile"
+	export_hdr_frames.pressed.connect(func() -> void: _export_frame_sequence("exr"))
+	playback_controls.add_child(export_hdr_frames)
 	sidebar.add_child(export_frames)
 
 	var buttons := HBoxContainer.new()
@@ -1239,7 +1245,11 @@ func _capture_screenshot() -> void:
 
 
 
-func _export_frame_sequence() -> void:
+func _export_frame_sequence(image_format: String = "png") -> void:
+	if image_format not in ["png", "exr"]:
+		_status.text = "Unsupported frame sequence format"
+		return
+	var hdr: bool = image_format == "exr"
 	if _capture_pending or _active_scene == null:
 		_status.text = "A capture is already active or no experiment is selected"
 		return
@@ -1255,6 +1265,13 @@ func _export_frame_sequence() -> void:
 	if not _active_scene.has_method("godauldron_setup") and not _active_scene.has_method("godauldron_preview"):
 		_status.text = "This experiment cannot reset for frame export"
 		return
+	if hdr:
+		var camera_for_hdr: Camera3D = _viewport.get_camera_3d()
+		var capability: Dictionary = HdrSceneCapture.capability(_rendering_method, _viewport, camera_for_hdr)
+		if not bool(capability.get("available", false)) or camera_for_hdr == null or \
+				(camera_for_hdr != _active_scene and not _active_scene.is_ancestor_of(camera_for_hdr)):
+			_status.text = "HDR sequence unavailable: " + String(capability.get("reason", "no_scene_owned_camera"))
+			return
 	var first_step: int = int(_sequence_start_control.value)
 	var frame_count: int = int(_sequence_frames_control.value)
 	var track_for_capture: bool = _track_enabled.button_pressed
@@ -1282,20 +1299,23 @@ func _export_frame_sequence() -> void:
 		"camera_track": _track_provenance(first_step, true)
 	}
 	_capture_sequence += 1
-	var stem: String = "sequence_%s_p%d_%d" % [
+	var stem: String = ("sequence_hdr_" if hdr else "sequence_") + "%s_p%d_%d" % [
 		Time.get_datetime_string_from_system().replace(":", "-"),
 		OS.get_process_id(), _capture_sequence
 	]
 	var writer = FrameSequence.new()
+	var hdr_source: Dictionary = _hdr_capture.source() if hdr else {}
 	var began: Dictionary = writer.begin(
-		_sequence_directory, stem, first_step, frame_count, _playback_delta_control.value, metadata
+		_hdr_sequence_directory if hdr else _sequence_directory,
+		stem, first_step, frame_count, _playback_delta_control.value, metadata,
+		image_format, hdr_source
 	)
 	if not bool(began.get("ok", false)):
 		_status.text = "Sequence failed: " + String(began.get("error", "Unknown error"))
 		return
 	# Changing status text on every frame can reflow the viewport container,
 	# altering actual render resolution during an otherwise fixed-size export.
-	_status.text = "Exporting fixed-step PNG sequence..."
+	_status.text = "Exporting fixed-step linear EXR sequence..." if hdr else "Exporting fixed-step PNG sequence..."
 	_capture_pending = true
 	_sequence_quality_index = _quality_picker.selected
 	_quality_picker.disabled = true
@@ -1341,15 +1361,50 @@ func _export_frame_sequence() -> void:
 		if track_for_capture and not _apply_camera_track(first_step + i):
 			error = "Camera track cannot evaluate at frame %d" % i
 			break
-		await RenderingServer.frame_post_draw
-		if not is_instance_valid(source_scene) or _active_scene != source_scene:
-			error = "Experiment changed during export"
-			break
-		var texture: ViewportTexture = _viewport.get_texture()
-		if texture == null:
-			error = "Viewport texture unavailable"
-			break
-		var rendered: Image = texture.get_image()
+		var rendered: Image = null
+		var frame_hdr_source: Dictionary = {}
+		if hdr:
+			var current_camera: Camera3D = _viewport.get_camera_3d()
+			if current_camera == null or (current_camera != source_scene and not source_scene.is_ancestor_of(current_camera)):
+				error = "HDR sequence frame has no scene-owned active camera"
+				break
+			var started_hdr: Dictionary = _hdr_capture.begin(_rendering_method, _viewport, current_camera, source_scene)
+			if not bool(started_hdr.get("ok", false)):
+				error = "HDR frame %d: %s" % [i, String(started_hdr.get("error", "cannot arm compositor"))]
+				break
+			frame_hdr_source = _hdr_capture.source()
+			var read_result: Dictionary = {}
+			for deadline in range(180):
+				await RenderingServer.frame_post_draw
+				if not is_instance_valid(source_scene) or _active_scene != source_scene or \
+						not is_instance_valid(current_camera) or _viewport.get_camera_3d() != current_camera:
+					read_result = {"ok": false, "error": "Scene/camera changed during HDR readback"}
+					break
+				var reading: Dictionary = _hdr_capture.status()
+				if reading.get("state") == "ready":
+					read_result = _hdr_capture.take_image()
+					break
+				if reading.get("state") == "failed":
+					read_result = {"ok": false, "error": String(reading.get("error", ""))}
+					break
+			_hdr_capture.release()
+			if read_result.is_empty():
+				read_result = {"ok": false, "error": "HDR frame timed out after 180 rendered frames"}
+			if not bool(read_result.get("ok", false)):
+				error = "HDR frame %d at step %d: %s" % [
+					i, first_step + i, String(read_result.get("error", "readback failed"))]
+				break
+			rendered = read_result["image"]
+		else:
+			await RenderingServer.frame_post_draw
+			if not is_instance_valid(source_scene) or _active_scene != source_scene:
+				error = "Experiment changed during export"
+				break
+			var texture: ViewportTexture = _viewport.get_texture()
+			if texture == null:
+				error = "Viewport texture unavailable"
+				break
+			rendered = texture.get_image()
 		if rendered == null or rendered.is_empty():
 			error = "No rendered frame available"
 			break
@@ -1363,6 +1418,10 @@ func _export_frame_sequence() -> void:
 			metadata["render_diagnostic_basis"] = "first_captured_frame"
 			# UI layout can complete after setup; use actual captured dimensions.
 			metadata["viewport_size"] = [rendered.get_width(), rendered.get_height()]
+			if hdr:
+				metadata["hdr_source"] = frame_hdr_source.duplicate(true)
+				metadata["render_buffer_size"] = [rendered.get_width(), rendered.get_height()]
+				metadata["image_format"] = "exr"
 			var context_result: Dictionary = writer.update_context(metadata)
 			if not bool(context_result.get("ok", false)):
 				error = String(context_result.get("error", "Cannot persist capture context"))
@@ -1388,10 +1447,14 @@ func _export_frame_sequence() -> void:
 			"scene_camera_path": _active_scene_camera_path(),
 			"camera_track": _track_provenance(first_step + i)
 		}
+		if hdr:
+			frame_context["hdr_capture_source"] = frame_hdr_source.duplicate(true)
+			frame_context["render_buffer_size"] = [rendered.get_width(), rendered.get_height()]
 		var written: Dictionary = writer.write_frame(rendered, i, observed, frame_context)
 		if not bool(written.get("ok", false)):
 			error = String(written.get("error", "Frame write failed"))
 			break
+	_hdr_capture.release()
 	var result: Dictionary = writer.finish(error)
 	_capture_pending = false
 	_quality_picker.disabled = false
@@ -1413,7 +1476,7 @@ func _export_frame_sequence() -> void:
 	elif not error.is_empty():
 		_status.text = "Incomplete sequence (%d frames): %s" % [int(result["frames"]), error]
 	else:
-		_status.text = "Exported %d PNG frames: %s" % [frame_count, String(result["directory"])]
+		_status.text = "Exported %d %s frames: %s" % [frame_count, "linear EXR" if hdr else "PNG", String(result["directory"])]
 
 
 func _discover() -> void:

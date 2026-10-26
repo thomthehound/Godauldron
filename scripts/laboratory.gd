@@ -1079,6 +1079,27 @@ func _capture_linear_exr() -> void:
 	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
 		_status.text = "HDR capture requires a scene-owned active Camera3D"
 		return
+	# Freeze simulation and camera intent before arming asynchronous HDR work.
+	# The frame and its JSON sidecar must describe one immutable timeline step.
+	_playback.pause()
+	_playback_accumulator = 0.0
+	_update_playback_ui()
+	var capture_step: int = _playback.step_index
+	if _track_enabled != null and _track_enabled.button_pressed and not _apply_camera_track(capture_step):
+		_status.text = "HDR capture requires the selected camera track to resolve at the frozen step"
+		return
+	# Applying a camera track may change the currently active scene camera.
+	camera = _viewport.get_camera_3d()
+	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
+		_status.text = "HDR capture camera ownership changed while freezing the track"
+		return
+	var frozen_playback: Dictionary = _playback.snapshot()
+	var frozen_track: Dictionary = _track_provenance(capture_step)
+	var frozen_camera_path: String = _active_scene_camera_path()
+	var frozen_graphics: Dictionary = GraphicsSettings.read(_viewport,
+		GraphicsSettings.owned_keys(scene, _manifest))
+	var frozen_environment: Dictionary = _environment_provenance()
+	var frozen_diagnostic: Dictionary = _diagnostic_provenance()
 	var started: Dictionary = _hdr_capture.begin(_rendering_method, _viewport, camera, scene)
 	if not bool(started.get("ok", false)):
 		_status.text = String(started.get("error", "HDR capture unsupported"))
@@ -1108,14 +1129,16 @@ func _capture_linear_exr() -> void:
 			OS.get_process_id(), _capture_sequence]
 		var metadata: Dictionary = {
 			"experiment_id": String(_manifest.get("id", "")),
-			"camera_scene_path": _active_scene_camera_path(),
+			"camera_scene_path": frozen_camera_path,
 			"viewport_rendering_method": _rendering_method,
 			"engine": Engine.get_version_info(),
-			"graphics": GraphicsSettings.read(_viewport,
-				GraphicsSettings.owned_keys(scene, _manifest)),
-			"environment": _environment_provenance(),
-			"camera_track": _track_provenance(_playback.step_index),
-			"render_diagnostic": _diagnostic_provenance(),
+			"playback": frozen_playback,
+			"capture_timeline_step": capture_step,
+			"capture_time_basis": "frozen_interactive_fixed_step",
+			"graphics": frozen_graphics,
+			"environment": frozen_environment,
+			"camera_track": frozen_track,
+			"render_diagnostic": frozen_diagnostic,
 			"timestamp": Time.get_datetime_string_from_system()
 		}
 		result = HdrExrCapture.write(result["image"], _hdr_directory, stem,

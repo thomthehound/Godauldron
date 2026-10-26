@@ -69,6 +69,21 @@ func _verify() -> void:
 	if camera.environment != null or world.environment != original:
 		_fail("WorldEnvironment ownership was changed by inspection")
 		return
+	var nested := SubViewport.new()
+	nested.own_world_3d = true
+	nested.size = Vector2i(64, 64)
+	scene.add_child(nested)
+	var foreign_world := WorldEnvironment.new()
+	var foreign_env := Environment.new()
+	foreign_env.tonemap_exposure = 9.0
+	foreign_world.environment = foreign_env
+	nested.add_child(foreign_world)
+	if not grading.apply(scene, viewport, 1.0, 1.0, 1.0).get("ok", false) or \
+			absf(camera.environment.tonemap_exposure - 3.0) > 0.00001 or \
+			grading.state(scene, viewport).get("host_override_source") != "scene_world_environment":
+		_fail("Nested SubViewport hijacked the active scene camera World3D Environment")
+		return
+	grading.release()
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
 	var active: Camera3D = host.get("_viewport").get_camera_3d()
@@ -79,6 +94,59 @@ func _verify() -> void:
 	if not host.get("_grade_controller").enabled() or \
 			absf(active.environment.tonemap_exposure - user_environment.tonemap_exposure * 4.0) > 0.00001:
 		_fail("Production host did not bind effective camera exposure")
+		return
+	var active_scene: Node = host.get("_active_scene")
+	var other := Camera3D.new()
+	other.name = "OtherCamera"
+	other.position = Vector3(4, 2, 9)
+	var other_environment := Environment.new()
+	other_environment.tonemap_exposure = 2.0
+	other.environment = other_environment
+	active_scene.add_child(other)
+	host.call("_refresh_scene_cameras")
+	var other_index: int = (host.get("_camera_paths") as Array).find("OtherCamera")
+	if other_index < 0:
+		_fail("Secondary scene camera did not appear in host camera chooser")
+		return
+	host.call("_choose_scene_camera", other_index)
+	if active.environment != user_environment or other.environment == other_environment or \
+			absf(other.environment.tonemap_exposure - 8.0) > 0.00001 or \
+			host.call("_environment_provenance")["camera_scene_path"] != "OtherCamera":
+		_fail("Camera picker left grading on previous scene camera")
+		return
+	# The same camera change can occur through the bookmark and keyframe
+	# paths, not only the explicit scene-camera picker.
+	var inspector = preload("res://scripts/inspection_camera.gd").new()
+	inspector.bind(active, AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2)))
+	host.set("_bookmark_entries", [{
+		"experiment_id": String(host.get("_manifest")["id"]),
+		"camera_path": String(active_scene.get_path_to(active)),
+		"name": "Return to first camera", "state": inspector.snapshot()
+	}])
+	host.call("_refresh_view_bookmarks")
+	(host.get("_bookmark_picker") as OptionButton).select(0)
+	host.call("_restore_inspection_view")
+	if other.environment != other_environment or active.environment == user_environment or \
+			absf(active.environment.tonemap_exposure - 4.0) > 0.00001:
+		_fail("Bookmark camera switch failed to rebind authored Environment")
+		return
+	var state: Dictionary = inspector.snapshot()
+	var track_keys: Array = [
+		{"step": 0, "state": state}, {"step": 20, "state": state.duplicate(true)}
+	]
+	var target_inspector = preload("res://scripts/inspection_camera.gd").new()
+	target_inspector.bind(other, AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2)))
+	track_keys[0]["state"] = target_inspector.snapshot()
+	track_keys[1]["state"] = target_inspector.snapshot()
+	host.set("_active_track", {
+		"experiment_id": String(host.get("_manifest")["id"]),
+		"camera_path": "OtherCamera", "name": "Other camera track", "keys": track_keys
+	})
+	if not host.call("_apply_camera_track", 10) or \
+			active.environment != user_environment or other.environment == other_environment or \
+			absf(other.environment.tonemap_exposure - 8.0) > 0.00001 or \
+			host.call("_environment_provenance")["camera_scene_path"] != "OtherCamera":
+		_fail("Keyframe camera switch failed to rebind authored Environment")
 		return
 	host.call("_start_run")
 	if bool(host.call("_has_active_run")) or not (host.get("_status") as Label).text.contains("grading"):

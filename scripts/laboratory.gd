@@ -152,6 +152,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_grade_controller.release()
 	_engine_render.deactivate(_viewport)
 
 
@@ -1100,6 +1101,7 @@ func _capture_screenshot() -> void:
 		"playback": _playback.snapshot(),
 		"parameters": _collect_parameters(),
 		"parameter_source": "current_controls_or_preview",
+		"environment": _environment_provenance(),
 		"render_diagnostic": _diagnostic_provenance(),
 		"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(_active_scene, _manifest)),
 		"inspection": {
@@ -1175,6 +1177,7 @@ func _export_frame_sequence() -> void:
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
 		"capture_is_not_a_benchmark": true,
+		"environment": _environment_provenance(),
 		"render_diagnostic": _diagnostic_provenance(),
 		"camera_track": _track_provenance(first_step, true)
 	}
@@ -1208,10 +1211,15 @@ func _export_frame_sequence() -> void:
 	_sequence_frames_control.editable = false
 	_playback.bind(source_scene, parameters, _playback_delta_control.value)
 	var error: String = ""
+	var regrade: bool = _grade_enabled.button_pressed
+	if regrade:
+		_grade_controller.release()
 	if not _playback.reset() or not _playback.seek(first_step):
 		error = "Unable to reset/seek experiment playback"
 	elif track_for_capture and not _apply_camera_track(first_step):
 		error = "Unable to bind saved camera track after provider setup"
+	elif regrade and not _apply_grade_after_setup():
+		error = "Unable to bind authored Environment grading after provider setup"
 	else:
 		# Setup may mutate graphics and its ownership contract. Reconcile
 		# host-controlled settings before collecting the rendered baseline.
@@ -1250,6 +1258,8 @@ func _export_frame_sequence() -> void:
 			# the active camera and change viewport diagnostic rendering.
 			metadata["scene_camera_path"] = _active_scene_camera_path()
 			metadata["render_diagnostic"] = _diagnostic_provenance()
+			metadata["environment"] = _environment_provenance()
+			metadata["environment_basis"] = "first_captured_frame"
 			metadata["render_diagnostic_basis"] = "first_captured_frame"
 			# UI layout can complete after setup; use actual captured dimensions.
 			metadata["viewport_size"] = [rendered.get_width(), rendered.get_height()]
@@ -1274,6 +1284,7 @@ func _export_frame_sequence() -> void:
 		var frame_context: Dictionary = {
 			"graphics": GraphicsSettings.read(_viewport, GraphicsSettings.owned_keys(source_scene, _manifest)),
 			"render_diagnostic": _diagnostic_provenance(),
+			"environment": _environment_provenance(),
 			"scene_camera_path": _active_scene_camera_path(),
 			"camera_track": _track_provenance(first_step + i)
 		}

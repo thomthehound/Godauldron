@@ -118,12 +118,16 @@ func _verify() -> void:
 	# paths, not only the explicit scene-camera picker.
 	var inspector = preload("res://scripts/inspection_camera.gd").new()
 	inspector.bind(active, AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2)))
-	host.set("_bookmark_entries", [{
+	var bookmarks: Array[Dictionary] = [{
 		"experiment_id": String(host.get("_manifest")["id"]),
 		"camera_path": String(active_scene.get_path_to(active)),
 		"name": "Return to first camera", "state": inspector.snapshot()
-	}])
+	}]
+	host.set("_bookmark_entries", bookmarks)
 	host.call("_refresh_view_bookmarks")
+	if (host.get("_bookmark_picker") as OptionButton).item_count != 1:
+		_fail("Production bookmark selector did not receive the typed view fixture")
+		return
 	(host.get("_bookmark_picker") as OptionButton).select(0)
 	host.call("_restore_inspection_view")
 	if other.environment != other_environment or active.environment == user_environment or \

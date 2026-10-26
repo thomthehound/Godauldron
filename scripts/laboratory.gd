@@ -115,6 +115,7 @@ var _console_panel: VBoxContainer
 var _console_text: TextEdit
 var _console_filter: OptionButton
 var _diagnostics_directory: String = "user://diagnostics"
+var _run_diagnostic_cursor: int = 0
 var _report_sequence: int = 0
 # Configurable result location also allows integration tests to simulate I/O failure.
 var _results_directory: String = "user://results"
@@ -1002,8 +1003,11 @@ func _capture_screenshot() -> void:
 	_capture_pending = false
 	if not bool(result["ok"]):
 		_status.text = "Capture failed: " + String(result["error"])
+		_log_event("error", "capture", "image_failed", String(result["error"]))
 	else:
 		_status.text = "Image captured: " + String(result["image"])
+		_log_event("info", "capture", "image_saved", "Screenshot and provenance saved",
+			{"experiment_id": String(_manifest.get("id", ""))})
 
 
 
@@ -1227,6 +1231,9 @@ func _select_experiment(index: int) -> void:
 	var candidate: Dictionary = _experiments[index]
 	var native_status: Dictionary = NativeExperimentPackage.preflight(candidate)
 	if not bool(native_status.get("ok", false)):
+		_log_event("warning", "native", "preflight_rejected",
+			String(native_status.get("error", "Native package unavailable")),
+			{"experiment_id": String(candidate.get("id", ""))})
 		_status.text = String(native_status.get("error", "Native package unavailable"))
 		_select_visible_current()
 		return
@@ -1315,6 +1322,8 @@ func _select_experiment(index: int) -> void:
 	_apply_graphics()
 	_status.text = String(_manifest.get("description", _manifest["display_name"]))
 	_discover_campaigns()
+	_log_event("info", "experiment", "selected", String(_manifest.get("display_name", "Experiment selected")),
+		{"experiment_id": String(_manifest["id"])})
 
 
 func _preview_active_scene() -> void:
@@ -1804,6 +1813,8 @@ func _start_campaign() -> void:
 		_status.text = "Invalid campaign: " + ", ".join(errors)
 		_campaign = null
 		return
+	_log_event("info", "campaign", "started", "Campaign configured",
+		{"experiment_id": String(_manifest.get("id", ""))})
 	_begin_campaign_case()
 
 
@@ -1825,6 +1836,10 @@ func _begin_campaign_case() -> void:
 	_apply_graphics()
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
+	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
+	_log_event("info", "campaign", "case_started", "Measured campaign case started",
+		{"experiment_id": String(_manifest.get("id", "")),
+		"case_index": int(next_case["case_index"]), "repetition": int(next_case["repetition"])})
 	_status.text = "Campaign case %d, repetition %d" % [
 		int(next_case["case_index"]) + 1, int(next_case["repetition"]) + 1
 	]
@@ -1836,6 +1851,10 @@ func _finish_campaign(completed: bool) -> void:
 	_show_comparison(_last_campaign_summary)
 	var path: String = _save_report(_last_campaign_summary, "campaign_" + String(_last_campaign_summary["campaign_id"]))
 	_last_campaign_report_path = path
+	_log_event("info" if completed and not path.is_empty() else "warning",
+		"campaign", "completed" if completed else "cancelled",
+		"Campaign summary persisted" if completed and not path.is_empty() else "Campaign ended or could not persist",
+		{"experiment_id": String(_manifest.get("id", ""))})
 	_campaign = null
 	if path.is_empty():
 		# _save_report set the concrete I/O error. Never replace it with success.
@@ -2004,6 +2023,10 @@ func _start_run() -> void:
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
 	_status.text = "Running %s" % String(_manifest["display_name"])
+	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
+	_log_event("info", "benchmark", "started", "Measured run started",
+		{"experiment_id": String(_manifest["id"]), "requested_steps": int(_run_steps.value),
+		"warmup_steps": int(_warmup_steps.value)})
 	_update_telemetry()
 
 

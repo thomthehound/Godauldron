@@ -145,7 +145,7 @@ func _verify() -> void:
 		return
 	if playback.playing or playback.step_index != 5 or \
 			camera.global_position.distance_to(Vector3(0.2, 0, 5)) > 0.0001:
-		_fail("HDR capture did not freeze moving simulation and keyed camera at step 5")
+		_fail("HDR capture freeze mismatch: playing=%s step=%d camera=%s track=%s status=%s" % [playback.playing, playback.step_index, camera.global_position, host.get("_track_enabled").button_pressed, (host.get("_status") as Label).text])
 		return
 	frames = 0
 	while bool(host.get("_capture_pending")) and frames < 220:

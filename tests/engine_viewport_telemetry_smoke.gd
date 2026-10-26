@@ -47,6 +47,27 @@ func _check() -> void:
 			telemetry.sample_report()["render_gpu"]["count"] != 0:
 		_fail("Viewport measurement state leaked between experiments")
 		return
+	telemetry.configure_frame_delay(3)
+	if telemetry.sample_report()["sample_boundary_guard_frames"] != 5 or \
+			telemetry.sample_report()["render_device_frame_delay"] != 3:
+		_fail("Renderer device ring did not configure conservative sample exclusion")
+		return
+	for i in range(5):
+		if telemetry.admit_sample_frame(true):
+			_fail("Buffered warmup frames were admitted to the sampled render window")
+			return
+	if not telemetry.admit_sample_frame(true):
+		_fail("Sustained sample rendering never cleared buffered-frame guard")
+		return
+	telemetry.admit_sample_frame(false)
+	if telemetry.admit_sample_frame(true) or \
+			int(telemetry.sample_report()["boundary_frames_excluded"]) != 6:
+		_fail("Sample transition was not reset after a non-sample interval")
+		return
+	telemetry.reset()
+	if int(telemetry.sample_report()["boundary_frames_excluded"]) != 0:
+		_fail("Buffer guard exclusions leaked between benchmark runs")
+		return
 	var environment: Dictionary = Telemetry.runtime_environment()
 	if String(environment.get("rendering_method", "")).is_empty() or \
 			String(environment.get("rendering_driver", "")).is_empty() or \

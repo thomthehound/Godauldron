@@ -58,7 +58,7 @@ func _verify() -> void:
 	(host.get("_sequence_start_control") as SpinBox).value = 0
 	host.call("_export_frame_sequence")
 	if not bool(host.get("_capture_pending")):
-		_fail("Graded fixed-step sequence did not start")
+		_fail("Graded fixed-step sequence did not start: " + (host.get("_status") as Label).text)
 		return
 	for i in range(100):
 		if not bool(host.get("_capture_pending")):

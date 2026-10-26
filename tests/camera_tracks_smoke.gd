@@ -51,8 +51,19 @@ func _test() -> void:
 		return
 	var folder: String = "user://camera-track-test-%d" % OS.get_process_id()
 	var tracks: Array[Dictionary] = [track]
-	if not CameraTracks.write(folder, tracks).get("ok", false) or CameraTracks.read(folder) != tracks:
-		_fail("Track persistence failed")
+	var persisted: Dictionary = CameraTracks.write(folder, tracks)
+	if not bool(persisted.get("ok", false)):
+		_fail("Track writer failed: " + String(persisted.get("error", "")))
+		return
+	var loaded: Array[Dictionary] = CameraTracks.read(folder)
+	if loaded.size() != 1:
+		var raw: String = FileAccess.get_file_as_string(folder.path_join("tracks.json"))
+		_fail("Track reader rejected serialized track; bytes=" + str(raw.length()) + " sample=" + raw.substr(0, 200))
+		return
+	if not CameraTracks.valid_track(loaded[0]) or \
+			int(loaded[0]["keys"][0]["step"]) != 0 or \
+			int(loaded[0]["keys"][1]["step"]) != 20:
+		_fail("Track persistence lost canonical camera steps")
 		return
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)

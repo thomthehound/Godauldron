@@ -212,7 +212,9 @@ func _verify() -> void:
 	if typeof(summary) != TYPE_DICTIONARY or summary.get("status") != "complete" or \
 			int(summary.get("written_frames", -1)) != 3 or \
 			summary.get("capture_type") != "fixed_step_scene_linear_exr_sequence" or \
-			summary.get("hdr_source", {}).get("source") != "godot_render_scene_buffers_rd":
+			summary.get("hdr_source", {}).get("source") != "godot_render_scene_buffers_rd" or \
+			int(summary.get("hdr_source", {}).get("preserved_existing_compositor_effects", -1)) != 1 or \
+			summary.get("hdr_source", {}).get("preserved_compositor_source") != "scene_world_environment":
 		_fail("HDR sequence manifest reported incomplete/incorrect source: " + JSON.stringify(summary))
 		return
 	var source_dimensions: Vector2i = Vector2i.ZERO

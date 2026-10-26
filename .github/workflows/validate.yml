@@ -73,6 +73,8 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/free_fly_diagnostics_smoke.gd
       - name: Verify scene camera bookmarks and pixel mapping
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/inspection_views_smoke.gd
+      - name: Verify authored fixed-step camera tracks and timeline integration
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/camera_tracks_smoke.gd
       - name: Verify technical gallery imports, previews, and report isolation
         run: .engine/godot --headless --path . --script res://tests/gallery_smoke.gd
       - name: Verify graphics ownership, presets and image persistence

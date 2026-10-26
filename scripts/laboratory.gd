@@ -10,6 +10,7 @@ const ExperimentCampaign = preload("res://scripts/experiment_campaign.gd")
 const CAMPAIGN_ROOT := "res://campaigns"
 const InspectionCamera = preload("res://scripts/inspection_camera.gd")
 const InspectionViews = preload("res://scripts/inspection_views.gd")
+const CameraTracks = preload("res://scripts/camera_tracks.gd")
 const PixelInspector = preload("res://scripts/pixel_inspector.gd")
 const InspectionOverlay = preload("res://scripts/inspection_overlay.gd")
 const RenderDiagnostics = preload("res://scripts/render_diagnostics.gd")
@@ -73,6 +74,13 @@ var _bookmark_picker: OptionButton
 var _bookmark_name: LineEdit
 var _bookmark_entries: Array[Dictionary] = []
 var _bookmarks_root: String = "user://inspection_views"
+var _track_root: String = "user://camera_tracks"
+var _tracks: Array[Dictionary] = []
+var _track_draft: Dictionary = {}
+var _active_track: Dictionary = {}
+var _track_name: LineEdit
+var _track_picker: OptionButton
+var _track_enabled: CheckButton
 var _pixel_toggle: CheckButton
 var _pixel_panel: HBoxContainer
 var _pixel_texture: TextureRect
@@ -123,6 +131,7 @@ var _results_directory: String = "user://results"
 
 func _ready() -> void:
 	_bookmark_entries = InspectionViews.read(_bookmarks_root)
+	_tracks = CameraTracks.read(_track_root)
 	_build_ui()
 	_diagnostics.record("info", "host", "started", "Godauldron laboratory initialized")
 	_engine_render.activate(_viewport)
@@ -427,6 +436,37 @@ func _build_ui() -> void:
 	_pixel_toggle.text = "Inspect pixel"
 	_pixel_toggle.tooltip_text = "One-shot viewport readback on next left-click, outside measured runs"
 	bookmark_row.add_child(_pixel_toggle)
+	var track_row := HBoxContainer.new()
+	viewer.add_child(track_row)
+	var track_label := Label.new()
+	track_label.text = "Camera track"
+	track_row.add_child(track_label)
+	_track_picker = OptionButton.new()
+	_track_picker.custom_minimum_size = Vector2(150, 0)
+	_track_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_track_picker.item_selected.connect(_select_camera_track)
+	track_row.add_child(_track_picker)
+	_track_name = LineEdit.new()
+	_track_name.placeholder_text = "Track name"
+	_track_name.custom_minimum_size = Vector2(108, 0)
+	track_row.add_child(_track_name)
+	var add_key := Button.new()
+	add_key.text = "Key at step"
+	add_key.tooltip_text = "Record current scene camera pose at the interactive timeline step"
+	add_key.pressed.connect(_add_camera_key)
+	track_row.add_child(add_key)
+	var save_track := Button.new()
+	save_track.text = "Save"
+	save_track.pressed.connect(_save_camera_track)
+	track_row.add_child(save_track)
+	_track_enabled = CheckButton.new()
+	_track_enabled.text = "Follow"
+	_track_enabled.toggled.connect(_toggle_camera_track)
+	track_row.add_child(_track_enabled)
+	var delete_track := Button.new()
+	delete_track.text = "Delete track"
+	delete_track.pressed.connect(_delete_camera_track)
+	track_row.add_child(delete_track)
 	var quality_label := Label.new()
 	quality_label.text = "Graphics"
 	toolbar.add_child(quality_label)
@@ -1266,6 +1306,9 @@ func _select_experiment(index: int) -> void:
 	_pixel_panel.visible = false
 	_last_pixel_sample.clear()
 	_pixel_toggle.button_pressed = false
+	_track_enabled.set_pressed_no_signal(false)
+	_active_track.clear()
+	_track_draft.clear()
 	if _active_scene != null:
 		_viewport.remove_child(_active_scene)
 		_active_scene.queue_free()
@@ -1386,6 +1429,7 @@ func _bind_inspection() -> void:
 	_camera_inspector.bind(view_camera, _inspection_bounds)
 	_refresh_scene_cameras()
 	_refresh_view_bookmarks()
+	_refresh_camera_tracks()
 
 
 func _refresh_scene_cameras() -> void:
@@ -1429,6 +1473,7 @@ func _choose_scene_camera(index: int) -> void:
 	_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
 	_camera_manipulated = false
 	_refresh_scene_cameras()
+	_refresh_camera_tracks()
 
 
 func _refresh_view_bookmarks() -> void:
@@ -1910,6 +1955,9 @@ func _collect_parameters() -> Dictionary:
 func _update_playback_ui() -> void:
 	if _playback_button == null:
 		return
+	if _playback.initialized and _track_enabled != null and _track_enabled.button_pressed and \
+			not _capture_pending and not _has_active_run():
+		_apply_camera_track(_playback.step_index)
 	_playback_button.text = "Pause" if _playback.playing else "Play"
 	if _playback_time_control != null:
 		_playback_time_control.set_block_signals(true)

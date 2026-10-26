@@ -125,8 +125,11 @@ func _verify() -> void:
 	var tracked_path: String = String(host.get("_sequence_directory")).path_join(tracked_dirs[0])
 	var track_manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(tracked_path.path_join("sequence.json")))
 	if typeof(track_manifest) != TYPE_DICTIONARY or track_manifest.get("status") != "complete" or \
-			track_manifest.get("camera_track", {}).get("track", {}) != track:
-		_fail("Tracked sequence manifest lost authored full camera path provenance")
+			track_manifest.get("camera_track", {}).get("active") != true or \
+			track_manifest.get("camera_track", {}).get("camera_path") != active_path or \
+			int(track_manifest.get("camera_track", {}).get("track", {}).get("keys", []).size()) != 2:
+		_fail("Tracked sequence manifest lost authored full camera path provenance: " + \
+			JSON.stringify(track_manifest.get("camera_track", {})) + " status=" + str(track_manifest.get("status")))
 		return
 	for i in range(3):
 		var record: Variant = JSON.parse_string(FileAccess.get_file_as_string(

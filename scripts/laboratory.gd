@@ -2179,8 +2179,35 @@ func _finish_run(completed: bool) -> void:
 	# orchestration while explicitly recording its host-side wall duration.
 	var report_preparation_started_usec: int = Time.get_ticks_usec()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
+	var provider_events: Dictionary = {"accepted": 0, "rejected": 0}
+	if is_instance_valid(_active_scene) and _active_scene.has_method("godauldron_diagnostics"):
+		# Optional producer diagnostics run outside sampled callbacks.
+		# The host validates data; no arbitrary scripts or commands are loaded.
+		provider_events = _diagnostics.ingest_provider(
+			_active_scene.call("godauldron_diagnostics"), "provider")
+		if int(provider_events["rejected"]) != 0:
+			_log_event("warning", "provider", "diagnostics_rejected",
+				"Provider returned malformed or excessive diagnostic records",
+				{"rejected_count": int(provider_events["rejected"])})
+	_log_event("info" if report.get("completed", false) else "warning",
+		"benchmark", "completed" if report.get("completed", false) else "cancelled",
+		"Measured callbacks finished; report preparation complete",
+		{"experiment_id": String(_manifest.get("id", "")),
+		"sample_steps": int(report.get("steps", 0))})
+	var run_events: Array[Dictionary] = []
+	for entry in _diagnostics.entries():
+		if int(entry["sequence"]) > _run_diagnostic_cursor:
+			run_events.append(entry)
+			if run_events.size() > 100:
+				run_events.pop_front()
+	report["diagnostic_events"] = {
+		"source_scope": "structured host lifecycle and post-run provider hook only",
+		"provider_ingestion": provider_events,
+		"events": run_events,
+		"truncated": _diagnostics.snapshot()["dropped_oldest"] > 0 or run_events.size() >= 100
+	}
 	report["report_preparation_host_wall_usec"] = Time.get_ticks_usec() - report_preparation_started_usec
-	report["report_preparation_boundary"] = "run report construction, experiment metrics and provider timing query; excludes JSON serialization and disk I/O"
+	report["report_preparation_boundary"] = "run report construction, experiment metrics, provider timing and optional diagnostics queries; excludes JSON serialization and disk I/O"
 	var gpu: Dictionary = report["provider_gpu_timing"]
 	if bool(gpu.get("available", false)):
 		_provider_timing_label.text = "Provider GPU (%s; declared resolved): p50 %.3f / p95 %.3f ms" % [
@@ -2218,6 +2245,8 @@ func _finish_run(completed: bool) -> void:
 		return
 	if result_path.is_empty():
 		# Keep _save_report's error; this run executed but its data was NOT saved.
+		_log_event("error", "report", "persist_failed", "Measured run report could not be written",
+			{"experiment_id": String(_manifest.get("id", ""))})
 		return
 	_status.text = "%s: %d measured steps, %d warmup steps. Report: %s" % [
 		"Complete" if completed else "Stopped",

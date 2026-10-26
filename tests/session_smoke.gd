@@ -83,7 +83,9 @@ func _verify() -> void:
 		_fail("Portable export failed or overwrote a destination")
 		return
 	var portable: Dictionary = Session.read_portable(export_path)
-	if not bool(portable.get("ok", false)) or portable["record"] != doc:
+	var normalized_doc: Variant = JSON.parse_string(JSON.stringify(doc))
+	if not bool(portable.get("ok", false)) or portable["record"] != normalized_doc or \
+			not Session.validate(portable["record"], manifests).is_empty():
 		_fail("Portable configuration JSON did not round-trip")
 		return
 	var before_import: int = Session.catalog(folder).size()

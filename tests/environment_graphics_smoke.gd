@@ -12,6 +12,16 @@ func _fail(message: String) -> void:
 func _verify() -> void:
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
+	var experiments: Array = host.get("_experiments")
+	var stage_index: int = -1
+	for i in range(experiments.size()):
+		if experiments[i].get("id") == "org.godauldron.showcase-portrait":
+			stage_index = i
+			break
+	if stage_index < 0:
+		_fail("No deterministic showcase stage available for graded frame capture")
+		return
+	host.call("_select_experiment", stage_index)
 	var camera: Camera3D = host.get("_viewport").get_camera_3d()
 	if camera == null:
 		_fail("No scene camera for rendered exposure inspection")

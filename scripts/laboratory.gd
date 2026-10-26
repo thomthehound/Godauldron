@@ -1476,6 +1476,188 @@ func _choose_scene_camera(index: int) -> void:
 	_refresh_camera_tracks()
 
 
+func _refresh_camera_tracks() -> void:
+	if _track_picker == null:
+		return
+	_track_picker.set_block_signals(true)
+	_track_picker.clear()
+	_track_picker.add_item("Select saved track")
+	_track_picker.set_item_metadata(0, -1)
+	var experiment: String = String(_manifest.get("id", ""))
+	for i in range(_tracks.size()):
+		var track: Dictionary = _tracks[i]
+		if String(track["experiment_id"]) != experiment:
+			continue
+		_track_picker.add_item("%s (%s)" % [track["name"], track["camera_path"]])
+		_track_picker.set_item_metadata(_track_picker.item_count - 1, i)
+	_track_picker.select(0)
+	_track_picker.set_block_signals(false)
+
+
+func _track_editable() -> bool:
+	if _capture_pending or _has_active_run() or _campaign != null or _active_scene == null:
+		_status.text = "Camera track editing unavailable during benchmark, campaign or capture"
+		return false
+	return true
+
+
+func _select_camera_track(index: int) -> void:
+	if not _track_editable():
+		_track_picker.select(0)
+		return
+	if index <= 0 or index >= _track_picker.item_count:
+		return
+	var item_index: int = int(_track_picker.get_item_metadata(index))
+	if item_index < 0 or item_index >= _tracks.size():
+		return
+	var selected: Dictionary = _tracks[item_index]
+	if selected["experiment_id"] != _manifest.get("id"):
+		return
+	_track_draft = selected.duplicate(true)
+	_track_name.text = String(selected["name"])
+	_active_track = selected.duplicate(true)
+	_track_enabled.set_pressed_no_signal(true)
+	if not _apply_camera_track(_playback.step_index):
+		_track_enabled.set_pressed_no_signal(false)
+		_active_track.clear()
+		_status.text = "Track camera no longer exists in this experiment"
+	else:
+		_status.text = "Loaded track: %s (%d keys)" % [selected["name"], selected["keys"].size()]
+
+
+func _toggle_camera_track(enabled: bool) -> void:
+	if not _track_editable():
+		_track_enabled.set_pressed_no_signal(not enabled)
+		return
+	if enabled:
+		if not CameraTracks.valid_track(_active_track) or not _apply_camera_track(_playback.step_index):
+			_track_enabled.set_pressed_no_signal(false)
+			_status.text = "Select a valid saved track first"
+	else:
+		_status.text = "Track follow disabled; current camera pose preserved"
+
+
+func _add_camera_key() -> void:
+	if not _track_editable() or _camera_inspector == null:
+		return
+	var camera: Camera3D = _camera_inspector.camera
+	if not is_instance_valid(camera) or _active_scene == null:
+		return
+	var name: String = _track_name.text.strip_edges()
+	if name.is_empty() or name.length() > CameraTracks.MAX_NAME:
+		_status.text = "Camera track name must be 1–60 characters"
+		return
+	var path: String = String(_active_scene.get_path_to(camera))
+	if _track_draft.is_empty() or _track_draft.get("experiment_id") != _manifest.get("id") or \
+			_track_draft.get("camera_path") != path or _track_draft.get("name") != name:
+		_track_draft = {
+			"experiment_id": String(_manifest["id"]),
+			"camera_path": path,
+			"name": name,
+			"keys": []
+		}
+	var updated: Array = CameraTracks.upsert_key(
+		_track_draft["keys"], _playback.step_index, _camera_inspector.snapshot())
+	if updated.is_empty():
+		_status.text = "Cannot record key: invalid view or maximum of 64 distinct key steps"
+		return
+	_track_draft["keys"] = updated
+	_status.text = "Camera key recorded at step %d (%d keys; save after at least two)" % [
+		_playback.step_index, updated.size()]
+
+
+func _save_camera_track() -> void:
+	if not _track_editable():
+		return
+	if _track_draft.is_empty() or not CameraTracks.valid_track(_track_draft) or \
+			_track_draft["name"] != _track_name.text.strip_edges():
+		_status.text = "Track requires a name and at least two valid distinct keyframes"
+		return
+	var updated: Array[Dictionary] = _tracks.duplicate(true)
+	var replaced: bool = false
+	for i in range(updated.size()):
+		if updated[i]["experiment_id"] == _track_draft["experiment_id"] and \
+				updated[i]["camera_path"] == _track_draft["camera_path"] and \
+				updated[i]["name"] == _track_draft["name"]:
+			updated[i] = _track_draft.duplicate(true)
+			replaced = true
+			break
+	if not replaced:
+		updated.append(_track_draft.duplicate(true))
+	var result: Dictionary = CameraTracks.write(_track_root, updated)
+	if not bool(result.get("ok", false)):
+		_status.text = "Track save failed: " + String(result.get("error", "unknown"))
+		return
+	_tracks = updated
+	_active_track = _track_draft.duplicate(true)
+	_refresh_camera_tracks()
+	_track_enabled.set_pressed_no_signal(true)
+	_apply_camera_track(_playback.step_index)
+	_status.text = "Camera track %s: %s" % ["updated" if replaced else "saved", String(_track_draft["name"])]
+
+
+func _delete_camera_track() -> void:
+	if not _track_editable():
+		return
+	if _active_track.is_empty():
+		return
+	var updated: Array[Dictionary] = _tracks.duplicate(true)
+	var deleted: bool = false
+	for i in range(updated.size()):
+		if updated[i]["experiment_id"] == _active_track["experiment_id"] and \
+				updated[i]["camera_path"] == _active_track["camera_path"] and \
+				updated[i]["name"] == _active_track["name"]:
+			updated.remove_at(i)
+			deleted = true
+			break
+	if not deleted:
+		return
+	var saved: Dictionary = CameraTracks.write(_track_root, updated)
+	if not bool(saved.get("ok", false)):
+		_status.text = "Cannot delete camera track: " + String(saved.get("error", "unknown"))
+		return
+	_tracks = updated
+	_active_track.clear()
+	_track_draft.clear()
+	_track_enabled.set_pressed_no_signal(false)
+	_refresh_camera_tracks()
+	_status.text = "Saved camera track deleted"
+
+
+func _apply_camera_track(step: int) -> bool:
+	if not CameraTracks.valid_track(_active_track) or \
+			_active_track.get("experiment_id") != _manifest.get("id") or _active_scene == null:
+		return false
+	var camera: Camera3D = InspectionViews.camera_for(
+		_active_scene, String(_active_track["camera_path"]))
+	if camera == null:
+		return false
+	if _camera_inspector == null or _camera_inspector.camera != camera:
+		_camera_inspector = InspectionCamera.new()
+		_camera_inspector.bind(camera, InspectionCamera.scene_bounds(_active_scene))
+	camera.current = true
+	var state: Dictionary = CameraTracks.evaluate(_active_track, step)
+	if state.is_empty() or not _camera_inspector.restore(state):
+		return false
+	_camera_manipulated = true
+	return true
+
+
+func _track_provenance(step: int) -> Dictionary:
+	if _track_enabled == null or not _track_enabled.button_pressed or \
+			not CameraTracks.valid_track(_active_track):
+		return {"active": false}
+	return {
+		"active": true, "name": String(_active_track["name"]),
+		"experiment_id": String(_active_track["experiment_id"]),
+		"camera_path": String(_active_track["camera_path"]),
+		"step": step,
+		"key_count": _active_track["keys"].size(),
+		"step_basis": "absolute_fixed_step_index",
+		"track": _active_track.duplicate(true)
+	}
+
+
 func _refresh_view_bookmarks() -> void:
 	_bookmark_picker.clear()
 	var experiment: String = String(_manifest.get("id", ""))

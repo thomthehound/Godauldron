@@ -130,7 +130,6 @@ func _verify() -> void:
 		return
 	host.set("_active_track", track)
 	(host.get("_track_enabled") as CheckButton).set_pressed_no_signal(true)
-	playback.playing = true
 	var expected_steps: int = int(scene.step_calls)
 	if expected_steps != 5:
 		_fail("Playback did not settle at requested fixed step before HDR capture")
@@ -139,6 +138,9 @@ func _verify() -> void:
 	host.set("_hdr_directory", inherited_root)
 	for i in range(3):
 		await process_frame
+	# Arm playback only immediately before the capture call; the preceding
+	# render warmup must not advance the deterministic test's source step.
+	playback.playing = true
 	host.call("_capture_linear_exr")
 	if not bool(host.get("_capture_pending")):
 		_fail("Inherited compositor HDR request did not arm")

@@ -14,7 +14,7 @@ Godauldron is not coupled to any particular SDK, graphics vendor, compute backen
 - Technical-scene gallery with named scene selections, bundled glTF 2.0 mesh specimen and Godot material study; imported scenes share the existing inspector and run contract.
 - Host graphics presets (Low, Medium, High, Ultra, Showcase), expandable per-setting controls with experiment ownership, and viewport PNG captures with adjacent provenance metadata.
 - Saved-capture comparison window with side-by-side images, magnification, RGB difference maps, channel-error statistics and warnings for mismatched experiment/camera/graphics settings.
-- Bounded fixed-step PNG frame-sequence export from interactive playback with numbered frames, sidecars and sequence provenance; never included in benchmark timings.
+- Bounded fixed-step PNG and genuine floating-point scene-linear OpenEXR frame-sequence export, with numbered frames, source-verified per-frame readbacks, crash-recoverable manifests and provenance; never included in benchmark timings.
 - Drop-in native experiment package preflight for external GDExtensions, plus reusable, editable showcase stages, generic fixed-step translation/rotation motion and an optional real CC0 MakeHuman reference portrait.
 - Searchable experiment catalog and named, validated user configuration snapshots for experiment parameters, graphics controls, camera, overlays, playback delta and run step counts.
 - A deterministic animated-geometry reference fixture.

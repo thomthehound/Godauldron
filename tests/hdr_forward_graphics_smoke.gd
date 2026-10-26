@@ -182,6 +182,69 @@ func _verify() -> void:
 			int(scene.step_calls) != expected_steps or camera.global_position.distance_to(Vector3(0.2, 0, 5)) > 0.0001:
 		_fail("Inherited compositor HDR pixels/provenance did not preserve original effects")
 		return
+	# Exercise the actual host sequence exporter, not a hand-authored image:
+	# reset/seek, then exactly one GPU HDR readback at each fixed step.
+	var sequence_root: String = "user://forward-hdr-frames-%d" % OS.get_process_id()
+	host.set("_hdr_sequence_directory", sequence_root)
+	(host.get("_sequence_start_control") as SpinBox).value = 5
+	(host.get("_sequence_frames_control") as SpinBox).value = 3
+	host.call("_export_frame_sequence", "exr")
+	if not bool(host.get("_capture_pending")):
+		_fail("Fixed-step HDR sequence could not start: " + (host.get("_status") as Label).text)
+		return
+	frames = 0
+	while bool(host.get("_capture_pending")) and frames < 650:
+		frames += 1
+		await process_frame
+	if bool(host.get("_capture_pending")):
+		_fail("Fixed-step HDR sequence stalled")
+		return
+	if camera.compositor != null or world.compositor != inherited or \
+			int(scene.step_calls) != 7 or playback.step_index != 7 or playback.playing:
+		_fail("HDR sequence leaked compositor ownership or advanced the wrong simulation steps")
+		return
+	var sequence_dirs: PackedStringArray = DirAccess.get_directories_at(sequence_root)
+	if sequence_dirs.size() != 1:
+		_fail("Fixed-step HDR sequence directory missing: " + (host.get("_status") as Label).text)
+		return
+	var folder: String = sequence_root.path_join(sequence_dirs[0])
+	var summary: Variant = JSON.parse_string(FileAccess.get_file_as_string(folder.path_join("sequence.json")))
+	if typeof(summary) != TYPE_DICTIONARY or summary.get("status") != "complete" or \
+			int(summary.get("written_frames", -1)) != 3 or \
+			summary.get("capture_type") != "fixed_step_scene_linear_exr_sequence" or \
+			summary.get("hdr_source", {}).get("source") != "godot_render_scene_buffers_rd" or \
+			int(summary.get("hdr_source", {}).get("preserved_existing_compositor_effects", -1)) != 1 or \
+			summary.get("hdr_source", {}).get("preserved_compositor_source") != "scene_world_environment":
+		_fail("HDR sequence manifest reported incomplete/incorrect source: " + JSON.stringify(summary))
+		return
+	var source_dimensions: Vector2i = Vector2i.ZERO
+	for i in range(3):
+		var stem: String = "frame_%06d" % i
+		var image_path: String = folder.path_join(stem + ".exr")
+		var frame_image: Image = Image.load_from_file(image_path)
+		var sidecar: Variant = JSON.parse_string(FileAccess.get_file_as_string(
+			folder.path_join(stem + ".json")))
+		if frame_image == null or frame_image.is_empty() or \
+				frame_image.get_format() not in [
+					Image.FORMAT_RGBAH, Image.FORMAT_RGBAF, Image.FORMAT_RGBH, Image.FORMAT_RGBF
+				] or typeof(sidecar) != TYPE_DICTIONARY:
+			_fail("Rendered HDR frame %d is not a floating EXR with provenance" % i)
+			return
+		var center_hdr: Color = frame_image.get_pixel(
+			int(frame_image.get_width() / 2), int(frame_image.get_height() / 2))
+		if center_hdr.r <= 2.0 or int(sidecar.get("timeline_step_index", -1)) != 5 + i or \
+				int(sidecar.get("camera_track", {}).get("step", -1)) != 5 + i or \
+				absf(float(sidecar.get("capture_state", {}).get("camera_position", [-999])[0]) -
+					(0.2 + 0.04 * float(i))) > 0.0001 or \
+				sidecar.get("source", {}).get("source") != "godot_render_scene_buffers_rd":
+			_fail("HDR frame %d misattributed GPU image or fixed-step camera" % i)
+			return
+		var dimensions: Vector2i = Vector2i(frame_image.get_width(), frame_image.get_height())
+		if i > 0 and dimensions != source_dimensions:
+			_fail("HDR internal render dimensions changed during sequence export")
+			return
+		source_dimensions = dimensions
+	print("HDR fixed-step EXR sequence validated: 3 GPU readbacks, steps 5–7, 16/32-bit floats")
 	print("Godauldron Forward+ scene-linear HDR verified: %dx%d center R=%f EXR=%s" % [
 		recovered.get_width(), recovered.get_height(), center.r, path
 	])

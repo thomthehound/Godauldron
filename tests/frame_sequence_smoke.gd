@@ -111,6 +111,69 @@ func _verify() -> void:
 			int(partial_manifest.get("written_frames", 0)) != 1:
 		_fail("Partial sequence was mislabeled complete")
 		return
+	# EXR uses the SAME manifest/progress writer, but must never encode
+	# SDR pixels or publish fabricated linear-source provenance.
+	var hdr_source: Dictionary = {
+		"source": "godot_render_scene_buffers_rd",
+		"stage": "post_transparent_pre_postprocess",
+		"transfer": "scene_linear",
+		"producer": "Godot resolved scene color"
+	}
+	var exr_writer = Sequence.new()
+	if exr_writer.begin(output, "bad_hdr_source", 5, 2, 0.025, {}, "exr",
+			{"source": "viewport_texture", "transfer": "srgb", "stage": "postprocess"}).get("ok", true):
+		_fail("EXR sequence accepted fake SDR viewport source")
+		return
+	var hdr_start: Dictionary = exr_writer.begin(output, "hdr", 5, 2, 0.025,
+		{"experiment_id": "org.godauldron.fixture"}, "exr", hdr_source)
+	if not bool(hdr_start.get("ok", false)):
+		_fail("Could not start float EXR sequence: " + str(hdr_start))
+		return
+	if exr_writer.write_frame(pixels, 0).get("ok", true):
+		_fail("EXR sequence encoded SDR RGBA8 frame")
+		return
+	var hdr_pixels: Image = Image.create(6, 4, false, Image.FORMAT_RGBAF)
+	hdr_pixels.fill(Color(0.2, 0.4, 0.6, 1.0))
+	hdr_pixels.set_pixel(3, 2, Color(13.5, -0.25, 2.5, 1.0))
+	for i in range(2):
+		var written_hdr: Dictionary = exr_writer.write_frame(hdr_pixels, i,
+			{"provider_step": 5 + i}, {"camera_track": {"step": 5 + i},
+				"hdr_capture_source": hdr_source, "scene_camera_path": "Camera3D"})
+		if not bool(written_hdr.get("ok", false)):
+			_fail("Float EXR frame rejected: " + str(written_hdr))
+			return
+		var hdr_image: Image = Image.load_from_file(String(written_hdr["image"]))
+		if hdr_image == null or hdr_image.is_empty() or \
+				absf(hdr_image.get_pixel(3, 2).r - 13.5) > 0.03 or \
+				absf(hdr_image.get_pixel(3, 2).g + 0.25) > 0.03:
+			_fail("Sequence HDR radiance was clipped or tonemapped")
+			return
+	var finished_hdr: Dictionary = exr_writer.finish()
+	var hdr_manifest: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(String(finished_hdr["manifest"])))
+	if finished_hdr.get("status") != "complete" or \
+			hdr_manifest.get("capture_type") != "fixed_step_scene_linear_exr_sequence" or \
+			hdr_manifest.get("image_format") != "exr" or \
+			int(hdr_manifest.get("written_frames", -1)) != 2 or \
+			hdr_manifest.get("frames", [])[1].get("image_filename") != "frame_000001.exr":
+		_fail("HDR manifest lost actual frame count or float image identity")
+		return
+	var partial_hdr = Sequence.new()
+	if not partial_hdr.begin(output, "hdr_incomplete", 20, 2, 0.025,
+			{}, "exr", hdr_source).get("ok", false):
+		_fail("Could not start partial HDR sequence")
+		return
+	if not partial_hdr.write_frame(hdr_pixels, 0).get("ok", false):
+		_fail("Could not preserve partial HDR frame")
+		return
+	var ended_hdr: Dictionary = partial_hdr.finish("Second GPU readback failed")
+	var incomplete_hdr: Variant = JSON.parse_string(FileAccess.get_file_as_string(
+		String(ended_hdr.get("manifest", ""))))
+	if incomplete_hdr.get("status") != "incomplete" or \
+			int(incomplete_hdr.get("written_frames", -1)) != 1 or \
+			incomplete_hdr.get("error") != "Second GPU readback failed":
+		_fail("Failed HDR sequence was inaccurately marked complete")
+		return
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
 	var active: Node = host.get("_active_scene")

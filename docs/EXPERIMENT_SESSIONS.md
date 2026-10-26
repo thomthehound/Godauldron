@@ -12,6 +12,15 @@ Load validates manifest identity, exact parameter types/allowed choices/ranges, 
 
 Existing manifests and custom provider scenes remain unchanged. A new session file cannot overwrite an existing filename; saving multiple configurations with identical display names creates separate files.
 
+## Portable configuration exchange
+
+Use **Export selected…** to save a configuration JSON to a chosen location, or **Import JSON…** to copy an external file into the local configuration library. An imported configuration is never activated automatically. Select it and choose **Load** after reviewing any compatibility notices.
+
+Portable files retain the versioned host configuration and its engine/renderer provenance; they do not contain executables, extension binaries or embedded scene data. Exchange accepts JSON files of at most 256 KiB. Import validates the complete session against installed experiment manifests, exact supported parameter types and choices, and graphics settings **before** creating a uniquely named local entry. Unknown experiment IDs, invalid file structures and unsupported versions are rejected without modifying the active experiment. Neither import nor export overwrites existing configurations or operates during measurements, captures or analysis.
+
+Engine major/minor and renderer differences are reported rather than silently assumed compatible. These are provenance warnings, not evidence that a native provider, its scene assets or its GPU behavior will reproduce identically. Applying the imported session still performs the normal native-extension and scene preflight, and can fail without interrupting the current run.
+
+
 ## Next Cauldron-class gates
 
 **1. Performance observability (P0).** Initial rolling host process intervals, orchestration remainder, callback distributions, percentiles, and run-export metadata are implemented. Optional completed device-sourced provider reports are validated and labeled provider-declared, never inferred from host timings. Remaining: real native synchronization validation, full engine-thread/render timelines, CPU/GPU correlation and hardware baseline methodology. See [Performance observability](PERFORMANCE_OBSERVABILITY.md).

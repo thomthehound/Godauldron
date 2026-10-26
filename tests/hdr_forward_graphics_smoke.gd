@@ -37,6 +37,10 @@ func _verify() -> void:
 	scene.add_child(mesh)
 	host.set("_active_scene", scene)
 	var original: Compositor = Compositor.new()
+	var preserved_effect: CompositorEffect = preload("res://scripts/hdr_scene_color_effect.gd").new()
+	preserved_effect.enabled = false
+	var original_effects: Array[CompositorEffect] = [preserved_effect]
+	original.compositor_effects = original_effects
 	camera.compositor = original
 	var result_root: String = "user://actual-forward-hdr-%d" % OS.get_process_id()
 	host.set("_hdr_directory", result_root)
@@ -62,8 +66,9 @@ func _verify() -> void:
 	if bool(host.get("_capture_pending")):
 		_fail("HDR GPU capture did not resolve before deadline")
 		return
-	if camera.compositor != original:
-		_fail("HDR capture did not restore provider camera Compositor ownership")
+	if camera.compositor != original or original.compositor_effects.size() != 1 or \
+			original.compositor_effects[0] != preserved_effect:
+		_fail("HDR capture did not restore provider compositor resources and effect order")
 		return
 	var exrs: PackedStringArray = PackedStringArray()
 	for filename in DirAccess.get_files_at(result_root):
@@ -88,6 +93,51 @@ func _verify() -> void:
 			evidence.get("source", {}).get("source") != "godot_render_scene_buffers_rd" or \
 			evidence.get("source", {}).get("stage") != "post_transparent_pre_postprocess":
 		_fail("Actual renderer HDR capture lost provenance")
+		return
+	# A WorldEnvironment compositor is inherited when the active camera
+	# has no explicit compositor. The temporary host effect must preserve
+	# those provider effects and restore camera.compositor to null.
+	camera.compositor = null
+	var world := WorldEnvironment.new()
+	var inherited: Compositor = Compositor.new()
+	var inherited_effects: Array[CompositorEffect] = [preserved_effect]
+	inherited.compositor_effects = inherited_effects
+	world.compositor = inherited
+	scene.add_child(world)
+	var inherited_root: String = "user://inherited-world-hdr-%d" % OS.get_process_id()
+	host.set("_hdr_directory", inherited_root)
+	for i in range(3):
+		await process_frame
+	host.call("_capture_linear_exr")
+	if not bool(host.get("_capture_pending")):
+		_fail("Inherited compositor HDR request did not arm")
+		return
+	frames = 0
+	while bool(host.get("_capture_pending")) and frames < 220:
+		frames += 1
+		await process_frame
+	if bool(host.get("_capture_pending")) or camera.compositor != null or \
+			world.compositor != inherited or inherited.compositor_effects.size() != 1 or \
+			inherited.compositor_effects[0] != preserved_effect:
+		_fail("WorldEnvironment compositor was mutated or GPU capture was incomplete")
+		return
+	var world_exrs: PackedStringArray = PackedStringArray()
+	for filename in DirAccess.get_files_at(inherited_root):
+		if filename.ends_with(".exr"):
+			world_exrs.append(filename)
+	if world_exrs.size() != 1:
+		_fail("Inherited WorldEnvironment compositor capture failed: " + (host.get("_status") as Label).text)
+		return
+	var world_path: String = inherited_root.path_join(world_exrs[0])
+	var inherited_image: Image = Image.load_from_file(world_path)
+	var world_center: Color = inherited_image.get_pixel(int(inherited_image.get_width() / 2),
+		int(inherited_image.get_height() / 2))
+	var inherited_metadata: Variant = JSON.parse_string(FileAccess.get_file_as_string(
+		world_path.get_basename() + ".json"))
+	if world_center.r <= 2.0 or typeof(inherited_metadata) != TYPE_DICTIONARY or \
+			inherited_metadata.get("source", {}).get("preserved_compositor_source") != "scene_world_environment" or \
+			int(inherited_metadata.get("source", {}).get("preserved_existing_compositor_effects", -1)) != 1:
+		_fail("Inherited compositor HDR pixels/provenance did not preserve original effects")
 		return
 	print("Godauldron Forward+ scene-linear HDR verified: %dx%d center R=%f EXR=%s" % [
 		recovered.get_width(), recovered.get_height(), center.r, path

@@ -15,7 +15,7 @@ static func validate(image: Image, source: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "HDR render buffer dimensions are invalid or unbounded"}
 	if source.get("stage") != "post_transparent_pre_postprocess" or \
 			source.get("transfer") != "scene_linear" or \
-			not ["godot_render_scene_buffers_rd", "native_provider_verified"].has(source.get("source")):
+			source.get("source") != "godot_render_scene_buffers_rd":
 		return {"ok": false, "error": "No verified scene-linear render-buffer provenance"}
 	# Enforce numeric sanity without silently clamping scene radiance to SDR.
 	for y in range(image.get_height()):

@@ -75,6 +75,50 @@ func _verify() -> void:
 	if not bool(loaded.get("ok", false)):
 		_fail("Could not reload session")
 		return
+	var export_path: String = ProjectSettings.globalize_path(folder).path_join("portable.json")
+	if not bool(Session.export_file(export_path, doc, manifests).get("ok", false)) or \
+			bool(Session.export_file(export_path, doc, manifests).get("ok", false)):
+		_fail("Portable export failed or overwrote a destination")
+		return
+	var portable: Dictionary = Session.read_portable(export_path)
+	if not bool(portable.get("ok", false)) or portable["record"] != doc:
+		_fail("Portable configuration JSON did not round-trip")
+		return
+	var before_import: int = Session.catalog(folder).size()
+	var imported: Dictionary = Session.import_file(export_path, folder, manifests,
+		Engine.get_version_info(), String(host.get("_rendering_method")))
+	var imported_twice: Dictionary = Session.import_file(export_path, folder, manifests,
+		Engine.get_version_info(), String(host.get("_rendering_method")))
+	if not bool(imported.get("ok", false)) or not bool(imported_twice.get("ok", false)) or \
+			imported["stem"] == imported_twice["stem"] or \
+			Session.catalog(folder).size() != before_import + 2:
+		_fail("Portable import did not create independent local configurations")
+		return
+	var mismatched: PackedStringArray = Session.compatibility_notes(
+		doc, {"major": 99, "minor": 99}, "_different_renderer")
+	if mismatched.is_empty():
+		_fail("Configuration engine/renderer compatibility differences were hidden")
+		return
+	var malformed_path: String = ProjectSettings.globalize_path(folder).path_join("malformed.json")
+	var malformed_file: FileAccess = FileAccess.open(malformed_path, FileAccess.WRITE)
+	malformed_file.store_string("{not valid JSON}")
+	malformed_file.close()
+	var rejected: Dictionary = Session.import_file(malformed_path, folder, manifests,
+		Engine.get_version_info(), String(host.get("_rendering_method")))
+	if bool(rejected.get("ok", false)):
+		_fail("Malformed portable JSON was accepted")
+		return
+	var invalid_portable: Dictionary = doc.duplicate(true)
+	invalid_portable["experiment_id"] = "org.example.uninstalled"
+	var incompatible_path: String = ProjectSettings.globalize_path(folder).path_join("incompatible.json")
+	var incompatible_file: FileAccess = FileAccess.open(incompatible_path, FileAccess.WRITE)
+	incompatible_file.store_string(JSON.stringify(invalid_portable))
+	incompatible_file.close()
+	if bool(Session.import_file(incompatible_path, folder, manifests,
+			Engine.get_version_info(), String(host.get("_rendering_method"))).get("ok", false)) or \
+			Session.catalog(folder).size() != before_import + 2:
+		_fail("Incompatible configuration was installed into the library")
+		return
 
 	host.call("_select_experiment", reference)
 	(host.get("_warmup_steps") as SpinBox).value = 0

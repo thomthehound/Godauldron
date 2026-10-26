@@ -106,6 +106,9 @@ var _session_picker: OptionButton
 var _session_entries: Array[Dictionary] = []
 var _session_root: String = "user://sessions"
 var _session_sequence: int = 0
+var _session_import_dialog: FileDialog
+var _session_export_dialog: FileDialog
+var _session_export_stem: String = ""
 var _parameters: VBoxContainer
 var _status: Label
 var _telemetry: Label
@@ -223,6 +226,32 @@ func _build_ui() -> void:
 	refresh_sessions.tooltip_text = "Refresh saved configurations"
 	refresh_sessions.pressed.connect(_refresh_sessions)
 	session_controls.add_child(refresh_sessions)
+	var share_controls := HBoxContainer.new()
+	sidebar.add_child(share_controls)
+	var import_session := Button.new()
+	import_session.text = "Import JSON…"
+	import_session.tooltip_text = "Copy a compatible configuration into the local library without applying it"
+	import_session.pressed.connect(_choose_import_session)
+	share_controls.add_child(import_session)
+	var export_session := Button.new()
+	export_session.text = "Export selected…"
+	export_session.tooltip_text = "Export a saved configuration as a portable JSON file"
+	export_session.pressed.connect(_choose_export_session)
+	share_controls.add_child(export_session)
+	_session_import_dialog = FileDialog.new()
+	_session_import_dialog.title = "Import configuration"
+	_session_import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_session_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_session_import_dialog.add_filter("*.json", "Configuration JSON")
+	_session_import_dialog.file_selected.connect(_import_session_file)
+	add_child(_session_import_dialog)
+	_session_export_dialog = FileDialog.new()
+	_session_export_dialog.title = "Export configuration"
+	_session_export_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_session_export_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	_session_export_dialog.add_filter("*.json", "Configuration JSON")
+	_session_export_dialog.file_selected.connect(_export_session_file)
+	add_child(_session_export_dialog)
 
 	var param_title := Label.new()
 	param_title.text = "Parameters"
@@ -797,6 +826,7 @@ func _session_snapshot(name: String) -> Dictionary:
 		"graphics_profile": _quality_picker.get_item_text(_quality_picker.selected),
 		"graphics": _graphics_values.duplicate(true),
 		"graphics_effective_at_save": GraphicsSettings.read(_viewport, _graphics_owned),
+		"rendering_method": _rendering_method,
 		"warmup_steps": int(_warmup_steps.value),
 		"run_steps": int(_run_steps.value),
 		"playback_delta": _playback_delta_control.value,
@@ -853,6 +883,62 @@ func _load_selected_session() -> void:
 		_status.text = "Configuration load failed: " + String(read.get("error", "Unknown error"))
 		return
 	_apply_session(read["record"])
+
+
+func _session_exchange_busy() -> bool:
+	return _has_active_run() or _capture_pending or \
+		(_comparison_window != null and bool(_comparison_window.call("analysis_busy")))
+
+
+func _choose_import_session() -> void:
+	if _session_exchange_busy():
+		_status.text = "Configuration exchange is unavailable during measurement, capture or analysis"
+		return
+	_session_import_dialog.popup_centered_ratio(0.7)
+
+
+func _import_session_file(path: String) -> void:
+	if _session_exchange_busy():
+		_status.text = "Configuration exchange interrupted by another operation"
+		return
+	var result: Dictionary = LabSession.import_file(
+		path, _session_root, _experiments, Engine.get_version_info(), _rendering_method)
+	if not bool(result.get("ok", false)):
+		_status.text = "Configuration import rejected: " + String(result.get("error", "Unknown error"))
+		return
+	_refresh_sessions()
+	for i in range(_session_entries.size()):
+		if _session_entries[i]["stem"] == result["stem"]:
+			_session_picker.select(i)
+			break
+	var notes: PackedStringArray = result["notes"]
+	_status.text = "Configuration imported; select Load to apply" + \
+		(" (compatibility: %s)" % "; ".join(notes) if not notes.is_empty() else "")
+
+
+func _choose_export_session() -> void:
+	if _session_exchange_busy():
+		_status.text = "Configuration exchange is unavailable during measurement, capture or analysis"
+		return
+	if _session_picker.selected < 0 or _session_picker.selected >= _session_entries.size():
+		_status.text = "Select a saved configuration to export"
+		return
+	_session_export_stem = String(_session_entries[_session_picker.selected]["stem"])
+	_session_export_dialog.current_file = _session_export_stem + ".json"
+	_session_export_dialog.popup_centered_ratio(0.7)
+
+
+func _export_session_file(path: String) -> void:
+	if _session_exchange_busy():
+		_status.text = "Configuration exchange interrupted by another operation"
+		return
+	var read: Dictionary = LabSession.read_session(_session_root, _session_export_stem)
+	if not bool(read.get("ok", false)):
+		_status.text = "Configuration export failed: " + String(read.get("error", "Unknown error"))
+		return
+	var result: Dictionary = LabSession.export_file(path, read["record"], _experiments)
+	_status.text = ("Exported configuration: " + path) if bool(result.get("ok", false)) else \
+		("Configuration export failed: " + String(result.get("error", "Unknown error")))
 
 
 func _apply_session(document: Dictionary) -> bool:

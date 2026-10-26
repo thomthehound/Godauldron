@@ -5,6 +5,7 @@ extends RefCounted
 
 const VERSION := 1
 const MAX_FILES := 200
+const MAX_EXCHANGE_BYTES := 256 * 1024
 const Graphics = preload("res://scripts/graphics_settings.gd")
 
 
@@ -158,6 +159,97 @@ static func save(root: String, stem: String, record: Dictionary) -> Dictionary:
 		DirAccess.remove_absolute(path)
 		return {"ok": false, "error": "Session write failed"}
 	return {"ok": true, "path": path}
+
+
+## Portable files contain only the versioned JSON session record. An import
+## creates a new local entry; it never executes resources, restores an experiment
+## or overwrites an existing configuration.
+static func read_portable(path: String) -> Dictionary:
+	if path.get_extension().to_lower() != "json":
+		return {"ok": false, "error": "Configuration exchange requires a .json file"}
+	var handle: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if handle == null:
+		return {"ok": false, "error": "Could not open configuration file"}
+	var length: int = handle.get_length()
+	if length <= 0 or length > MAX_EXCHANGE_BYTES:
+		handle.close()
+		return {"ok": false, "error": "Configuration file size is invalid or exceeds 256 KiB"}
+	var parsed: Variant = JSON.parse_string(handle.get_as_text())
+	handle.close()
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {"ok": false, "error": "Configuration file is not a JSON object"}
+	return {"ok": true, "record": parsed}
+
+
+static func compatibility_notes(record: Dictionary, engine_info: Dictionary,
+		rendering_method: String) -> PackedStringArray:
+	var notes := PackedStringArray()
+	var saved_engine: Variant = record.get("engine")
+	if typeof(saved_engine) == TYPE_DICTIONARY and \
+			_number(saved_engine.get("major"), 0, 100) and \
+			_number(saved_engine.get("minor"), 0, 100):
+		if int(saved_engine["major"]) != int(engine_info.get("major", -1)) or \
+				int(saved_engine["minor"]) != int(engine_info.get("minor", -1)):
+			notes.append("Saved with a different Godot major/minor version")
+	var saved_renderer: Variant = record.get("rendering_method")
+	if typeof(saved_renderer) == TYPE_STRING and not String(saved_renderer).is_empty() and \
+			not rendering_method.is_empty() and saved_renderer != rendering_method:
+		notes.append("Saved with a different rendering method: " + String(saved_renderer))
+	return notes
+
+
+static func export_file(path: String, record: Dictionary,
+		manifests: Array[Dictionary]) -> Dictionary:
+	var validation: String = validate(record, manifests)
+	if not validation.is_empty():
+		return {"ok": false, "error": validation}
+	if path.get_extension().to_lower() != "json":
+		return {"ok": false, "error": "Export path must end in .json"}
+	if FileAccess.file_exists(path):
+		return {"ok": false, "error": "Destination file already exists"}
+	if not DirAccess.dir_exists_absolute(path.get_base_dir()):
+		return {"ok": false, "error": "Export directory does not exist"}
+	var output: String = JSON.stringify(record, "\t") + "\n"
+	if output.to_utf8_buffer().size() > MAX_EXCHANGE_BYTES:
+		return {"ok": false, "error": "Configuration exceeds 256 KiB exchange limit"}
+	var handle: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	if handle == null:
+		return {"ok": false, "error": "Could not create configuration export"}
+	handle.store_string(output)
+	handle.flush()
+	var error: Error = handle.get_error()
+	handle.close()
+	if error != OK:
+		DirAccess.remove_absolute(path)
+		return {"ok": false, "error": "Configuration export write failed"}
+	return {"ok": true, "path": path}
+
+
+static func import_file(path: String, root: String,
+		manifests: Array[Dictionary], engine_info: Dictionary,
+		rendering_method: String) -> Dictionary:
+	var imported: Dictionary = read_portable(path)
+	if not bool(imported.get("ok", false)):
+		return imported
+	var record: Dictionary = imported["record"]
+	var validation: String = validate(record, manifests)
+	if not validation.is_empty():
+		return {"ok": false, "error": validation}
+	if catalog(root).size() >= MAX_FILES:
+		return {"ok": false, "error": "Configuration library has reached its entry limit"}
+	var notes: PackedStringArray = compatibility_notes(record, engine_info, rendering_method)
+	var prefix: String = "import_%s_p%d" % [
+		Time.get_datetime_string_from_system().replace(":", "-"), OS.get_process_id()
+	]
+	for i in range(MAX_FILES + 1):
+		var stem: String = "%s_%d" % [prefix, i]
+		if FileAccess.file_exists(ProjectSettings.globalize_path(root).path_join(stem + ".json")):
+			continue
+		var saved: Dictionary = save(root, stem, record)
+		if not bool(saved.get("ok", false)):
+			return saved
+		return {"ok": true, "stem": stem, "notes": notes}
+	return {"ok": false, "error": "Could not allocate an unused configuration identifier"}
 
 
 static func catalog(root: String) -> Array[Dictionary]:

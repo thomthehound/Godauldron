@@ -75,6 +75,72 @@ func _verify() -> void:
 	if not bool(loaded.get("ok", false)):
 		_fail("Could not reload session")
 		return
+	var exchange_root: String = "user://session-exchange-smoke-%d" % OS.get_process_id()
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(exchange_root))
+	var export_path: String = ProjectSettings.globalize_path(exchange_root).path_join("portable.json")
+	if not bool(Session.export_file(export_path, doc, manifests).get("ok", false)) or \
+			bool(Session.export_file(export_path, doc, manifests).get("ok", false)):
+		_fail("Portable export failed or overwrote a destination")
+		return
+	var portable: Dictionary = Session.read_portable(export_path)
+	var normalized_doc: Variant = JSON.parse_string(JSON.stringify(doc))
+	if not bool(portable.get("ok", false)) or portable["record"] != normalized_doc or \
+			not Session.validate(portable["record"], manifests).is_empty():
+		_fail("Portable configuration JSON did not round-trip")
+		return
+	var before_import: int = Session.catalog(folder).size()
+	var imported: Dictionary = Session.import_file(export_path, folder, manifests,
+		Engine.get_version_info(), String(host.get("_rendering_method")))
+	var imported_twice: Dictionary = Session.import_file(export_path, folder, manifests,
+		Engine.get_version_info(), String(host.get("_rendering_method")))
+	if not bool(imported.get("ok", false)) or not bool(imported_twice.get("ok", false)) or \
+			imported["stem"] == imported_twice["stem"] or \
+			Session.catalog(folder).size() != before_import + 2:
+		_fail("Portable import did not create independent local configurations")
+		return
+	var mismatched: PackedStringArray = Session.compatibility_notes(
+		doc, {"major": 99, "minor": 99}, "_different_renderer")
+	if mismatched.is_empty():
+		_fail("Configuration engine/renderer compatibility differences were hidden")
+		return
+	var malformed_path: String = ProjectSettings.globalize_path(exchange_root).path_join("malformed.json")
+	var malformed_file: FileAccess = FileAccess.open(malformed_path, FileAccess.WRITE)
+	malformed_file.store_string("{not valid JSON}")
+	malformed_file.close()
+	var rejected: Dictionary = Session.import_file(malformed_path, folder, manifests,
+		Engine.get_version_info(), String(host.get("_rendering_method")))
+	if bool(rejected.get("ok", false)):
+		_fail("Malformed portable JSON was accepted")
+		return
+	var invalid_portable: Dictionary = doc.duplicate(true)
+	invalid_portable["experiment_id"] = "org.example.uninstalled"
+	var incompatible_path: String = ProjectSettings.globalize_path(exchange_root).path_join("incompatible.json")
+	var incompatible_file: FileAccess = FileAccess.open(incompatible_path, FileAccess.WRITE)
+	incompatible_file.store_string(JSON.stringify(invalid_portable))
+	incompatible_file.close()
+	if bool(Session.import_file(incompatible_path, folder, manifests,
+			Engine.get_version_info(), String(host.get("_rendering_method"))).get("ok", false)) or \
+			Session.catalog(folder).size() != before_import + 2:
+		_fail("Incompatible configuration was installed into the library")
+		return
+	var oversized_path: String = ProjectSettings.globalize_path(exchange_root).path_join("oversized.json")
+	var oversized: FileAccess = FileAccess.open(oversized_path, FileAccess.WRITE)
+	oversized.store_string("x".repeat(Session.MAX_EXCHANGE_BYTES + 1))
+	oversized.close()
+	if bool(Session.import_file(oversized_path, folder, manifests,
+			Engine.get_version_info(), String(host.get("_rendering_method"))).get("ok", false)):
+		_fail("Oversized external configuration was accepted")
+		return
+	# The GUI import path must only populate the catalog, never apply the file.
+	host.set("_session_root", folder)
+	var imported_scene: Node = host.get("_active_scene")
+	var before_gui_import: int = Session.catalog(folder).size()
+	host.call("_import_session_file", export_path)
+	if host.get("_active_scene") != imported_scene or \
+			Session.catalog(folder).size() != before_gui_import + 1 or \
+			host.get("_manifest").get("id") != doc["experiment_id"]:
+		_fail("GUI import unexpectedly changed the active experiment")
+		return
 
 	host.call("_select_experiment", reference)
 	(host.get("_warmup_steps") as SpinBox).value = 0

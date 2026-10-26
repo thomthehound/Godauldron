@@ -81,6 +81,68 @@ func _verify() -> void:
 			bool((host.get("_playback")).playing):
 		_fail("Export did not leave interactive playback paused at its final frame")
 		return
+	# Replay a genuine authored camera track using the SAME production
+	# exporter. The camera state must derive from absolute frame step indices,
+	# not from the asynchronous GPU draw or timeline UI update cadence.
+	var Inspector = preload("res://scripts/inspection_camera.gd")
+	var Track = preload("res://scripts/camera_tracks.gd")
+	var scene_camera: Camera3D = (host.get("_camera_inspector")).camera
+	var active_path: String = String(scene.get_path_to(scene_camera))
+	var original: Dictionary = host.get("_camera_inspector").snapshot()
+	var shift: Dictionary = original.duplicate(true)
+	shift["position"][0] = float(original["position"][0]) + 4.0
+	var track: Dictionary = {
+		"experiment_id": "org.godauldron.showcase-portrait",
+		"camera_path": active_path, "name": "Measured sweep",
+		"keys": [
+			{"step": 10, "state": original},
+			{"step": 12, "state": shift}
+		]
+	}
+	if not Track.valid_track(track) or not Inspector.valid_snapshot(shift):
+		_fail("Graphical camera sweep fixture was invalid")
+		return
+	host.set("_active_track", track)
+	(host.get("_track_enabled") as CheckButton).set_pressed_no_signal(true)
+	host.set("_sequence_directory", OUTPUT + "-tracked-%d" % OS.get_process_id())
+	(host.get("_sequence_start_control") as SpinBox).value = 10
+	(host.get("_sequence_frames_control") as SpinBox).value = 3
+	host.call("_export_frame_sequence")
+	if not bool(host.get("_capture_pending")):
+		_fail("Tracked camera capture did not start")
+		return
+	frames = 0
+	while bool(host.get("_capture_pending")) and frames < 120:
+		frames += 1
+		await process_frame
+	if bool(host.get("_capture_pending")):
+		_fail("Tracked camera PNG export stalled")
+		return
+	var tracked_dirs: PackedStringArray = DirAccess.get_directories_at(String(host.get("_sequence_directory")))
+	if tracked_dirs.size() != 1:
+		_fail("Tracked camera export directory missing")
+		return
+	var tracked_path: String = String(host.get("_sequence_directory")).path_join(tracked_dirs[0])
+	var track_manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(tracked_path.path_join("sequence.json")))
+	if typeof(track_manifest) != TYPE_DICTIONARY or track_manifest.get("status") != "complete" or \
+			track_manifest.get("camera_track", {}).get("active") != true or \
+			track_manifest.get("camera_track", {}).get("camera_path") != active_path or \
+			int(track_manifest.get("camera_track", {}).get("track", {}).get("keys", []).size()) != 2:
+		_fail("Tracked sequence manifest lost authored full camera path provenance: " + \
+			JSON.stringify(track_manifest.get("camera_track", {})) + " status=" + str(track_manifest.get("status")))
+		return
+	for i in range(3):
+		var record: Variant = JSON.parse_string(FileAccess.get_file_as_string(
+			tracked_path.path_join("frame_%06d.json" % i)))
+		var expected_x: float = float(original["position"][0]) + 2.0 * float(i)
+		if typeof(record) != TYPE_DICTIONARY or \
+				int(record.get("camera_track", {}).get("step", -1)) != 10 + i or \
+				String(record.get("scene_camera_path", "")) != active_path or \
+				absf(float(record.get("capture_state", {}).get("camera_position", [-999])[0]) - expected_x) > 0.0001:
+			_fail("Rendered camera position diverged from absolute authored frame step %d" % (10 + i))
+			return
+	(host.get("_track_enabled") as CheckButton).set_pressed_no_signal(false)
+	host.set("_active_track", {})
 	# Switch to a provider whose setup changes viewport values and takes
 	# ownership of a graphics key. Export must record post-setup effective
 	# settings rather than the prior preview's values.

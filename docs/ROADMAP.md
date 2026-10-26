@@ -69,7 +69,7 @@ Exit gate: native workloads preserve algorithm behavior and publish GPU outputs 
 ## M4 — Broad research and demonstration platform
 
 - [ ] Advanced HDR, temporal reconstruction, frame generation and latency experiments
-- [ ] Large representative scenes, scripted camera paths and visual baselines
+- [ ] Large representative scenes and visual baselines (authored fixed-step scene-camera tracks, validated persistence and captured per-frame camera provenance implemented; multi-camera compositing, easing tools and automated HDR baselines pending). See [Camera tracks](CAMERA_TRACKS.md).
 - [ ] Composite experiments running several unrelated technologies together
 - [ ] Portable performance regressions on real GPUs
 - [ ] Release process for optional custom Godot builds and matched extensions

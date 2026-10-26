@@ -575,6 +575,65 @@ func _build_ui() -> void:
 	add_child(_comparison_window)
 
 
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F3:
+		_toggle_diagnostics_console()
+		get_viewport().set_input_as_handled()
+
+
+func _log_event(level: String, source: String, code: String, message: String,
+		context: Dictionary = {}) -> void:
+	if _diagnostics.record(level, source, code, message, context) and \
+			_console_panel != null and _console_panel.visible and not _capture_pending and not _has_active_run():
+		_refresh_diagnostics_console()
+
+
+func _refresh_diagnostics_console() -> void:
+	if _console_text == null or _console_filter == null:
+		return
+	var level: String = String(_console_filter.get_item_metadata(_console_filter.selected))
+	var visible_entries: Array[Dictionary] = _diagnostics.entries(level)
+	var lines: PackedStringArray = PackedStringArray()
+	var start: int = maxi(0, visible_entries.size() - 100)
+	for i in range(start, visible_entries.size()):
+		var item: Dictionary = visible_entries[i]
+		lines.append("%s  %-7s  [%s:%s] %s" % [
+			String(item["utc_time"]), String(item["level"]).to_upper(),
+			String(item["source"]), String(item["code"]), String(item["message"])
+		])
+	_console_text.text = "\n".join(lines)
+	_console_text.set_caret_line(_console_text.get_line_count() - 1)
+
+
+func _toggle_diagnostics_console() -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Finish benchmark or capture before opening/closing messages"
+		return
+	_console_panel.visible = not _console_panel.visible
+	if _console_panel.visible:
+		_refresh_diagnostics_console()
+
+
+func _export_diagnostics_console() -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Finish benchmark or capture before exporting diagnostics"
+		return
+	var result: Dictionary = _diagnostics.export(_diagnostics_directory)
+	if bool(result.get("ok", false)):
+		_status.text = "Diagnostic events exported: " + String(result["path"])
+	else:
+		_status.text = "Diagnostic export failed: " + String(result.get("error", "unknown"))
+
+
+func _clear_diagnostics_console() -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Finish benchmark or capture before clearing diagnostics"
+		return
+	_diagnostics.clear()
+	_refresh_diagnostics_console()
+	_status.text = "Host diagnostic event list cleared"
+
+
 func _session_snapshot(name: String) -> Dictionary:
 	var camera_state := {}
 	var active_camera: Camera3D = _viewport.get_camera_3d()

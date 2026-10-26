@@ -30,7 +30,7 @@ func _verify() -> void:
 	quad.size = Vector2(4, 4)
 	mesh.mesh = quad
 	var shader: Shader = Shader.new()
-	shader.code = "shader_type spatial; render_mode unshaded; void fragment() { EMISSION = vec3(14.0, 1.5, 0.25); ALBEDO = vec3(0.0); }"
+	shader.code = "shader_type spatial; render_mode unshaded; void fragment() { ALBEDO = vec3(14.0, 1.5, 0.25); EMISSION = vec3(14.0, 1.5, 0.25); }"
 	var material: ShaderMaterial = ShaderMaterial.new()
 	material.shader = shader
 	mesh.material_override = material
@@ -42,6 +42,15 @@ func _verify() -> void:
 	host.set("_hdr_directory", result_root)
 	for i in range(5):
 		await process_frame
+	if viewport.get_camera_3d() != camera:
+		_fail("Calibration Camera3D was not activated in the experiment viewport")
+		return
+	var displayed: Image = viewport.get_texture().get_image()
+	var display_center: Color = displayed.get_pixel(
+		int(displayed.get_width() / 2), int(displayed.get_height() / 2))
+	print("Forward+ HDR calibration: LDR preview %dx%d center=%s, camera=%s" % [
+		displayed.get_width(), displayed.get_height(), display_center, camera.name
+	])
 	host.call("_capture_linear_exr")
 	if not bool(host.get("_capture_pending")):
 		_fail("HDR GPU capture could not be armed: " + (host.get("_status") as Label).text)
@@ -72,7 +81,7 @@ func _verify() -> void:
 		return
 	var center: Color = recovered.get_pixel(recovered.get_width() / 2, recovered.get_height() / 2)
 	if center.r <= 2.0:
-		_fail("Scene-linear highlight was lost or tonemapped before readback: " + str(center))
+		_fail("Scene-linear highlight was lost or tonemapped before readback: HDR=" + str(center) + " LDR=" + str(display_center))
 		return
 	var evidence: Variant = JSON.parse_string(FileAccess.get_file_as_string(path.get_basename() + ".json"))
 	if typeof(evidence) != TYPE_DICTIONARY or \

@@ -1,0 +1,25 @@
+# Genuine scene-linear HDR / OpenEXR capture
+
+The **Capture linear EXR** command is separate from existing SDR PNG capture. It is supported only when Godot can provide actual floating-point **3D scene-color pixels before tonemapping**, and never obtains those pixels by converting an SDR screenshot to floating-point.
+
+## Renderer path and synchronization
+
+On Forward+ or Mobile with a valid global `RenderingDevice`, Godauldron temporarily attaches a `CompositorEffect` to the current experiment-owned `Camera3D`. Any existing camera compositor effects remain in their original order and original resources are left untouched. The host effect is appended to a **temporary** compositor and removed after the request; the original camera compositor is restored only if Godauldron still owns the temporary attachment.
+
+The compositor callback runs at `EFFECT_CALLBACK_TYPE_POST_TRANSPARENT`, after opaque/sky/transparency but **before built-in postprocessing/tonemapping**. It accesses the engine's resolved `render_buffers/color` texture through `RenderSceneBuffersRD`. It requires mono view, bounded dimensions, an actual `RGBA16F` or `RGBA32F` GPU texture, and `TEXTURE_USAGE_CAN_COPY_FROM_BIT`. An asynchronous `RenderingDevice.texture_get_data_async()` request transfers the pixel bytes from that exact render frame without calling blocking `texture_get_data()` during rendering. If the engine cannot export that texture, the request **fails explicitly**; Godauldron does not try to sample the displayed LDR viewport instead.
+
+Results arrive through a thread-safe one-shot mailbox and are decoded into `Image.FORMAT_RGBAH` or `FORMAT_RGBAF` without SDR conversion or tone mapping. Output is an **OpenEXR** file and a JSON provenance sidecar. EXR output does not clip pixel values to 1.0. It retains values greater than 1 and negative floating channel values when present; the output is **not** a display-referred PNG in an EXR wrapper.
+
+Readback is explicitly outside measured benchmarks, campaigns, image comparison and other captures; it reserves the capture lifecycle before installing the compositor. A bounded render-frame timeout and scene/camera ownership checks prevent misattributing a buffer to a different experiment. The host records renderer, engine, active camera path, graphics settings and effective Environment provenance. It does not claim GPU or CPU timings for this operation.
+
+## Precision and limitations
+
+This records Godot's own **scene-linear renderer color at the selected compositor stage**. It is not a physical radiance calibration or guaranteed whole-frame HDR display output; built-in glow, exposure/tonemapping, color correction and later postprocessing are intentionally absent. The image dimensions are the **internal 3D render dimensions**, which may differ from the displayed viewport under scaling, TAA or spatial upscaling. A provider that draws outside Godot's normal render pipeline may not appear in this buffer.
+
+Godot's `CompositorEffect` APIs are experimental, and source buffer copy permissions and asynchronous readback depend on the renderer and driver. Compatibility and headless rendering cannot provide this compositor path. If the active renderer uses another buffer format or disallows copying, the UI reports **unavailable** rather than inventing output.
+
+The headless regression tests the real TinyEXR encoder/decoder and proves a floating-point image with a 12.5-valued highlight and a negative channel round-trips without clipping. It also ensures SDR inputs and unsupported Compositor backends are rejected. That serialization test is **not** evidence of successful Forward+ scene-buffer readback on hardware; the latter requires rendering-device integration testing under an actual supported backend. A true HDR test must inspect image format and numeric range, not just file extension.
+
+## Remaining engineering
+
+Capture of animated fixed-step EXR sequences, GPU queue/resource lifetime validation under hardware stress, normal/depth/velocity/AOV readbacks, EXR multi-part channels, HDR10 display output and engine-native buffer metadata require additional backend validation. These are separate milestones from the floating-point EXR writer and current one-shot scene-color path.

@@ -61,6 +61,8 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/campaign_smoke.gd
       - name: Verify host observability statistics and provider GPU provenance
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/observability_smoke.gd
+      - name: Verify bounded messages console and post-run provider diagnostics
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/diagnostics_console_smoke.gd
       - name: Verify renderer viewport timing and hardware provenance
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/engine_viewport_telemetry_smoke.gd
       - name: Verify campaign statistics and optional guard limits

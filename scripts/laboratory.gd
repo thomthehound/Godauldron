@@ -116,7 +116,6 @@ var _console_text: TextEdit
 var _console_filter: OptionButton
 var _diagnostics_directory: String = "user://diagnostics"
 var _run_diagnostic_cursor: int = 0
-var _run_diagnostic_drops: int = 0
 var _report_sequence: int = 0
 # Configurable result location also allows integration tests to simulate I/O failure.
 var _results_directory: String = "user://results"
@@ -592,6 +591,8 @@ func _log_event(level: String, source: String, code: String, message: String,
 
 
 func _refresh_diagnostics_console() -> void:
+	if _capture_pending or _has_active_run():
+		return
 	if _console_text == null or _console_filter == null:
 		return
 	var level: String = String(_console_filter.get_item_metadata(_console_filter.selected))
@@ -1825,6 +1826,8 @@ func _begin_campaign_case() -> void:
 	_engine_render.reset()
 	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
 	var next_case: Dictionary = _campaign.next_case()
+	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
+	_console_filter.disabled = true
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
@@ -1838,8 +1841,6 @@ func _begin_campaign_case() -> void:
 	_apply_graphics()
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
-	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
-	_run_diagnostic_drops = int(_diagnostics.snapshot()["dropped_oldest"])
 	_log_event("info", "campaign", "case_started", "Measured campaign case started",
 		{"experiment_id": String(_manifest.get("id", "")),
 		"case_index": int(next_case["case_index"]), "repetition": int(next_case["repetition"])})
@@ -2011,6 +2012,8 @@ func _start_run() -> void:
 	_observability.reset_run()
 	_engine_render.reset()
 	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
+	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
+	_console_filter.disabled = true
 	_run = ExperimentRun.new()
 	_run.begin(
 		_active_scene, _collect_parameters(),
@@ -2026,8 +2029,6 @@ func _start_run() -> void:
 	_graphics_run_snapshot = GraphicsSettings.read(_viewport, _graphics_owned)
 	_accumulator = 0.0
 	_status.text = "Running %s" % String(_manifest["display_name"])
-	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
-	_run_diagnostic_drops = int(_diagnostics.snapshot()["dropped_oldest"])
 	_log_event("info", "benchmark", "started", "Measured run started",
 		{"experiment_id": String(_manifest["id"]), "requested_steps": int(_run_steps.value),
 		"warmup_steps": int(_warmup_steps.value)})
@@ -2175,6 +2176,7 @@ func _finish_run(completed: bool) -> void:
 		return
 	var finished_run: ExperimentRun = _run
 	_run = null
+	_console_filter.disabled = false
 	if not completed:
 		finished_run.cancel()
 	finished_run.host_observations = _observability.report_snapshot()
@@ -2200,7 +2202,13 @@ func _finish_run(completed: bool) -> void:
 		"sample_steps": int(report.get("steps", 0))})
 	var run_events: Array[Dictionary] = []
 	var run_events_truncated: bool = false
-	for entry in _diagnostics.entries():
+	var all_events: Array[Dictionary] = _diagnostics.entries()
+	# A full global ring may evict old experiments without losing any
+	# messages from this run. Only an eviction past this run's first sequence
+	# constitutes loss of its evidence.
+	var ring_evicted_current_run: bool = not all_events.is_empty() and \
+		int(all_events.front()["sequence"]) > _run_diagnostic_cursor + 1
+	for entry in all_events:
 		if int(entry["sequence"]) > _run_diagnostic_cursor:
 			run_events.append(entry)
 			if run_events.size() > 100:
@@ -2210,7 +2218,7 @@ func _finish_run(completed: bool) -> void:
 		"source_scope": "structured host lifecycle and post-run provider hook only",
 		"provider_ingestion": provider_events,
 		"events": run_events,
-		"truncated": run_events_truncated or int(_diagnostics.snapshot()["dropped_oldest"]) > _run_diagnostic_drops
+		"truncated": run_events_truncated or ring_evicted_current_run
 	}
 	report["report_preparation_host_wall_usec"] = Time.get_ticks_usec() - report_preparation_started_usec
 	report["report_preparation_boundary"] = "run report construction, experiment metrics, provider timing and optional diagnostics queries; excludes JSON serialization and disk I/O"

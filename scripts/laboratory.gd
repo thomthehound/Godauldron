@@ -23,6 +23,7 @@ const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.g
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
 const ExperimentPlayback = preload("res://scripts/experiment_playback.gd")
 const LabSession = preload("res://scripts/lab_session.gd")
+const HostDiagnostics = preload("res://scripts/host_diagnostics.gd")
 
 var _experiments: Array[Dictionary] = []
 var _manifest: Dictionary = {}
@@ -109,6 +110,11 @@ var _last_campaign_summary: Dictionary = {}
 
 var _run: ExperimentRun = null
 var _accumulator: float = 0.0
+var _diagnostics = HostDiagnostics.new()
+var _console_panel: VBoxContainer
+var _console_text: TextEdit
+var _console_filter: OptionButton
+var _diagnostics_directory: String = "user://diagnostics"
 var _report_sequence: int = 0
 # Configurable result location also allows integration tests to simulate I/O failure.
 var _results_directory: String = "user://results"
@@ -117,6 +123,7 @@ var _results_directory: String = "user://results"
 func _ready() -> void:
 	_bookmark_entries = InspectionViews.read(_bookmarks_root)
 	_build_ui()
+	_diagnostics.record("info", "host", "started", "Godauldron laboratory initialized")
 	_engine_render.activate(_viewport)
 	_runtime_environment = EngineViewportTelemetry.runtime_environment()
 	_update_runtime_environment_label()
@@ -142,6 +149,11 @@ func _build_ui() -> void:
 	title.text = "GODAULDRON  |  Technology Laboratory"
 	title.add_theme_font_size_override("font_size", 21)
 	header.add_child(title)
+	var log_toggle := Button.new()
+	log_toggle.text = "Messages (F3)"
+	log_toggle.tooltip_text = "Show structured host and post-run provider diagnostic events"
+	log_toggle.pressed.connect(_toggle_diagnostics_console)
+	header.add_child(log_toggle)
 
 	var content := HBoxContainer.new()
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -524,6 +536,36 @@ func _build_ui() -> void:
 	_observability_plot.custom_minimum_size = Vector2(260, 76)
 	_observability_plot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	performance_panel.add_child(_observability_plot)
+
+	_console_panel = VBoxContainer.new()
+	_console_panel.visible = false
+	root.add_child(_console_panel)
+	var console_bar := HBoxContainer.new()
+	_console_panel.add_child(console_bar)
+	var console_title := Label.new()
+	console_title.text = "Diagnostic events (host and post-run provider only)"
+	console_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	console_bar.add_child(console_title)
+	_console_filter = OptionButton.new()
+	for level in ["all", "info", "warning", "error"]:
+		_console_filter.add_item(level.capitalize())
+		_console_filter.set_item_metadata(_console_filter.item_count - 1, level)
+	_console_filter.item_selected.connect(func(_index: int) -> void: _refresh_diagnostics_console())
+	console_bar.add_child(_console_filter)
+	var export_button := Button.new()
+	export_button.text = "Export JSON"
+	export_button.pressed.connect(_export_diagnostics_console)
+	console_bar.add_child(export_button)
+	var clear_button := Button.new()
+	clear_button.text = "Clear"
+	clear_button.pressed.connect(_clear_diagnostics_console)
+	console_bar.add_child(clear_button)
+	_console_text = TextEdit.new()
+	_console_text.editable = false
+	_console_text.scroll_fit_content_height = false
+	_console_text.custom_minimum_size = Vector2(0, 115)
+	_console_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_console_panel.add_child(_console_text)
 
 	_comparison_window = VisualComparisonWindow.new()
 	_comparison_window.capture_directory = _capture_directory

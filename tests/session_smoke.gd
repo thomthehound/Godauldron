@@ -75,7 +75,9 @@ func _verify() -> void:
 	if not bool(loaded.get("ok", false)):
 		_fail("Could not reload session")
 		return
-	var export_path: String = ProjectSettings.globalize_path(folder).path_join("portable.json")
+	var exchange_root: String = "user://session-exchange-smoke-%d" % OS.get_process_id()
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(exchange_root))
+	var export_path: String = ProjectSettings.globalize_path(exchange_root).path_join("portable.json")
 	if not bool(Session.export_file(export_path, doc, manifests).get("ok", false)) or \
 			bool(Session.export_file(export_path, doc, manifests).get("ok", false)):
 		_fail("Portable export failed or overwrote a destination")
@@ -99,7 +101,7 @@ func _verify() -> void:
 	if mismatched.is_empty():
 		_fail("Configuration engine/renderer compatibility differences were hidden")
 		return
-	var malformed_path: String = ProjectSettings.globalize_path(folder).path_join("malformed.json")
+	var malformed_path: String = ProjectSettings.globalize_path(exchange_root).path_join("malformed.json")
 	var malformed_file: FileAccess = FileAccess.open(malformed_path, FileAccess.WRITE)
 	malformed_file.store_string("{not valid JSON}")
 	malformed_file.close()
@@ -110,7 +112,7 @@ func _verify() -> void:
 		return
 	var invalid_portable: Dictionary = doc.duplicate(true)
 	invalid_portable["experiment_id"] = "org.example.uninstalled"
-	var incompatible_path: String = ProjectSettings.globalize_path(folder).path_join("incompatible.json")
+	var incompatible_path: String = ProjectSettings.globalize_path(exchange_root).path_join("incompatible.json")
 	var incompatible_file: FileAccess = FileAccess.open(incompatible_path, FileAccess.WRITE)
 	incompatible_file.store_string(JSON.stringify(invalid_portable))
 	incompatible_file.close()

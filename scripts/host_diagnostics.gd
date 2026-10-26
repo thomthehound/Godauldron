@@ -11,15 +11,22 @@ var _sequence: int = 0
 var _dropped: int = 0
 
 
+static func _printable(value: String) -> bool:
+	for i in range(value.length()):
+		if value.unicode_at(i) < 32 or value.unicode_at(i) == 127:
+			return false
+	return true
+
+
 static func _valid_context(value: Variant) -> bool:
 	if typeof(value) != TYPE_DICTIONARY or value.size() > 16:
 		return false
 	for key in value:
-		if typeof(key) != TYPE_STRING or String(key).length() > 80:
+		if typeof(key) != TYPE_STRING or String(key).length() > 80 or not _printable(String(key)):
 			return false
 		var item: Variant = value[key]
 		if typeof(item) == TYPE_STRING:
-			if String(item).length() > 320:
+			if String(item).length() > 320 or not _printable(String(item)):
 				return false
 		elif typeof(item) in [TYPE_INT, TYPE_FLOAT]:
 			if not is_finite(float(item)):
@@ -38,7 +45,9 @@ static func valid_event(item: Variant) -> bool:
 	if not VALID_LEVELS.has(item["level"]) or String(item["source"]).strip_edges().is_empty() or \
 			String(item["source"]).length() > 80 or \
 			String(item["code"]).strip_edges().is_empty() or String(item["code"]).length() > 80 or \
-			String(item["message"]).strip_edges().is_empty() or String(item["message"]).length() > MAX_MESSAGE:
+			String(item["message"]).strip_edges().is_empty() or String(item["message"]).length() > MAX_MESSAGE or \
+			not _printable(String(item["message"])) or not _printable(String(item["source"])) or \
+			not _printable(String(item["code"])):
 		return false
 	return _valid_context(item.get("context", {}))
 

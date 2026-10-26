@@ -67,7 +67,7 @@ func _verify() -> void:
 	root.add_child(viewport)
 	var camera: Camera3D = Camera3D.new()
 	viewport.add_child(camera)
-	add_child(root)
+	get_root().add_child(root)
 	var original: Compositor = Compositor.new()
 	camera.compositor = original
 	var capture = SceneCapture.new()

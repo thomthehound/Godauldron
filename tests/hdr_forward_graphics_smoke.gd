@@ -18,7 +18,7 @@ func _verify() -> void:
 	var prior: Node = host.get("_active_scene")
 	viewport.remove_child(prior)
 	prior.queue_free()
-	var scene: Node3D = Node3D.new()
+	var scene: Node3D = preload("res://tests/fixtures/hdr_playback_probe.gd").new()
 	scene.name = "HDRCalibration"
 	viewport.add_child(scene)
 	var camera: Camera3D = Camera3D.new()
@@ -104,6 +104,37 @@ func _verify() -> void:
 	inherited.compositor_effects = inherited_effects
 	world.compositor = inherited
 	scene.add_child(world)
+	# Start a real advancing playback timeline while a camera keyframe
+	# track is selected. HDR capture must freeze both before GPU readback.
+	var playback = host.get("_playback")
+	playback.bind(scene, {}, 1.0 / 60.0)
+	if not playback.reset() or not playback.seek(5):
+		_fail("HDR playback regression could not seek to an authored step")
+		return
+	var inspector = preload("res://scripts/inspection_camera.gd").new()
+	inspector.bind(camera, AABB(Vector3(-2, -2, -2), Vector3(4, 4, 4)))
+	var state_first: Dictionary = inspector.snapshot()
+	var state_last: Dictionary = state_first.duplicate(true)
+	state_last["position"][0] = float(state_first["position"][0]) + 0.4
+	var track: Dictionary = {
+		"experiment_id": String(host.get("_manifest")["id"]),
+		"camera_path": String(scene.get_path_to(camera)),
+		"name": "HDR freeze proof",
+		"keys": [
+			{"step": 0, "state": state_first},
+			{"step": 10, "state": state_last}
+		]
+	}
+	if not preload("res://scripts/camera_tracks.gd").valid_track(track):
+		_fail("HDR camera-keyframe capture fixture is invalid")
+		return
+	host.set("_active_track", track)
+	(host.get("_track_enabled") as CheckButton).set_pressed_no_signal(true)
+	playback.playing = true
+	var expected_steps: int = int(scene.step_calls)
+	if expected_steps != 5:
+		_fail("Playback did not settle at requested fixed step before HDR capture")
+		return
 	var inherited_root: String = "user://inherited-world-hdr-%d" % OS.get_process_id()
 	host.set("_hdr_directory", inherited_root)
 	for i in range(3):
@@ -111,6 +142,10 @@ func _verify() -> void:
 	host.call("_capture_linear_exr")
 	if not bool(host.get("_capture_pending")):
 		_fail("Inherited compositor HDR request did not arm")
+		return
+	if playback.playing or playback.step_index != 5 or \
+			camera.global_position.distance_to(Vector3(0.2, 0, 5)) > 0.0001:
+		_fail("HDR capture did not freeze moving simulation and keyed camera at step 5")
 		return
 	frames = 0
 	while bool(host.get("_capture_pending")) and frames < 220:
@@ -136,7 +171,13 @@ func _verify() -> void:
 		world_path.get_basename() + ".json"))
 	if world_center.r <= 2.0 or typeof(inherited_metadata) != TYPE_DICTIONARY or \
 			inherited_metadata.get("source", {}).get("preserved_compositor_source") != "scene_world_environment" or \
-			int(inherited_metadata.get("source", {}).get("preserved_existing_compositor_effects", -1)) != 1:
+			int(inherited_metadata.get("source", {}).get("preserved_existing_compositor_effects", -1)) != 1 or \
+			int(inherited_metadata.get("capture_timeline_step", -1)) != 5 or \
+			int(inherited_metadata.get("playback", {}).get("steps", -1)) != 5 or \
+			bool(inherited_metadata.get("playback", {}).get("playing", true)) or \
+			int(inherited_metadata.get("camera_track", {}).get("step", -1)) != 5 or \
+			inherited_metadata.get("camera_scene_path") != String(scene.get_path_to(camera)) or \
+			int(scene.step_calls) != expected_steps or camera.global_position.distance_to(Vector3(0.2, 0, 5)) > 0.0001:
 		_fail("Inherited compositor HDR pixels/provenance did not preserve original effects")
 		return
 	print("Godauldron Forward+ scene-linear HDR verified: %dx%d center R=%f EXR=%s" % [

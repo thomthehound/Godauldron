@@ -7,10 +7,27 @@ var _camera: Camera3D
 var _original: Compositor
 var _temporary: Compositor
 var _effect: CompositorEffect
+var _effective_original: Compositor
+var _original_source: String = "none"
+
+
+static func _world_compositor(scene: Node, viewport: Viewport) -> Compositor:
+	if scene == null:
+		return null
+	var pending: Array[Node] = [scene]
+	while not pending.is_empty():
+		var node: Node = pending.pop_back()
+		if node is Viewport and node != viewport:
+			continue
+		if node is WorldEnvironment and node.get_viewport() == viewport and node.compositor != null:
+			return node.compositor
+		for child in node.get_children():
+			pending.append(child)
+	return null
 
 
 static func capability(method: String, viewport: SubViewport, camera: Camera3D) -> Dictionary:
-	if method not in ["gl_compatibility", "mobile", "gl_compatibility", "forward_plus"]:
+	if method not in ["gl_compatibility", "mobile", "forward_plus"]:
 		return {"available": false, "reason": "unknown_rendering_method"}
 	if method not in ["forward_plus", "mobile"]:
 		return {"available": false, "reason": "compositor_requires_forward_plus_or_mobile"}
@@ -21,7 +38,7 @@ static func capability(method: String, viewport: SubViewport, camera: Camera3D) 
 	return {"available": true, "method": method, "path": "render_scene_buffers_rd_post_transparent"}
 
 
-func begin(method: String, viewport: SubViewport, camera: Camera3D) -> Dictionary:
+func begin(method: String, viewport: SubViewport, camera: Camera3D, scene: Node = null) -> Dictionary:
 	if _temporary != null:
 		return {"ok": false, "error": "HDR capture already armed"}
 	var caps: Dictionary = capability(method, viewport, camera)
@@ -29,11 +46,14 @@ func begin(method: String, viewport: SubViewport, camera: Camera3D) -> Dictionar
 		return {"ok": false, "error": "HDR capture unavailable: " + String(caps.get("reason", ""))}
 	_camera = camera
 	_original = camera.compositor
+	_effective_original = _original if _original != null else _world_compositor(scene, viewport)
+	_original_source = "camera" if _original != null else (
+		"scene_world_environment" if _effective_original != null else "none")
 	_effect = CaptureEffect.new()
 	_temporary = Compositor.new()
 	var effects: Array[CompositorEffect] = []
-	if _original != null:
-		for existing in _original.compositor_effects:
+	if _effective_original != null:
+		for existing in _effective_original.compositor_effects:
 			effects.append(existing)
 	effects.append(_effect)
 	_temporary.compositor_effects = effects
@@ -59,6 +79,8 @@ func release() -> void:
 		_camera.compositor = _original
 	_camera = null
 	_original = null
+	_effective_original = null
+	_original_source = "none"
 	_temporary = null
 	_effect = null
 
@@ -70,5 +92,7 @@ func source() -> Dictionary:
 		"transfer": "scene_linear",
 		"producer": "Godot CompositorEffect POST_TRANSPARENT resolved render_buffers/color",
 		"color_semantics": "scene-linear renderer buffer, before Godot built-in tonemap/postprocess; actual native provider effects may differ",
-		"performance": "unmeasured GPU asynchronous readback"
+		"performance": "unmeasured GPU asynchronous readback",
+		"preserved_compositor_source": _original_source,
+		"preserved_existing_compositor_effects": 0 if _effective_original == null else _effective_original.compositor_effects.size()
 	}

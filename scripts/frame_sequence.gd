@@ -3,6 +3,7 @@ extends RefCounted
 ## Never starts a benchmark or reports GPU timing.
 
 const ImageCapture = preload("res://scripts/image_capture.gd")
+const HdrExrCapture = preload("res://scripts/hdr_exr_capture.gd")
 const MAX_FRAMES := 240
 
 var _directory: String = ""
@@ -12,12 +13,21 @@ var _expected_frames: int = 0
 var _start_step: int = 0
 var _step_seconds: float = 0.0
 var _active: bool = false
+var _format: String = "png"
+var _hdr_source: Dictionary = {}
 
 
 func begin(root: String, stem: String, start_step: int, count: int,
-		step_seconds: float, metadata: Dictionary) -> Dictionary:
+		step_seconds: float, metadata: Dictionary,
+		image_format: String = "png", hdr_source: Dictionary = {}) -> Dictionary:
 	if _active:
 		return {"ok": false, "error": "Sequence already active"}
+	if image_format not in ["png", "exr"]:
+		return {"ok": false, "error": "Unsupported sequence image format"}
+	if image_format == "exr" and (hdr_source.get("source") != "godot_render_scene_buffers_rd" or \
+			hdr_source.get("stage") != "post_transparent_pre_postprocess" or \
+			hdr_source.get("transfer") != "scene_linear"):
+		return {"ok": false, "error": "EXR sequence lacks verified linear render-buffer source"}
 	if stem.is_empty() or not stem.is_valid_filename() or stem.contains(".."):
 		return {"ok": false, "error": "Invalid sequence name"}
 	if start_step < 0 or count < 1 or count > MAX_FRAMES or \
@@ -36,6 +46,8 @@ func begin(root: String, stem: String, start_step: int, count: int,
 	_expected_frames = count
 	_start_step = start_step
 	_step_seconds = step_seconds
+	_format = image_format
+	_hdr_source = hdr_source.duplicate(true)
 	_active = true
 	var initial: Dictionary = _write_summary("incomplete", "")
 	if not bool(initial.get("ok", false)):
@@ -68,14 +80,15 @@ func write_frame(image: Image, index: int, observed: Dictionary = {},
 	if not observed.is_empty():
 		record["capture_state"] = observed.duplicate(true)
 	var stem: String = "frame_%06d" % index
-	var written: Dictionary = ImageCapture.write_image(image, _directory, stem, record)
+	var written: Dictionary = ImageCapture.write_image(image, _directory, stem, record) if _format == "png" else \
+		HdrExrCapture.write(image, _directory, stem, _hdr_source, record)
 	if not bool(written.get("ok", false)):
 		return written
 	_frames.append({
 		"index": index,
 		"timeline_step_index": step,
 		"timeline_seconds": float(step) * _step_seconds,
-		"image_filename": stem + ".png",
+		"image_filename": stem + (".png" if _format == "png" else ".exr"),
 		"metadata_filename": stem + ".json"
 	})
 	# The manifest is a crash-recovery record: every completed frame is
@@ -98,7 +111,10 @@ func finish(error: String = "") -> Dictionary:
 func _write_summary(status: String, error: String) -> Dictionary:
 	var record: Dictionary = _base.duplicate(true)
 	record["format_version"] = 1
-	record["capture_type"] = "fixed_step_png_sequence"
+	record["capture_type"] = "fixed_step_png_sequence" if _format == "png" else "fixed_step_scene_linear_exr_sequence"
+	record["image_format"] = _format
+	if _format == "exr":
+		record["hdr_source"] = _hdr_source.duplicate(true)
 	record["status"] = status
 	record["error"] = error
 	record["start_step"] = _start_step

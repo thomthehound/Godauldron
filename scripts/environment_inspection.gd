@@ -97,6 +97,12 @@ func apply(scene: Node, viewport: Viewport, exposure_ev: float,
 			not is_finite(contrast) or contrast < 0.5 or contrast > 1.5 or \
 			not is_finite(saturation) or saturation < 0.0 or saturation > 2.0:
 		return {"ok": false, "error": "Unsupported inspection grade settings"}
+	if _override != null and is_instance_valid(_camera) and \
+			_camera.environment != _override:
+		# A provider replaced the camera environment while the host was bound.
+		# Don't silently layer another host clone over its new resource.
+		release()
+		return {"ok": false, "error": "Scene camera Environment changed ownership"}
 	if enabled() and (_camera != viewport.get_camera_3d() or \
 			not _camera_in_scene(scene, _camera)):
 		release()
@@ -118,7 +124,6 @@ func apply(scene: Node, viewport: Viewport, exposure_ev: float,
 		# after this inspection override was originally bound.
 		release()
 		return {"ok": false, "error": "Scene camera Environment changed ownership"}
-	_override.tonemap_exposure = (1.0 if _original == null else _override.tonemap_exposure)
 	# EV is relative to the original authored exposure, not a hidden reset.
 	var base_environment: Environment = _original
 	if base_environment == null:

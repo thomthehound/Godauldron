@@ -97,7 +97,7 @@ jobs:
     timeout-minutes: 20
     env:
       LIBGL_ALWAYS_SOFTWARE: "1"
-      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+      MESA_VK_DEVICE_SELECT: "10005:0000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -107,7 +107,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers xvfb
-          test -f "$VK_ICD_FILENAMES"
+          ICD="$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d -iname '*lvp*.json' -print -quit 2>/dev/null)"
+          test -n "$ICD"
+          echo "VK_DRIVER_FILES=$ICD" >> "$GITHUB_ENV"
       - name: Download Godot 4
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -115,7 +117,7 @@ jobs:
       - name: Import assets
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --editor --import --quit
       - name: Verify actual Forward+ scene-linear HDR output from emitted radiance
-        run: timeout --signal=TERM --kill-after=5s 120s xvfb-run -a .engine/godot --path . --rendering-method gl_compatibility --version && timeout --signal=TERM --kill-after=5s 120s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/hdr_forward_graphics_smoke.gd
+        run: timeout --signal=TERM --kill-after=5s 120s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/hdr_forward_graphics_smoke.gd
 
   portrait-visual-capture:
     runs-on: ubuntu-latest

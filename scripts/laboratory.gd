@@ -17,6 +17,7 @@ const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
 const FrameSequence = preload("res://scripts/frame_sequence.gd")
 const Observability = preload("res://scripts/performance_observability.gd")
+const EngineViewportTelemetry = preload("res://scripts/engine_viewport_telemetry.gd")
 const PerformancePlot = preload("res://scripts/performance_plot.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
@@ -88,6 +89,10 @@ var _parameters: VBoxContainer
 var _status: Label
 var _telemetry: Label
 var _observability = Observability.new()
+var _engine_render = EngineViewportTelemetry.new()
+var _runtime_environment: Dictionary = {}
+var _engine_render_label: Label
+var _environment_label: Label
 var _observability_plot: Control
 var _observability_label: Label
 var _provider_timing_label: Label
@@ -112,11 +117,18 @@ var _results_directory: String = "user://results"
 func _ready() -> void:
 	_bookmark_entries = InspectionViews.read(_bookmarks_root)
 	_build_ui()
+	_engine_render.activate(_viewport)
+	_runtime_environment = EngineViewportTelemetry.runtime_environment()
+	_update_runtime_environment_label()
 	_discover()
 	_refresh_sessions()
 	if not _experiments.is_empty():
 		_list.select(0)
 		_select_experiment(0)
+
+
+func _exit_tree() -> void:
+	_engine_render.deactivate(_viewport)
 
 
 func _build_ui() -> void:
@@ -496,6 +508,14 @@ func _build_ui() -> void:
 	_observability_label.text = "Host frame pacing / callback CPU: waiting for samples"
 	_observability_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	performance_text.add_child(_observability_label)
+	_engine_render_label = Label.new()
+	_engine_render_label.text = "Godot viewport render CPU/GPU: waiting for rendered frames"
+	_engine_render_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	performance_text.add_child(_engine_render_label)
+	_environment_label = Label.new()
+	_environment_label.text = "Renderer/hardware: unavailable"
+	_environment_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	performance_text.add_child(_environment_label)
 	_provider_timing_label = Label.new()
 	_provider_timing_label.text = "Provider GPU: unavailable (no resolved device report)"
 	_provider_timing_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1116,6 +1136,7 @@ func _select_experiment(index: int) -> void:
 	# Clear only after successful preflight and completion/cancellation of
 	# the previous run, never for a failed candidate.
 	_observability.reset_run()
+	_engine_render.reset()
 	_last_observability_ui_tick = -1
 	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
 	_update_observability_ui()
@@ -1687,6 +1708,7 @@ func _start_campaign() -> void:
 
 func _begin_campaign_case() -> void:
 	_observability.reset_run()
+	_engine_render.reset()
 	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
 	var next_case: Dictionary = _campaign.next_case()
 	_run = ExperimentRun.new()
@@ -1864,6 +1886,7 @@ func _start_run() -> void:
 		_finish_run(false)
 	_campaign = null
 	_observability.reset_run()
+	_engine_render.reset()
 	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
 	_run = ExperimentRun.new()
 	_run.begin(
@@ -1894,6 +1917,8 @@ func _process(delta: float) -> void:
 	var analysis_active: bool = _comparison_window != null and bool(_comparison_window.call("analysis_busy"))
 	var exclude: bool = _capture_pending or analysis_active
 	_observability.observe_frame_tick(now_usec, exclude)
+	_engine_render.poll(_viewport, not exclude and _viewport.debug_draw == Viewport.DEBUG_DRAW_DISABLED,
+		_run != null and _run.phase == ExperimentRun.Phase.SAMPLE and _run.sample_steps_completed > 0)
 	if _last_observability_ui_tick < 0 or now_usec - _last_observability_ui_tick > 250000:
 		_last_observability_ui_tick = now_usec
 		_update_observability_ui()
@@ -1942,7 +1967,41 @@ func _process(delta: float) -> void:
 		_finish_run(true)
 
 
+func _update_runtime_environment_label() -> void:
+	if _environment_label == null:
+		return
+	var gpu: String = String(_runtime_environment.get("gpu_name")) if _runtime_environment.get("gpu_name") != null else "GPU unidentified"
+	_environment_label.text = "Renderer: %s / %s  |  Adapter: %s" % [
+		String(_runtime_environment.get("rendering_method", "unknown")),
+		String(_runtime_environment.get("rendering_driver", "unknown")), gpu
+	]
+
+
+func _update_engine_viewport_ui() -> void:
+	if _engine_render_label == null:
+		return
+	var live: Dictionary = _engine_render.live_snapshot()
+	var cpu: Dictionary = live["render_cpu"]
+	var gpu: Dictionary = live["render_gpu"]
+	var draws: Dictionary = live["visible_draw_calls"]
+	var cpu_text: String = "unavailable"
+	var gpu_text: String = "unavailable"
+	if int(cpu["count"]) > 0:
+		cpu_text = "p50 %.3f / p95 %.3f ms" % [
+			float(cpu["p50_usec"]) / 1000.0, float(cpu["p95_usec"]) / 1000.0
+		]
+	if int(gpu["count"]) > 0:
+		gpu_text = "p50 %.3f / p95 %.3f ms" % [
+			float(gpu["p50_usec"]) / 1000.0, float(gpu["p95_usec"]) / 1000.0
+		]
+	var draws_text: String = "unavailable" if int(draws["count"]) == 0 else "%.0f" % float(draws["p50_usec"])
+	_engine_render_label.text = "Godot viewport renderer CPU: %s  |  GPU: %s  |  visible draw calls p50: %s (not provider GPU)" % [
+		cpu_text, gpu_text, draws_text
+	]
+
+
 func _update_observability_ui() -> void:
+	_update_engine_viewport_ui()
 	if _observability_label == null or _observability_plot == null:
 		return
 	var snapshot: Dictionary = _observability.live_snapshot()
@@ -2007,6 +2066,8 @@ func _finish_run(completed: bool) -> void:
 		]
 	else:
 		_provider_timing_label.text = "Provider GPU: unavailable (%s)" % String(gpu.get("reason", "not reported"))
+	report["engine_viewport_telemetry"] = _engine_render.sample_report()
+	report["runtime_environment"] = _runtime_environment.duplicate(true)
 	report["graphics"] = _graphics_run_snapshot.duplicate(true)
 	report["visualization_path"] = NativeExperimentPackage.display_path(_manifest)
 	report["measurement_boundary"] = "host_godauldron_step_callback_cpu_wall_only; excludes native GPU execution, completion and presentation"

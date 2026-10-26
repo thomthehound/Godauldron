@@ -146,12 +146,6 @@ func apply(scene: Node, viewport: Viewport, exposure_ev: float,
 	# EV is relative to the original authored exposure, not a hidden reset.
 	var base_environment: Environment = _source_environment
 	if base_environment == null:
-		var world: WorldEnvironment = _find_world_environment(scene)
-		if world != null:
-			base_environment = world.environment
-		elif viewport.world_3d != null:
-			base_environment = viewport.world_3d.environment
-	if base_environment == null:
 		release()
 		return {"ok": false, "error": "Original Environment no longer available"}
 	_override.tonemap_exposure = base_environment.tonemap_exposure * pow(2.0, exposure_ev)

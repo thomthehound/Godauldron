@@ -80,8 +80,9 @@ func write_frame(image: Image, index: int, observed: Dictionary = {},
 	if not observed.is_empty():
 		record["capture_state"] = observed.duplicate(true)
 	var stem: String = "frame_%06d" % index
+	var source: Dictionary = frame_context.get("hdr_capture_source", _hdr_source) if _format == "exr" else {}
 	var written: Dictionary = ImageCapture.write_image(image, _directory, stem, record) if _format == "png" else \
-		HdrExrCapture.write(image, _directory, stem, _hdr_source, record)
+		HdrExrCapture.write(image, _directory, stem, source, record)
 	if not bool(written.get("ok", false)):
 		return written
 	_frames.append({

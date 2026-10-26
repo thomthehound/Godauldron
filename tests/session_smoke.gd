@@ -123,6 +123,24 @@ func _verify() -> void:
 			Session.catalog(folder).size() != before_import + 2:
 		_fail("Incompatible configuration was installed into the library")
 		return
+	var oversized_path: String = ProjectSettings.globalize_path(exchange_root).path_join("oversized.json")
+	var oversized: FileAccess = FileAccess.open(oversized_path, FileAccess.WRITE)
+	oversized.store_string("x".repeat(Session.MAX_EXCHANGE_BYTES + 1))
+	oversized.close()
+	if bool(Session.import_file(oversized_path, folder, manifests,
+			Engine.get_version_info(), String(host.get("_rendering_method"))).get("ok", false)):
+		_fail("Oversized external configuration was accepted")
+		return
+	# The GUI import path must only populate the catalog, never apply the file.
+	host.set("_session_root", folder)
+	var imported_scene: Node = host.get("_active_scene")
+	var before_gui_import: int = Session.catalog(folder).size()
+	host.call("_import_session_file", export_path)
+	if host.get("_active_scene") != imported_scene or \
+			Session.catalog(folder).size() != before_gui_import + 1 or \
+			host.get("_manifest").get("id") != doc["experiment_id"]:
+		_fail("GUI import unexpectedly changed the active experiment")
+		return
 
 	host.call("_select_experiment", reference)
 	(host.get("_warmup_steps") as SpinBox).value = 0

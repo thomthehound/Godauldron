@@ -19,12 +19,18 @@ var _excluded: int = 0
 var _missing_gpu: int = 0
 var _missing_cpu: int = 0
 var _armed: bool = false
+var _render_device_frame_delay: int = 0
+var _boundary_guard_frames: int = 4
+var _consecutive_sample_frames: int = 0
+var _boundary_skipped: int = 0
 
 
 func activate(viewport: Viewport) -> void:
 	if viewport == null:
 		return
 	RenderingServer.viewport_set_measure_render_time(viewport.get_viewport_rid(), true)
+	var rd: RenderingDevice = RenderingServer.get_rendering_device()
+	configure_frame_delay(rd.get_frame_delay() if rd != null else 2)
 	_armed = true
 	reset()
 
@@ -33,6 +39,24 @@ func deactivate(viewport: Viewport) -> void:
 	if _armed and viewport != null:
 		RenderingServer.viewport_set_measure_render_time(viewport.get_viewport_rid(), false)
 	_armed = false
+
+
+func configure_frame_delay(frames: int) -> void:
+	_render_device_frame_delay = maxi(0, frames)
+	# Add two render-thread/viewport staging frames to device's own ring.
+	# This is a conservative rejection window, not exact timestamp correlation.
+	_boundary_guard_frames = maxi(4, _render_device_frame_delay + 2)
+
+
+func admit_sample_frame(sampling: bool) -> bool:
+	if not sampling:
+		_consecutive_sample_frames = 0
+		return false
+	_consecutive_sample_frames += 1
+	if _consecutive_sample_frames <= _boundary_guard_frames:
+		_boundary_skipped += 1
+		return false
+	return true
 
 
 func reset() -> void:
@@ -49,6 +73,8 @@ func reset() -> void:
 	_excluded = 0
 	_missing_gpu = 0
 	_missing_cpu = 0
+	_consecutive_sample_frames = 0
+	_boundary_skipped = 0
 
 
 static func _append(array: Array[float], value: float) -> void:
@@ -98,8 +124,10 @@ func poll(viewport: Viewport, include: bool, sampling: bool) -> void:
 		_frames += 1
 		return
 	if not include:
+		admit_sample_frame(false)
 		observe_values(0, 0, -1, -1, false, false)
 		return
+	var admit_sampling: bool = admit_sample_frame(sampling)
 	var rid: RID = viewport.get_viewport_rid()
 	var cpu_ms: float = RenderingServer.viewport_get_measured_render_time_cpu(rid)
 	var gpu_ms: float = RenderingServer.viewport_get_measured_render_time_gpu(rid)
@@ -109,7 +137,7 @@ func poll(viewport: Viewport, include: bool, sampling: bool) -> void:
 	var primitives: int = RenderingServer.viewport_get_render_info(rid,
 		RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
 		RenderingServer.VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME)
-	observe_values(cpu_ms, gpu_ms, draws, primitives, true, sampling)
+	observe_values(cpu_ms, gpu_ms, draws, primitives, true, admit_sampling)
 
 
 func live_snapshot() -> Dictionary:
@@ -128,12 +156,15 @@ func live_snapshot() -> Dictionary:
 func sample_report() -> Dictionary:
 	return {
 		"source": "Godot RenderingServer viewport (not provider SDK)",
-		"phase": "descriptive_sampled_render_frames_not_correlated_to_callbacks",
+		"phase": "descriptive_render_frames_after_device_delay_guard_not_correlated_to_callbacks",
 		"render_cpu": Observability.describe(_sample_cpu),
 		"render_gpu": Observability.describe(_sample_gpu),
 		"visible_draw_calls": Observability.describe(_sample_draws),
 		"visible_primitives": Observability.describe(_sample_primitives),
 		"sampled_frames": _sample_frames,
+		"render_device_frame_delay": _render_device_frame_delay,
+		"sample_boundary_guard_frames": _boundary_guard_frames,
+		"boundary_frames_excluded": _boundary_skipped,
 		"excluded_frames": _excluded,
 		"unavailable_cpu_readings": _missing_cpu,
 		"unavailable_gpu_readings": _missing_gpu,

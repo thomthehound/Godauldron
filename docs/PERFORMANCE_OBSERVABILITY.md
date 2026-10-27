@@ -44,6 +44,8 @@ A supported result has this shape:
 
 `measurement_source` can be `device_timestamp` or `device_event`. The durations must be finite, nonnegative microseconds; up to 8,192 samples are accepted. The producer is responsible for sampling the current run's **sample phase only**, resolving device events, synchronizing their availability before returning, and documenting whether its reported scope includes device queues, copies, simulation, or rendering. A provider can report any credible scope but cannot assume it equals end-to-end frame latency. For cancelled runs, missing hooks, pending queries, unsupported sources, or malformed reports, the exported result has `available=false` with a reason; no fake GPU number is substituted.
 
+A complementary optional [native GPU queue timeline hook](PROVIDER_GPU_TIMELINES.md) records step-indexed compute/graphics/transfer events, same-clock queue overlap, and separately measured CPU synchronization waits. It is a strictly validated provider-reported contract, **not an invented GPU profiler or direct renderer-device correlation**. Only providers implementing the hook incur the bounded per-step submission-identity bookkeeping.
+
 The dashboard labels accepted data **provider-reported**. Godauldron validates type, bounds, and the provider's completion declaration; it does **not** independently prove driver-level synchronization correctness. The report keeps the provider/backend/scope/source together with its descriptive percentiles, under `provider_gpu_timing`.
 
 ## Remaining scope

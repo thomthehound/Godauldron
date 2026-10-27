@@ -1,10 +1,12 @@
-# Godot-generated state
+# Godot-generated caches (not per-resource *.import or *.uid metadata)
 .godot/
 .import/
 
 # Native and engine builds
 bin/
 build/
+/.native-build/
+/.native-rd-windows-build/
 .engine/
 godot-cpp/bin/
 godot-cpp/gen/
@@ -15,11 +17,21 @@ godot-cpp/gen/
 *.dylib
 *.pdb
 
+# Native diagnostic packages installed by the repository's build scripts
+/experiments/native-rd-windows/
+/experiments/native-vulkan-provider/
+
 # Python tooling
 __pycache__/
 *.pyc
 .pytest_cache/
 
-# Local experiment captures
+# Local experiment captures and root-level native GPU profiling reports
 results/
 visual-artifacts/
+/native_rd_*.json
+/native_rd_*.csv
+/native_rd_*.zip
+
+# Keep Godot *.uid and *.import sidecars under version control; they preserve
+# resource identities and importer options across checkouts.

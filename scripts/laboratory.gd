@@ -31,6 +31,7 @@ const PerformancePlot = preload("res://scripts/performance_plot.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
 const ProviderControls = preload("res://scripts/provider_runtime_controls.gd")
+const PipelineDiagnostics = preload("res://scripts/provider_pipeline_diagnostics.gd")
 const ExperimentPlayback = preload("res://scripts/experiment_playback.gd")
 const LabSession = preload("res://scripts/lab_session.gd")
 const HostDiagnostics = preload("res://scripts/host_diagnostics.gd")
@@ -140,6 +141,7 @@ var _environment_label: Label
 var _observability_plot: Control
 var _observability_label: Label
 var _provider_timing_label: Label
+var _pipeline_lifecycle_label: Label
 var _provider_timeline_label: Label
 var _provider_timeline_window: Window
 var _provider_timeline_data: Dictionary = {}
@@ -735,6 +737,18 @@ func _build_ui() -> void:
 	_provider_timing_label.text = "Provider GPU: unavailable (no resolved device report)"
 	_provider_timing_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	performance_text.add_child(_provider_timing_label)
+	var pipeline_row := HBoxContainer.new()
+	performance_text.add_child(pipeline_row)
+	var inspect_pipelines := Button.new()
+	inspect_pipelines.text = "Inspect pipelines"
+	inspect_pipelines.tooltip_text = "One provider-owned post-setup snapshot; host API timings, creations, binds and failures; no cache-hit guessing"
+	inspect_pipelines.pressed.connect(_inspect_provider_pipelines)
+	pipeline_row.add_child(inspect_pipelines)
+	_pipeline_lifecycle_label = Label.new()
+	_pipeline_lifecycle_label.text = "Provider pipelines: not inspected"
+	_pipeline_lifecycle_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pipeline_lifecycle_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pipeline_row.add_child(_pipeline_lifecycle_label)
 	_provider_timeline_label = Label.new()
 	_provider_timeline_label.text = "Provider queue timeline: unavailable (no resolved device intervals)"
 	_provider_timeline_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1925,6 +1939,7 @@ func _select_experiment(index: int) -> void:
 	_engine_render.reset()
 	_last_observability_ui_tick = -1
 	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
+	_pipeline_lifecycle_label.text = "Provider pipelines: not inspected for selected experiment"
 	_provider_timeline_label.text = "Provider queue timeline: unavailable (no completed run)"
 	_provider_timeline_data.clear()
 	if _provider_timeline_window != null:
@@ -3271,6 +3286,16 @@ func _update_telemetry() -> void:
 	]
 
 
+func _inspect_provider_pipelines() -> void:
+	if _capture_pending or _has_active_run() or _campaign != null or \
+			(_comparison_window != null and \
+			(_comparison_window.visible or bool(_comparison_window.call("analysis_busy")))):
+		_status.text = "Pipeline inspection unavailable during measurement, capture or image analysis"
+		return
+	var report: Dictionary = PipelineDiagnostics.read(_active_scene)
+	_pipeline_lifecycle_label.text = PipelineDiagnostics.summary(report)
+
+
 func _show_provider_gpu_timeline() -> void:
 	if _capture_pending or _has_active_run():
 		_status.text = "Cannot open GPU lane detail during capture or a measured run"
@@ -3296,6 +3321,9 @@ func _finish_run(completed: bool) -> void:
 	# orchestration while explicitly recording its host-side wall duration.
 	var report_preparation_started_usec: int = Time.get_ticks_usec()
 	var report: Dictionary = finished_run.make_report(String(_manifest["id"]))
+	var pipelines: Dictionary = PipelineDiagnostics.read(_active_scene)
+	_pipeline_lifecycle_label.text = PipelineDiagnostics.summary(pipelines)
+	report["provider_pipeline_lifecycle"] = pipelines
 	var provider_events: Dictionary = {"accepted": 0, "rejected": 0}
 	if is_instance_valid(_active_scene) and _active_scene.has_method("godauldron_diagnostics"):
 		# Optional producer diagnostics run outside sampled callbacks.

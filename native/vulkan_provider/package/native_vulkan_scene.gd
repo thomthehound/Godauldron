@@ -21,6 +21,9 @@ func godauldron_reload_shader_from_source(path: String) -> Dictionary:
 		return {"ok": false, "stage": "source", "error": "Shader source not found: " + path}
 	if not bool(_native.call("godauldron_pipeline_diagnostics")["pipelines"][0].get("prepare_attempts", 0)):
 		_native.call("godauldron_setup", {})
+	if not bool(_native.call("godauldron_shader_reload_available")):
+		return {"ok": false, "stage": "in_flight",
+			"error": "Native provider is not idle or prior GPU submissions remain unresolved"}
 	var output_path: String = "user://godauldron_shader_reload_%d.spv" % Time.get_ticks_usec()
 	var compiler_messages: Array = []
 	var exit_code: int = OS.execute(shader_compiler, PackedStringArray([

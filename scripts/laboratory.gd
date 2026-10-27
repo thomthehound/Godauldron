@@ -2507,6 +2507,9 @@ func _start_campaign() -> void:
 	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
 		_status.text = "Switch Render view to Lit before measuring a campaign"
 		return
+	if _buffer_window != null and _buffer_window.visible:
+		_status.text = "Close native buffer inspection before measuring a campaign"
+		return
 	if _capture_pending:
 		_status.text = "Capture in progress; campaign cannot start yet"
 		return
@@ -2715,6 +2718,9 @@ func _start_run() -> void:
 	_inspector_drag = 0
 	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
 		_status.text = "Switch Render view to Lit before measuring a benchmark"
+		return
+	if _buffer_window != null and _buffer_window.visible:
+		_status.text = "Close native buffer inspection before measuring a benchmark"
 		return
 	if _capture_pending:
 		_status.text = "Capture in progress; experiment cannot start yet"

@@ -32,6 +32,7 @@ func _verify() -> void:
 	for failure in [
 			{"stage": "shader", "shaders": 0, "pipelines": 0},
 			{"stage": "pipeline", "shaders": 1, "pipelines": 0},
+			{"stage": "descriptor", "shaders": 1, "pipelines": 1},
 			{"stage": "initialization", "shaders": 1, "pipelines": 1}
 	]:
 		provider.evidence = copy.duplicate(true)
@@ -40,13 +41,13 @@ func _verify() -> void:
 		item["prepare_failures"] = 1
 		item["shader_creations"] = failure["shaders"]
 		item["pipeline_creations"] = failure["pipelines"]
-		item["descriptor_creations"] = 1
+		item["descriptor_creations"] = 0 if failure["stage"] == "descriptor" else 1
 		item["pipeline_binds"] = 0
 		item["last_prepare_failure_stage"] = failure["stage"]
 		item["last_prepare_error"] = "Native setup rejected at " + failure["stage"]
 		var failure_report: Dictionary = Diagnostics.read(provider)
 		if not failure_report.get("available", false) or \
-				int(failure_report["pipelines"][0]["descriptor_creations"]) != 1 or \
+				int(failure_report["pipelines"][0]["descriptor_creations"]) != int(item["descriptor_creations"]) or \
 				failure_report["pipelines"][0]["last_prepare_failure_stage"] != failure["stage"] or \
 				int(failure_report["pipelines"][0]["shader_create_host_usec"]) != 20 or \
 				not Diagnostics.summary(failure_report).contains(item["last_prepare_error"]):

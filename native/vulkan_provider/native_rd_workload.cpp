@@ -153,6 +153,7 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
         rd->free_rid(shader);
         return prepare_failure("pipeline", "provider_pipeline_creation_failed", elapsed_host_usec(began));
     }
+    ++pipeline_creations_;
 
     Ref<RDUniform> binding;
     binding.instantiate();
@@ -169,6 +170,7 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
         rd->free_rid(shader);
         return prepare_failure("descriptor", "provider_descriptor_creation_failed", elapsed_host_usec(began));
     }
+    ++descriptor_creations_;
 
     shader_ = shader;
     pipeline_ = pipeline;
@@ -182,8 +184,6 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     push_bytes_.resize(sizeof(uint32_t) * 2);
     phase_ = Phase::PREPARED;
     ++prepare_count_;
-    ++pipeline_creations_;
-    ++descriptor_creations_;
     prepare_total_host_usec_ = elapsed_host_usec(began);
     last_prepare_error_ = "";
     last_prepare_failure_stage_ = "";

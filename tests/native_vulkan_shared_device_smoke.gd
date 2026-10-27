@@ -1,5 +1,5 @@
 extends SceneTree
-## Genuine engine-owned Vulkan VkDevice + VkBuffer inspected by the native
+## Genuine engine-owned Vulkan VkDevice + VkImage inspected by the native
 ## extension, with compute/async readback submitted by Godot's RenderingDevice.
 
 const Package = preload("res://scripts/native_experiment_package.gd")
@@ -43,7 +43,7 @@ func _verify() -> void:
 	var native: Object = stage.get("_native")
 	var camera: Camera3D = viewport.get_camera_3d()
 	if native == null or camera == null or \
-			not native.has_method("inspect_godot_vulkan_buffer") or camera.compositor != null:
+			not native.has_method("inspect_godot_vulkan_image") or camera.compositor != null:
 		_fail("Native resource-witness method or active scene-owned camera missing")
 		return
 	var effect_script: GDScript = load(
@@ -58,7 +58,7 @@ func _verify() -> void:
 	temporary.compositor_effects = effects
 	camera.compositor = temporary
 	if not effect.request():
-		_fail("Godot-owned VkBuffer inspection could not be armed")
+		_fail("Godot-owned VkImage inspection could not be armed")
 		return
 	var state: Dictionary = {}
 	for i in range(180):
@@ -77,15 +77,15 @@ func _verify() -> void:
 			witness.get("backend") != "Vulkan" or \
 			witness.get("resource_owner") != "godot_global_rendering_device" or \
 			witness.get("queue_submission_owner") != "godot_rendering_device" or \
-			int(witness.get("buffer_required_bytes", -1)) != EXPECTED_ELEMENTS * 4 or \
-			int(witness.get("buffer_allocation_requirement_bytes", 0)) < EXPECTED_ELEMENTS * 4:
-		_fail("Native VkDevice/VkBuffer identity or actual GPU readback was unavailable")
+			int(witness.get("image_required_bytes", -1)) != EXPECTED_ELEMENTS * 4 or \
+			int(witness.get("image_allocation_requirement_bytes", 0)) < EXPECTED_ELEMENTS * 4:
+		_fail("Native VkDevice/VkImage identity or actual GPU readback was unavailable")
 		return
 	for i in range(EXPECTED_ELEMENTS):
 		if bytes.decode_u32(i * 4) != 7:
-			_fail("Same-device GPU compute did not write the actual Godot-owned buffer at %d" % i)
+			_fail("Same-device GPU compute did not write the actual Godot-owned image at %d" % i)
 			return
-	# Do not free Godot-owned buffer or native device. The compositor no longer
+	# Do not free Godot-owned image or native device. The compositor no longer
 	# owns the frame after this capture; the witness kept no raw handles.
 	camera.compositor = original
 	if camera.compositor != null or not ClassDB.class_exists("NativeGpuProbe3D"):
@@ -94,6 +94,6 @@ func _verify() -> void:
 	if RenderingServer.get_current_rendering_driver_name() != "vulkan":
 		_fail("Renderer driver unexpectedly changed")
 		return
-	print("Godot Vulkan same-device resource verified: native VkDevice/VkBuffer witness, ",
+	print("Godot Vulkan same-device resource verified: native VkDevice/VkImage witness, ",
 		EXPECTED_ELEMENTS, " shader-written values, async RD readback, engine-owned submission")
 	quit(0)

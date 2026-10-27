@@ -40,6 +40,8 @@ void NativeGpuProbe3D::_bind_methods() {
                          &NativeGpuProbe3D::godauldron_metrics);
     ClassDB::bind_method(D_METHOD("godauldron_pipeline_diagnostics"),
                          &NativeGpuProbe3D::godauldron_pipeline_diagnostics);
+    ClassDB::bind_method(D_METHOD("godauldron_replace_shader", "spirv"),
+                         &NativeGpuProbe3D::godauldron_replace_shader);
     ClassDB::bind_method(D_METHOD("record_godot_image_compute", "rendering_device",
                                  "output_image", "seed"),
                          &NativeGpuProbe3D::record_godot_image_compute);
@@ -225,6 +227,121 @@ bool NativeGpuProbe3D::create_buffer(VkDeviceSize bytes, VkBufferUsageFlags usag
     return true;
 }
 
+// The provider is the only owner of this native pipeline and its shader
+// bytecode. Both initial creation and reload use exactly this creation path.
+bool NativeGpuProbe3D::create_compute_pipeline(
+        const PackedByteArray &bytecode, VkPipeline &created,
+        std::string &failure_stage, std::string &failure_reason) {
+    created = VK_NULL_HANDLE;
+    failure_stage.clear();
+    failure_reason.clear();
+    if (pipeline_layout_ == VK_NULL_HANDLE || bytecode.size() < 20 ||
+        bytecode.size() > 1024 * 1024 || bytecode.size() % sizeof(uint32_t) != 0) {
+        failure_stage = "shader";
+        failure_reason = "Compute shader SPIR-V size, alignment, or pipeline layout invalid";
+        return false;
+    }
+    std::vector<uint32_t> words(static_cast<size_t>(bytecode.size()) / sizeof(uint32_t));
+    std::memcpy(words.data(), bytecode.ptr(), static_cast<size_t>(bytecode.size()));
+    if (words[0] != 0x07230203u) {
+        failure_stage = "shader";
+        failure_reason = "Compute shader is not SPIR-V";
+        return false;
+    }
+    VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    info.codeSize = static_cast<size_t>(bytecode.size());
+    info.pCode = words.data();
+    VkShaderModule module = VK_NULL_HANDLE;
+    const auto shader_start = std::chrono::steady_clock::now();
+    const VkResult shader_result = vkCreateShaderModule(device_, &info, nullptr, &module);
+    shader_create_host_usec_ = elapsed_pipeline_host_usec(shader_start);
+    if (shader_result != VK_SUCCESS || module == VK_NULL_HANDLE) {
+        failure_stage = "shader";
+        failure_reason = "vkCreateShaderModule rejected candidate SPIR-V";
+        return false;
+    }
+    ++shader_creation_count_;
+
+    VkPipelineShaderStageCreateInfo stage{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.module = module;
+    stage.pName = "main";
+    VkComputePipelineCreateInfo pipeline_info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    pipeline_info.stage = stage;
+    pipeline_info.layout = pipeline_layout_;
+    const auto pipeline_start = std::chrono::steady_clock::now();
+    const VkResult pipeline_result =
+        vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &created);
+    pipeline_create_host_usec_ = elapsed_pipeline_host_usec(pipeline_start);
+    vkDestroyShaderModule(device_, module, nullptr);
+    if (pipeline_result != VK_SUCCESS || created == VK_NULL_HANDLE) {
+        if (created != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device_, created, nullptr);
+            created = VK_NULL_HANDLE;
+        }
+        failure_stage = "pipeline";
+        failure_reason = "vkCreateComputePipelines rejected candidate SPIR-V";
+        return false;
+    }
+    ++pipeline_creation_count_;
+    return true;
+}
+
+Dictionary NativeGpuProbe3D::shader_reload_result(bool ok, const char *error) const {
+    Dictionary result;
+    result["ok"] = ok;
+    result["error"] = error;
+    result["generation"] = shader_reload_successes_;
+    result["attempts"] = shader_reload_attempts_;
+    result["failures"] = shader_reload_failures_;
+    result["retired_pipelines"] = retired_replaced_pipelines_;
+    result["host_wall_usec"] = shader_reload_host_usec_;
+    result["failure_stage"] = String(shader_reload_failure_stage_.c_str());
+    result["failure_reason"] = String(shader_reload_error_.c_str());
+    return result;
+}
+
+// This method is called only at an explicit unmeasured user/provider action.
+// An unresolved epoch retains executable command buffers referencing the old
+// PSO. Reject rather than waiting or destroying any in-flight GPU resources.
+Dictionary NativeGpuProbe3D::godauldron_replace_shader(const PackedByteArray &spirv) {
+    ++shader_reload_attempts_;
+    const auto started = std::chrono::steady_clock::now();
+    const auto rejected = [&](const char *stage, const char *reason) {
+        ++shader_reload_failures_;
+        shader_reload_failure_stage_ = stage;
+        shader_reload_error_ = reason;
+        shader_reload_host_usec_ = elapsed_pipeline_host_usec(started);
+        return shader_reload_result(false, reason);
+    };
+    if (!ready_ || device_ == VK_NULL_HANDLE || pipeline_ == VK_NULL_HANDLE) {
+        return rejected("lifecycle", "Native pipeline not initialized");
+    }
+    if (sampling_ || (submitted_samples_ > 0 && !resolved_) || !error_.empty()) {
+        return rejected("in_flight", "GPU submissions not yet resolved; reload requires an idle provider");
+    }
+
+    VkPipeline candidate = VK_NULL_HANDLE;
+    std::string stage;
+    std::string reason;
+    if (!create_compute_pipeline(spirv, candidate, stage, reason)) {
+        return rejected(stage.c_str(), reason.c_str());
+    }
+
+    // A resolved epoch has already waited for every submission fence; if no
+    // epoch was recorded, nothing could reference the old PSO.
+    VkPipeline retired = pipeline_;
+    pipeline_ = candidate;
+    accepted_shader_bytes_ = spirv;
+    vkDestroyPipeline(device_, retired, nullptr);
+    ++retired_replaced_pipelines_;
+    ++shader_reload_successes_;
+    shader_reload_error_.clear();
+    shader_reload_failure_stage_.clear();
+    shader_reload_host_usec_ = elapsed_pipeline_host_usec(started);
+    return shader_reload_result(true, "");
+}
+
 bool NativeGpuProbe3D::initialize(int capacity) {
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "Godauldron Native GPU Diagnostic";
@@ -345,36 +462,22 @@ bool NativeGpuProbe3D::initialize(int capacity) {
     if (vkCreatePipelineLayout(device_, &pipeline_layout_info, nullptr, &pipeline_layout_) != VK_SUCCESS) {
         return fail("Cannot create Vulkan pipeline layout");
     }
-    VkShaderModule module = VK_NULL_HANDLE;
-    VkShaderModuleCreateInfo shader_info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    shader_info.codeSize = sizeof(kComputeSpirv);
-    shader_info.pCode = kComputeSpirv;
-    const auto shader_begin = std::chrono::steady_clock::now();
-    const VkResult shader_result = vkCreateShaderModule(device_, &shader_info, nullptr, &module);
-    shader_create_host_usec_ = elapsed_pipeline_host_usec(shader_begin);
-    if (shader_result != VK_SUCCESS) {
-        pipeline_failure_stage_ = "shader";
-        return fail("Cannot create Vulkan compute shader");
+    PackedByteArray initial_shader;
+    if (!accepted_shader_bytes_.is_empty()) {
+        initial_shader = accepted_shader_bytes_;
+    } else {
+        initial_shader.resize(sizeof(kComputeSpirv));
+        std::memcpy(initial_shader.ptrw(), kComputeSpirv, sizeof(kComputeSpirv));
     }
-    ++shader_creation_count_;
-    VkPipelineShaderStageCreateInfo stage{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
-    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stage.module = module;
-    stage.pName = "main";
-    VkComputePipelineCreateInfo pipeline_info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-    pipeline_info.stage = stage;
-    pipeline_info.layout = pipeline_layout_;
-    const auto pipeline_begin = std::chrono::steady_clock::now();
-    const VkResult pipeline_result =
-        vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_);
-    pipeline_create_host_usec_ = elapsed_pipeline_host_usec(pipeline_begin);
-    vkDestroyShaderModule(device_, module, nullptr);
-    if (pipeline_result != VK_SUCCESS) {
-        pipeline_failure_stage_ = "pipeline";
-        return fail("Cannot create native Vulkan compute pipeline");
+    VkPipeline prepared = VK_NULL_HANDLE;
+    std::string failure_stage;
+    std::string failure_reason;
+    if (!create_compute_pipeline(initial_shader, prepared, failure_stage, failure_reason)) {
+        pipeline_failure_stage_ = failure_stage;
+        return fail(failure_reason);
     }
-    ++pipeline_creation_count_;
-    // Any later initialization failure is not a shader or PSO failure.
+    pipeline_ = prepared;
+    // Any later initialization error is not a shader/PSO failure.
     pipeline_failure_stage_ = "initialization";
     VkQueryPoolCreateInfo query_info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
     query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -560,6 +663,13 @@ Dictionary NativeGpuProbe3D::godauldron_pipeline_diagnostics() const {
     entry["prepare_total_host_usec"] = prepare_total_host_usec_;
     entry["last_prepare_error"] = String(pipeline_prepare_error_.c_str());
     entry["last_prepare_failure_stage"] = String(pipeline_failure_stage_.c_str());
+    entry["reload_generation"] = shader_reload_successes_;
+    entry["reload_attempts"] = shader_reload_attempts_;
+    entry["reload_failures"] = shader_reload_failures_;
+    entry["reload_retired_pipelines"] = retired_replaced_pipelines_;
+    entry["reload_host_usec"] = shader_reload_host_usec_;
+    entry["reload_error"] = String(shader_reload_error_.c_str());
+    entry["reload_failure_stage"] = String(shader_reload_failure_stage_.c_str());
     entry["cache_hit_observation"] = "not_reported";
     entry["timing_source"] = "steady_host_wall_microseconds";
     Array entries;

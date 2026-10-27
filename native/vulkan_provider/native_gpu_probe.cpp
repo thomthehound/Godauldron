@@ -826,6 +826,9 @@ Dictionary NativeGpuProbe3D::godauldron_resolved_gpu_timeline() {
     result["backend"] = "Vulkan";
     result["device"] = String(adapter_name_.c_str());
     result["steps"] = records;
+    // All native submission fences have completed and output was verified.
+    // The owned pipeline may now be replaced without a device-wide wait.
+    sampling_ = false;
     return result;
 }
 

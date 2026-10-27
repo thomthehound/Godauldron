@@ -53,6 +53,14 @@ def distribution(values: list[float], indices: list[int] | None = None) -> dict:
     }
 
 
+def rate_distribution(values: list[float]) -> dict:
+    measured = distribution(values)
+    return {
+        (key.removesuffix("_usec") + "_per_second" if key.endswith("_usec") else key):
+            value for key, value in measured.items()
+    }
+
+
 def analyze(report: dict) -> dict:
     settings = report["settings"]
     validate(report, physical=settings["mode"] == "physical_amd")
@@ -64,10 +72,10 @@ def analyze(report: dict) -> dict:
     # Normalized counts are rates over the marker window, not bandwidth,
     # device occupancy, standalone kernel time or complete frame throughput.
     gpu["pixel_dispatches_per_second"] = (
-        distribution([pixel_dispatches * 1_000_000.0 / t for t in gpu_values])
+        rate_distribution([pixel_dispatches * 1_000_000.0 / t for t in gpu_values])
         if gpu_values else {"available": False, "samples": 0})
     gpu["dispatches_per_second"] = (
-        distribution([settings["passes"] * 1_000_000.0 / t for t in gpu_values])
+        rate_distribution([settings["passes"] * 1_000_000.0 / t for t in gpu_values])
         if gpu_values else {"available": False, "samples": 0})
     gpu["rate_scope"] = (
         "nominal pixel-dispatch and dispatch rates over the Godot RD timestamp window; "

@@ -195,6 +195,16 @@ func _verify() -> void:
 	if not selected.get("ok", false):
 		_fail("Cannot select provider-owned HLSL mode: " + str(selected))
 		return
+	# Selecting a compiler does not mean its shader is already compiled
+	# or executing. The previous successful GLSL generation stays active.
+	var before_hlsl: Dictionary = PipelineDiagnostics.read(scene)
+	var before_source: Dictionary = before_hlsl.get("source_reload", {})
+	if not before_hlsl.get("available", false) or \
+			before_source.get("selected_language") != "hlsl" or \
+			before_source.get("language") != "glsl" or \
+			before_source.get("active_language") != "glsl":
+		_fail("Language selection misreported the still-live GLSL pipeline")
+		return
 	var hlsl_path := "res://experiments/native-vulkan-provider/reload_compute.hlsl"
 	if not FileAccess.file_exists(hlsl_path):
 		_fail("Installed provider does not include editable HLSL")
@@ -253,6 +263,19 @@ func _verify() -> void:
 			int(diag_after_hlsl["pipelines"][0]["reload_generation"]) != 3:
 		_fail("HLSL compiler failure lost accepted pipeline or provenance: " +
 			str(diag_after_hlsl))
+		return
+	# Switching the next source back to GLSL must not mislabel the
+	# active HLSL pipeline or the previous DXC compile failure.
+	var back_to_glsl: Dictionary = ProviderControls.apply(scene, "forward_plus",
+		"shader_reload_language", "glsl")
+	var selected_again: Dictionary = PipelineDiagnostics.read(scene)
+	var again: Dictionary = selected_again.get("source_reload", {})
+	if not back_to_glsl.get("ok", false) or not selected_again.get("available", false) or \
+			again.get("selected_language") != "glsl" or \
+			again.get("language") != "hlsl" or \
+			again.get("active_language") != "hlsl" or \
+			not PipelineDiagnostics.summary(selected_again).contains("last compile hlsl"):
+		_fail("Selected language overwrote active or last compile language evidence")
 		return
 	var final_diag: Dictionary = PipelineDiagnostics.read(scene)
 	if not final_diag.get("available", false) or \

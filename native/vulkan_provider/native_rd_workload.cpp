@@ -19,6 +19,8 @@ void NativeRDWorkload::_bind_methods() {
                          &NativeRDWorkload::prepare);
     ClassDB::bind_method(D_METHOD("record_batch", "rendering_device", "seeds"),
                          &NativeRDWorkload::record_batch);
+    ClassDB::bind_method(D_METHOD("record_series", "rendering_device", "seeds", "repetitions"),
+                         &NativeRDWorkload::record_series);
     ClassDB::bind_method(D_METHOD("mark_readback_complete"),
                          &NativeRDWorkload::mark_readback_complete);
     ClassDB::bind_method(D_METHOD("release", "rendering_device"),
@@ -155,6 +157,12 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
 
 Dictionary NativeRDWorkload::record_batch(RenderingDevice *rd,
                                           const PackedInt32Array &seeds) {
+    return record_series(rd, seeds, 1);
+}
+
+Dictionary NativeRDWorkload::record_series(RenderingDevice *rd,
+                                          const PackedInt32Array &seeds,
+                                          int64_t repetitions) {
     if (phase_ != Phase::PREPARED || rd == nullptr || rd != rd_ ||
         !image_.is_valid() || !pipeline_.is_valid() || !uniform_set_.is_valid()) {
         return reject("workload_not_ready_or_device_changed");
@@ -162,6 +170,10 @@ Dictionary NativeRDWorkload::record_batch(RenderingDevice *rd,
     // Fail closed before recording any commands; no partially published batch.
     if (seeds.size() < 1 || seeds.size() > 32) {
         return reject("invalid_batch_length");
+    }
+    if (repetitions < 1 || repetitions > 256 ||
+        repetitions * seeds.size() > 2048) {
+        return reject("invalid_resident_series_length");
     }
     for (int i = 0; i < seeds.size(); ++i) {
         if (seeds[i] < 1 || seeds[i] > 65535) {
@@ -172,26 +184,32 @@ Dictionary NativeRDWorkload::record_batch(RenderingDevice *rd,
     int64_t commands = rd->compute_list_begin();
     rd->compute_list_bind_compute_pipeline(commands, pipeline_);
     rd->compute_list_bind_uniform_set(commands, uniform_set_, 0);
-    for (int i = 0; i < seeds.size(); ++i) {
-        if (i > 0) {
-            // A genuine inter-dispatch dependency on the same storage image.
-            rd->compute_list_add_barrier(commands);
+    // A single list holds the complete GPU-resident series. Every dispatch
+    // depends on the previous image write; only the first dispatch resets it.
+    for (int64_t batch = 0; batch < repetitions; ++batch) {
+        for (int i = 0; i < seeds.size(); ++i) {
+            const int64_t ordinal = batch * seeds.size() + i;
+            if (ordinal > 0) {
+                rd->compute_list_add_barrier(commands);
+            }
+            uint32_t parameters[2] = {static_cast<uint32_t>(seeds[i]),
+                                      static_cast<uint32_t>(ordinal)};
+            std::memcpy(push_bytes_.ptrw(), parameters, sizeof(parameters));
+            rd->compute_list_set_push_constant(commands, push_bytes_,
+                                               sizeof(parameters));
+            rd->compute_list_dispatch(commands, groups_x_, groups_y_, 1);
         }
-        uint32_t parameters[2] = {static_cast<uint32_t>(seeds[i]),
-                                  static_cast<uint32_t>(i)};
-        std::memcpy(push_bytes_.ptrw(), parameters, sizeof(parameters));
-        rd->compute_list_set_push_constant(commands, push_bytes_,
-                                           sizeof(parameters));
-        rd->compute_list_dispatch(commands, groups_x_, groups_y_, 1);
     }
     rd->compute_list_end();
     rd->capture_timestamp("native_persistent_batch_end");
-    ++batches_recorded_;
-    dispatch_count_ += seeds.size();
+    batches_recorded_ += repetitions;
+    dispatch_count_ += repetitions * seeds.size();
+    pending_batch_count_ = repetitions;
     phase_ = Phase::PENDING;
     Dictionary result = diagnostics();
     result["ok"] = true;
-    result["recorded_dispatches"] = seeds.size();
+    result["recorded_dispatches"] = repetitions * seeds.size();
+    result["resident_series_length"] = repetitions;
     result["execution"] = "native_cpp_persistent_shader_and_dispatch";
     result["queue_owner"] = "godot_rendering_device";
     result["resource_owner"] = "godot_rendering_device";
@@ -202,7 +220,8 @@ Dictionary NativeRDWorkload::mark_readback_complete() {
     if (phase_ != Phase::PENDING) return reject("no_pending_gpu_readback");
     // Called only after the engine's async texture readback callback signals
     // that this batch completed. Does not guess completion from frame count.
-    ++completion_count_;
+    completion_count_ += pending_batch_count_;
+    pending_batch_count_ = 0;
     phase_ = Phase::PREPARED;
     Dictionary result = diagnostics();
     result["ok"] = true;
@@ -253,6 +272,7 @@ Dictionary NativeRDWorkload::diagnostics() const {
     result["batches_recorded"] = batches_recorded_;
     result["dispatch_count"] = dispatch_count_;
     result["completed_batches"] = completion_count_;
+    result["pending_batches"] = pending_batch_count_;
     result["active_resources"] = phase_ == Phase::PREPARED || phase_ == Phase::PENDING;
     result["backend_contract"] = "godot_rendering_device_backend_neutral";
     result["shader_origin"] = "native_compiled_embedded_spirv";

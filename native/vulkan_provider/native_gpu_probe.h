@@ -27,6 +27,7 @@ public:
     // Rebuild native compute PSO from a compiled SPIR-V candidate. The
     // existing pipeline remains live until the replacement is fully valid.
     godot::Dictionary godauldron_replace_shader(const godot::PackedByteArray &spirv);
+    bool godauldron_shader_reload_available() const;
 
     // Called only on Godot's rendering thread, inside the compositor callback.
     // Records native-authored shader and workload into Godot's RenderingDevice.

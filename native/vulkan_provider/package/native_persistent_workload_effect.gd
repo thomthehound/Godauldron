@@ -27,10 +27,17 @@ func _init(width: int = 8, height: int = 8) -> void:
 
 
 func request_batch(seeds: PackedInt32Array) -> bool:
+	# Reject malformed workloads before the compositor allocates GPU resources.
+	# The native adapter independently enforces the same bound on its API.
+	if seeds.is_empty() or seeds.size() > 32 or \
+			_width < 1 or _height < 1 or _width > 2048 or _height > 2048 or \
+			_width * _height > MAX_PIXELS:
+		return false
+	for seed in seeds:
+		if seed < 1 or seed > 65535:
+			return false
 	_mutex.lock()
-	var allowed: bool = _phase in ["idle", "consumed"] and \
-		seeds.size() > 0 and _width > 0 and _height > 0 and \
-		_width * _height <= MAX_PIXELS
+	var allowed: bool = _phase in ["idle", "consumed"]
 	if allowed:
 		_requested_seeds = seeds.duplicate()
 		_phase = "armed"
@@ -161,7 +168,15 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 		return
 	var record: Dictionary = _workload.call("record_batch", rd, seeds)
 	if not bool(record.get("ok", false)):
-		_fail("Native workload batch recording failed: " + str(record))
+		# No commands were submitted: a rejected batch leaves the adapter
+		# PREPARED. Retire those resources immediately on this render thread.
+		var retired: Dictionary = _workload.call("release", rd)
+		if bool(retired.get("ok", false)):
+			rd.free_rid(_texture)
+			_texture = RID()
+			_workload = null
+		_fail("Native workload batch recording failed: " + str(record) +
+			"; cleanup: " + str(retired))
 		return
 	# Intentionally attempt an unsafe release once. The adapter must refuse
 	# while a GPU readback is still pending and preserve all its resources.

@@ -199,7 +199,11 @@ Dictionary NativeRDWorkload::record_impl(RenderingDevice *rd,
             return reject("invalid_seed");
         }
     }
-    rd->capture_timestamp("native_persistent_batch_start");
+    if (checkpoint && checkpoint_dispatches_pending_ +
+        repetitions * seeds.size() > 32768) {
+        return reject("checkpoint_dispatch_limit");
+    }
+    if (!checkpoint) rd->capture_timestamp("native_persistent_batch_start");
     int64_t commands = rd->compute_list_begin();
     rd->compute_list_bind_compute_pipeline(commands, pipeline_);
     rd->compute_list_bind_uniform_set(commands, uniform_set_, 0);
@@ -227,7 +231,7 @@ Dictionary NativeRDWorkload::record_impl(RenderingDevice *rd,
         }
     }
     rd->compute_list_end();
-    rd->capture_timestamp("native_persistent_batch_end");
+    if (!checkpoint) rd->capture_timestamp("native_persistent_batch_end");
     batches_recorded_ += repetitions;
     dispatch_count_ += repetitions * seeds.size();
     pending_batch_count_ += repetitions;

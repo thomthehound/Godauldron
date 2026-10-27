@@ -132,6 +132,48 @@ func _verify() -> void:
 		_fail("Shader failure failed to preserve resource ownership/provenance")
 		return
 
+	# The same set/binding numbers cannot disguise a different resource.
+	# These candidates compile to valid SPIR-V but violate the existing PSO
+	# descriptor type/count or push-constant ABI. Reject before Vulkan calls.
+	for broken in [
+		{"name": "storage_image", "source":
+			"#version 450\nlayout(local_size_x=64) in;\n" +
+			"layout(set=0,binding=0,r32ui) uniform uimage2D image_out;\n" +
+			"void main(){imageAtomicAdd(image_out,ivec2(gl_GlobalInvocationID.x,0),1u);}\n"},
+		{"name": "uniform_buffer", "source":
+			"#version 450\nlayout(local_size_x=64) in;\n" +
+			"layout(set=0,binding=0) uniform Params { uint delta; } p;\n" +
+			"void main(){uint unused_value=p.delta;}\n"},
+		{"name": "descriptor_array", "source":
+			"#version 450\nlayout(local_size_x=64) in;\n" +
+			"layout(set=0,binding=0,std430) buffer Counters { uint value[4096]; } c[2];\n" +
+			"void main(){atomicAdd(c[0].value[gl_GlobalInvocationID.x],1u);}\n"},
+		{"name": "push_constant", "source":
+			"#version 450\nlayout(local_size_x=64) in;\n" +
+			"layout(set=0,binding=0,std430) buffer Counters { uint value[]; } c;\n" +
+			"layout(push_constant) uniform Params { uint delta; } p;\n" +
+			"void main(){atomicAdd(c.value[gl_GlobalInvocationID.x],p.delta);}\n"}
+	]:
+		var path: String = "user://native_reload_wrong_%s.comp" % broken["name"]
+		var source_file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+		if source_file == null:
+			_fail("Could not stage incompatible shader: " + path)
+			return
+		source_file.store_string(broken["source"])
+		source_file.close()
+		var rejected: Dictionary = scene.call("godauldron_reload_shader_from_source", path)
+		if rejected.get("ok", true) or rejected.get("stage") != "shader" or \
+				int(rejected.get("generation", -1)) != 1:
+			_fail("Incompatible shader resource type/count was accepted: " +
+				String(broken["name"]) + " " + str(rejected))
+			return
+	var after_abi: Dictionary = PipelineDiagnostics.read(scene)
+	if not after_abi.get("available", false) or \
+			int(after_abi["pipelines"][0]["reload_generation"]) != 1 or \
+			int(after_abi["pipelines"][0]["reload_retired_pipelines"]) != 1:
+		_fail("Rejecting incompatible candidate damaged the active native pipeline")
+		return
+
 	var first_epoch: Dictionary = _run_epoch(scene)
 	if not first_epoch.get("ok", false):
 		_fail("Retained replacement failed real GPU/fence verification: " + str(first_epoch))

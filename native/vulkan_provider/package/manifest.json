@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.native-vulkan-device-probe",
+  "display_name": "Native Vulkan / Compute and transfer timestamps",
+  "category": "Native GPU diagnostics",
+  "description": "Independently owned Vulkan compute dispatch, buffer transfer, resolved timestamps, and completion-fence test. Diagnostic throughput is not production application performance.",
+  "entry_scene": "res://experiments/native-vulkan-provider/native_vulkan_scene.tscn",
+  "native_extensions": [
+    "res://experiments/native-vulkan-provider/native_vulkan.gdextension"
+  ],
+  "required_native_classes": ["NativeGpuProbe3D"],
+  "visualization_path": "godot_scene",
+  "parameters": []
+}

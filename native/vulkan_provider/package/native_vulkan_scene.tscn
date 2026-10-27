@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://experiments/native-vulkan-provider/native_vulkan_scene.gd" id="1_native"]
+
+[node name="NativeVulkanDeviceProbe" type="Node3D"]
+script = ExtResource("1_native")

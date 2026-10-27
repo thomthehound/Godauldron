@@ -52,6 +52,10 @@ Use the search box above the experiment catalog to filter by name, category, ID 
 
 This saves a **reproducible configuration**, not a simulation checkpoint. Solver internal memory, queued GPU work, imported native binaries, authored lights/exposure, and the current animation timeline are not serialized. See [Session configuration and remaining Cauldron gaps](docs/EXPERIMENT_SESSIONS.md).
 
+## Native Vulkan GPU diagnostic
+
+Godauldron includes an optional [C++23 native Vulkan provider diagnostic](docs/NATIVE_VULKAN_PROVIDER.md) for validating the end-to-end `godauldron_resolved_gpu_timeline()` interface. A dedicated Linux software-Vulkan CI job builds and installs a real GDExtension, dispatches a compute shader, copies GPU buffer data, resolves native device timestamp queries, checks completion fences and verifies the copied results. Vulkan validation layers gate GPU command correctness. The fixture owns its own device and queue: it establishes native provider execution, **not** shared-resource interoperability with Godot, hardware benchmark performance or production SDK integration. The extension is not installed in ordinary project checkouts.
+
 ## External native experiments / LoxFX
 
 Developers can install an `experiments/<package>/` directory with its manifest, scene, `.gdextension` descriptor, native libraries and runtime dependencies. Godauldron discovers its manifest and checks the native requirements **before** replacing the selected experiment. No SDK or LoxFX headers are linked into the laboratory host. See [External native experiment packages](docs/NATIVE_EXPERIMENTS.md) for a complete layout and manifest example.

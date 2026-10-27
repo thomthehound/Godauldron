@@ -117,6 +117,58 @@ jobs:
       - name: Verify legacy provider timing remains compatible
         run: .\.engine\godot_console.exe --headless --path . --script res://tests/observability_smoke.gd
 
+  native-vulkan-device:
+    # One native build per PR revision; avoid rebuilding bindings on push and PR.
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      MESA_VK_DEVICE_SELECT: "10005:0000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install native Vulkan and shader build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools xvfb
+          ICD="$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d -iname '*lvp*.json' -print -quit 2>/dev/null)"
+          test -n "$ICD"
+          echo "VK_DRIVER_FILES=$ICD" >> "$GITHUB_ENV"
+      - name: Download Godot 4
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/fetch_preview.py --major 4
+      - name: Restore C++ bindings build cache
+        uses: actions/cache@v4
+        with:
+          path: .native-build
+          key: native-godotcpp-${{ runner.os }}-v10-godot47-${{ hashFiles('native/vulkan_provider/CMakeLists.txt') }}
+          restore-keys: native-godotcpp-${{ runner.os }}-v10-godot47-
+      - name: Compile independent C++23 native Vulkan extension
+        run: |
+          cmake -S native/vulkan_provider -B .native-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O1 -DNDEBUG"
+          cmake --build .native-build --parallel 3
+          LIB="$(find .native-build -type f -name 'libgodauldron_native_vulkan_provider.so' -print -quit)"
+          test -n "$LIB"
+          python native/vulkan_provider/install_package.py "$LIB"
+      - name: Validate installed native package
+        run: |
+          python tools/validate_manifests.py
+          timeout --signal=TERM --kill-after=5s 120s .engine/godot --headless --path . --editor --import --quit
+      - name: Validate native Vulkan queue work against Vulkan API rules
+        run: |
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 150s .engine/godot --headless --path . --script res://tests/native_vulkan_provider_smoke.gd 2>&1 | tee native-vulkan-validation.log
+          if grep -E 'VUID-|Validation Error' native-vulkan-validation.log; then
+            echo "Vulkan validation found invalid native GPU commands"
+            exit 1
+          fi
+      - name: Verify real native Vulkan compute/copy, GPU queries and fence completion alongside Forward+
+        run: timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_provider_smoke.gd
+
   forward-hdr-render:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

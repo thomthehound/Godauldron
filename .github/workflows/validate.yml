@@ -238,6 +238,10 @@ jobs:
           if (-not $binary) { throw "C++23 native RD-only GDExtension was not built" }
           python native/rd_windows/install_package.py $binary.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Upgrading an installed native package must also refresh its
+          # compositor script, rather than leaving an old API behind.
+          python native/rd_windows/install_package.py $binary.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Import Godot project with RD-only native Windows package
         run: .\.engine\godot_console.exe --headless --path . --editor --import --quit
       - name: Verify real D3D12 WARP compute, barriers, persistent resources and completion

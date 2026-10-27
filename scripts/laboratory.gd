@@ -669,7 +669,9 @@ func _build_ui() -> void:
 	performance_text.add_child(gpu_profile_row)
 	var gpu_profile_button := Button.new()
 	gpu_profile_button.text = "Profile GPU stages"
-	gpu_profile_button.tooltip_text = "Unmeasured 12-frame device-timestamp capture of Forward+ compositor stage intervals"
+	gpu_profile_button.disabled = _rendering_method != "forward_plus" or \
+		RenderingServer.get_rendering_device() == null
+	gpu_profile_button.tooltip_text = "Unmeasured 12-frame device-timestamp capture; requires Forward+"
 	gpu_profile_button.pressed.connect(_profile_gpu_stages)
 	gpu_profile_row.add_child(gpu_profile_button)
 	_gpu_stage_label = Label.new()

@@ -65,6 +65,51 @@ func _verify() -> void:
 			host.get("_active_scene") != source_scene:
 		_fail("Production magnifier failed to present a rendered pixel")
 		return
+	if int(sampled.get("tile_size", -1)) != 13 or \
+			int(sampled.get("sampled_pixels", -1)) != 169 or \
+			int(sampled.get("clamped_border_texels", -1)) != 0 or \
+			(sampled.get("rgb_mean", []) as Array).size() != 3 or \
+			not is_finite(float(sampled.get("encoded_luma_mean", NAN))):
+		_fail("Pixel analysis did not report the actual bounded neighborhood")
+		return
+	# Zoom operates on the already captured tile and MUST NOT fetch again.
+	var zoom: SpinBox = host.get("_pixel_zoom_spin")
+	zoom.value = 6
+	if bool(host.get("_capture_pending")) or \
+			int((host.get("_pixel_texture") as TextureRect).custom_minimum_size.x) != 78:
+		_fail("Magnifier zoom triggered capture or failed nearest-neighbor resizing")
+		return
+	# Pin prevents further readbacks; the pinned sample retains provenance.
+	var pin: CheckButton = host.get("_pixel_pin")
+	if pin.disabled:
+		_fail("Pin control was not enabled by a genuine pixel sample")
+		return
+	pin.button_pressed = true
+	container.gui_input.emit(click)
+	await process_frame
+	if bool(host.get("_capture_pending")) or \
+			not bool((host.get("_last_pixel_sample") as Dictionary).get("pinned", false)):
+		_fail("Pinned magnifier allowed an unexpected GPU readback")
+		return
+	pin.button_pressed = false
+	var picker: OptionButton = host.get("_pixel_tile_picker")
+	picker.select(2)
+	container.gui_input.emit(click)
+	if not bool(host.get("_capture_pending")):
+		_fail("New 21×21 neighborhood did not request an explicit frame")
+		return
+	for i in range(90):
+		if not bool(host.get("_capture_pending")):
+			break
+		await process_frame
+	var enlarged: Dictionary = host.get("_last_pixel_sample")
+	if bool(host.get("_capture_pending")) or \
+			int(enlarged.get("tile_size", -1)) != 21 or \
+			int(enlarged.get("sampled_pixels", -1)) != 441 or \
+			int(enlarged.get("clamped_border_texels", -1)) != 0 or \
+			int((host.get("_pixel_texture") as TextureRect).custom_minimum_size.x) != 126:
+		_fail("Explicit 21×21 neighborhood was not sampled and resized correctly")
+		return
 	if DirAccess.get_files_at(output) != before:
 		_fail("Pixel inspection generated benchmark measurements")
 		return

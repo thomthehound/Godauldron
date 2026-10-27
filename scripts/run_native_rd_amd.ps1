@@ -20,16 +20,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Native RD C++23 compilation failed" }
     $binary = Join-Path $build "Release/godauldron_native_rd_workload.dll"
     if (!(Test-Path $binary)) { throw "Native RD DLL absent: $binary" }
-    $installed = "experiments/native-rd-windows"
-    if (!(Test-Path $installed)) {
-        python native/rd_windows/install_package.py (Resolve-Path $binary).Path
-        if ($LASTEXITCODE -ne 0) { throw "Native RD package installation failed" }
-    } else {
-        if (!(Test-Path (Join-Path $installed "manifest.json"))) {
-            throw "Existing native RD experiment folder is not a valid package"
-        }
-        Copy-Item $binary (Join-Path $installed "bin/godauldron_native_rd_workload.dll") -Force
-    }
+    # The installer refreshes the C++ DLL, descriptor and shared compositor
+    # effect together, including when a prior native RD package is present.
+    python native/rd_windows/install_package.py (Resolve-Path $binary).Path
+    if ($LASTEXITCODE -ne 0) { throw "Native RD package installation failed" }
     $godot = ".engine/godot_console.exe"
     if (!(Test-Path $godot)) {
         python tools/fetch_preview.py --major 4 --platform win64.exe

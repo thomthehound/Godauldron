@@ -135,6 +135,7 @@ func _harvest(rd: RenderingDevice) -> void:
 		return
 	var span: float = float(times[STAGES.back()] - times[STAGES.front()]) / 1000.0
 	var record: Dictionary = {"device_frame": frame,
+		"marker_gpu_nanoseconds": times.duplicate(true),
 		"windows_usec": windows, "covered_gpu_window_usec": span}
 	_mutex.lock()
 	if _samples.size() < MAX_FRAMES:

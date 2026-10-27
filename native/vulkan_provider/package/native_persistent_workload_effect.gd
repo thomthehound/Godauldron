@@ -3,9 +3,10 @@ extends CompositorEffect
 ## One batch at a time, with actual Godot async GPU completion for reuse.
 ## All RenderingDevice calls occur only within render callbacks.
 
-const EDGE := 8
-const BYTES := EDGE * EDGE * 4
+const MAX_PIXELS := 1024 * 1024
 
+var _width := 8
+var _height := 8
 var _mutex := Mutex.new()
 var _phase := "idle"
 var _failure := ""
@@ -18,14 +19,18 @@ var _completion: Dictionary = {}
 var _early_release_rejected := false
 
 
-func _init() -> void:
+func _init(width: int = 8, height: int = 8) -> void:
+	_width = width
+	_height = height
 	effect_callback_type = EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
 	enabled = true
 
 
 func request_batch(seeds: PackedInt32Array) -> bool:
 	_mutex.lock()
-	var allowed: bool = _phase in ["idle", "consumed"] and seeds.size() > 0
+	var allowed: bool = _phase in ["idle", "consumed"] and \
+		seeds.size() > 0 and _width > 0 and _height > 0 and \
+		_width * _height <= MAX_PIXELS
 	if allowed:
 		_requested_seeds = seeds.duplicate()
 		_phase = "armed"
@@ -82,8 +87,8 @@ func _ensure_workload(rd: RenderingDevice) -> bool:
 	var format := RDTextureFormat.new()
 	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
 	format.format = RenderingDevice.DATA_FORMAT_R32_UINT
-	format.width = EDGE
-	format.height = EDGE
+	format.width = _width
+	format.height = _height
 	format.depth = 1
 	format.array_layers = 1
 	format.mipmaps = 1
@@ -99,7 +104,8 @@ func _ensure_workload(rd: RenderingDevice) -> bool:
 		_texture = RID()
 		_fail("Native workload could not instantiate")
 		return false
-	var prepared: Dictionary = _workload.call("prepare", rd, _texture)
+	var prepared: Dictionary = _workload.call("prepare", rd, _texture,
+		_width, _height)
 	if not bool(prepared.get("ok", false)):
 		rd.free_rid(_texture)
 		_texture = RID()

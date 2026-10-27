@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/string.hpp>
 
 #include <cstdint>
 
@@ -51,6 +52,16 @@ private:
     int64_t groups_x_ = 0;
     int64_t groups_y_ = 0;
     int64_t prepare_count_ = 0;
+    int64_t prepare_attempts_ = 0;
+    int64_t prepare_failures_ = 0;
+    int64_t shader_creations_ = 0;
+    int64_t pipeline_binds_ = 0;
+    int64_t shader_create_host_usec_ = 0;
+    int64_t pipeline_create_host_usec_ = 0;
+    int64_t descriptor_create_host_usec_ = 0;
+    int64_t prepare_total_host_usec_ = 0;
+    godot::String last_prepare_error_;
+    godot::String last_prepare_failure_stage_;
     int64_t pipeline_creations_ = 0;
     int64_t descriptor_creations_ = 0;
     int64_t batches_recorded_ = 0;
@@ -65,4 +76,5 @@ private:
                                   int64_t repetitions, bool checkpoint);
 
     static godot::Dictionary reject(const char *reason);
+    godot::Dictionary prepare_failure(const char *stage, const char *reason);
 };

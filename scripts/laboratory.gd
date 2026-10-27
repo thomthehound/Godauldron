@@ -30,6 +30,7 @@ const GPUStageProfileReport = preload("res://scripts/gpu_stage_profile_report.gd
 const PerformancePlot = preload("res://scripts/performance_plot.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
+const ProviderControls = preload("res://scripts/provider_runtime_controls.gd")
 const ExperimentPlayback = preload("res://scripts/experiment_playback.gd")
 const LabSession = preload("res://scripts/lab_session.gd")
 const HostDiagnostics = preload("res://scripts/host_diagnostics.gd")
@@ -121,6 +122,10 @@ var _session_import_dialog: FileDialog
 var _session_export_dialog: FileDialog
 var _session_export_stem: String = ""
 var _parameters: VBoxContainer
+var _provider_panel: VBoxContainer
+var _provider_inputs: Dictionary = {}
+var _provider_specs: Array[Dictionary] = []
+var _provider_run_snapshot: Dictionary = {}
 var _status: Label
 var _telemetry: Label
 var _observability = Observability.new()
@@ -280,9 +285,15 @@ func _build_ui() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sidebar.add_child(scroll)
+	var parameter_stack := VBoxContainer.new()
+	parameter_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(parameter_stack)
 	_parameters = VBoxContainer.new()
 	_parameters.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_parameters)
+	parameter_stack.add_child(_parameters)
+	_provider_panel = VBoxContainer.new()
+	_provider_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parameter_stack.add_child(_provider_panel)
 
 	var warmup_row := HBoxContainer.new()
 	sidebar.add_child(warmup_row)
@@ -1948,6 +1959,8 @@ func _select_experiment(index: int) -> void:
 		_active_scene.queue_free()
 		_active_scene = null
 	_manifest = _experiments[index]
+	_provider_run_snapshot.clear()
+	_clear_provider_controls()
 	for child in _parameters.get_children():
 		_parameters.remove_child(child)
 		child.queue_free()
@@ -2000,7 +2013,9 @@ func _select_experiment(index: int) -> void:
 	_update_playback_ui()
 	_bind_inspection()
 	_apply_graphics()
-	_status.text = String(_manifest.get("description", _manifest["display_name"]))
+	var provider_valid: bool = _refresh_provider_controls()
+	if provider_valid:
+		_status.text = String(_manifest.get("description", _manifest["display_name"]))
 	_discover_campaigns()
 	_log_event("info", "experiment", "selected", String(_manifest.get("display_name", "Experiment selected")),
 		{"experiment_id": String(_manifest["id"])})
@@ -2030,6 +2045,124 @@ func _preview_active_scene() -> void:
 		_apply_graphics()
 		if _camera_inspector != null:
 			_frame_inspection()
+		_refresh_provider_controls()
+
+
+func _clear_provider_controls() -> void:
+	_provider_inputs.clear()
+	_provider_specs.clear()
+	if _provider_panel == null:
+		return
+	for child in _provider_panel.get_children():
+		_provider_panel.remove_child(child)
+		child.queue_free()
+
+
+func _provider_controls_busy() -> bool:
+	return _active_scene == null or _capture_pending or _has_active_run() or \
+		_campaign != null or (_comparison_window != null and \
+		(_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))))
+
+
+func _refresh_provider_controls() -> bool:
+	_clear_provider_controls()
+	var read: Dictionary = ProviderControls.read(_active_scene, _rendering_method)
+	if not read["ok"]:
+		var error := Label.new()
+		error.text = "Provider settings unavailable: " + String(read["error"])
+		error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_provider_panel.add_child(error)
+		_status.text = "Provider setting contract rejected: " + String(read["error"])
+		return false
+	_provider_specs = read["controls"]
+	if _provider_specs.is_empty():
+		return true
+	var title := Label.new()
+	title.text = "Provider runtime controls"
+	title.tooltip_text = "Reported and applied by the active experiment; not manifest setup parameters"
+	_provider_panel.add_child(title)
+	for spec in _provider_specs:
+		var row := HBoxContainer.new()
+		_provider_panel.add_child(row)
+		var label := Label.new()
+		label.text = String(spec["label"])
+		label.custom_minimum_size.x = 110
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		var control: Control
+		match String(spec["type"]):
+			"bool":
+				var check := CheckBox.new()
+				check.set_pressed_no_signal(bool(spec["value"]))
+				check.toggled.connect(_change_provider_control.bind(String(spec["id"])))
+				control = check
+			"choice":
+				var select := OptionButton.new()
+				for option in spec["options"]:
+					select.add_item(String(option["label"]))
+					select.set_item_metadata(select.item_count - 1, option["value"])
+					if option["value"] == spec["value"]:
+						select.select(select.item_count - 1)
+				select.item_selected.connect(func(index: int) -> void:
+					_change_provider_control(select.get_item_metadata(index), String(spec["id"])))
+				control = select
+			_:
+				var spin := SpinBox.new()
+				spin.min_value = float(spec["min"])
+				spin.max_value = float(spec["max"])
+				spin.step = float(spec["step"])
+				spin.set_value_no_signal(float(spec["value"]))
+				spin.custom_minimum_size.x = 95
+				spin.value_changed.connect(func(value: float) -> void:
+					var exact: Variant = int(roundi(value)) if spec["type"] == "int" else value
+					_change_provider_control(exact, String(spec["id"])))
+				control = spin
+		row.add_child(control)
+		_provider_inputs[spec["id"]] = control
+		var explanation := String(spec["mode"])
+		if spec["mode"] == "restart":
+			explanation = "Restart required"
+		elif not spec["available"]:
+			explanation = "Renderer unsupported"
+		elif spec["mode"] == "rebuild":
+			explanation = "Provider rebuild"
+		else:
+			explanation = "Live"
+		control.tooltip_text = "%s | %s%s" % [
+			explanation, String(spec["id"]),
+			" | " + String(spec["unit"]) if not String(spec["unit"]).is_empty() else ""]
+		if not String(spec["unit"]).is_empty():
+			var units := Label.new()
+			units.text = String(spec["unit"])
+			row.add_child(units)
+	_set_provider_controls_editable(not _provider_controls_busy())
+	return true
+
+
+func _set_provider_controls_editable(allow: bool) -> void:
+	for spec in _provider_specs:
+		var control: Control = _provider_inputs.get(spec["id"])
+		if control == null:
+			continue
+		var permitted: bool = allow and bool(spec["editable"]) and \
+			_active_scene.has_method("godauldron_set_runtime_control")
+		if control is SpinBox:
+			(control as SpinBox).editable = permitted
+		elif control is BaseButton:
+			(control as BaseButton).disabled = not permitted
+
+
+func _change_provider_control(value: Variant, id: String) -> void:
+	if _provider_controls_busy():
+		_status.text = "Provider setting changes are disabled during measurement, capture or analysis"
+		_refresh_provider_controls()
+		return
+	var change: Dictionary = ProviderControls.apply(_active_scene, _rendering_method, id, value)
+	_refresh_provider_controls()
+	if not change["ok"]:
+		_status.text = "Provider rejected setting %s: %s" % [id, String(change["error"])]
+		return
+	_status.text = "Provider applied %s (%s)" % [id, String(change["mode"])]
 
 
 func _find_scene_camera(node: Node) -> Camera3D:
@@ -2772,6 +2905,12 @@ func _begin_campaign_case() -> void:
 	_run = ExperimentRun.new()
 	_run.begin(_active_scene, next_case["parameters"],
 		int(next_case["warmup_steps"]), int(next_case["sample_steps"]), FIXED_STEP)
+	_provider_run_snapshot = ProviderControls.read(_active_scene, _rendering_method)
+	if not _provider_run_snapshot["ok"]:
+		_run.invalidate_unreported_completion("invalid_provider_runtime_control_contract")
+		_finish_run(false)
+		return
+	_set_provider_controls_editable(false)
 	if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
 		_run.invalidate_unreported_completion("diagnostic_mode_enabled_during_setup")
 		_finish_run(false)
@@ -2801,6 +2940,7 @@ func _finish_campaign(completed: bool) -> void:
 		"Campaign summary persisted" if completed and not path.is_empty() else "Campaign ended or could not persist",
 		{"experiment_id": String(_manifest.get("id", ""))})
 	_campaign = null
+	_refresh_provider_controls()
 	if path.is_empty():
 		# _save_report set the concrete I/O error. Never replace it with success.
 		_status.text = "Campaign summary NOT saved: " + _status.text
@@ -2973,6 +3113,12 @@ func _start_run() -> void:
 		_active_scene, _collect_parameters(),
 		int(_warmup_steps.value), int(_run_steps.value), FIXED_STEP
 	)
+	_provider_run_snapshot = ProviderControls.read(_active_scene, _rendering_method)
+	if not _provider_run_snapshot["ok"]:
+		_run.invalidate_unreported_completion("invalid_provider_runtime_control_contract")
+		_finish_run(false)
+		return
+	_set_provider_controls_editable(false)
 	if _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
 		_run.invalidate_unreported_completion("diagnostic_mode_enabled_during_setup")
 		_finish_run(false)
@@ -3210,6 +3356,11 @@ func _finish_run(completed: bool) -> void:
 	report["runtime_environment"] = _runtime_environment.duplicate(true)
 	report["environment"] = _environment_provenance()
 	report["graphics"] = _graphics_run_snapshot.duplicate(true)
+	report["provider_runtime_controls"] = {
+		"at_setup": _provider_run_snapshot.duplicate(true),
+		"at_finalize": ProviderControls.read(_active_scene, _rendering_method),
+		"timing": "queried after setup and after run; never during measured step callbacks"
+	}
 	report["visualization_path"] = NativeExperimentPackage.display_path(_manifest)
 	report["measurement_boundary"] = "host_godauldron_step_callback_cpu_wall_only; excludes native GPU execution, completion and presentation"
 	report["inspection"] = {
@@ -3223,6 +3374,8 @@ func _finish_run(completed: bool) -> void:
 		report["campaign_case_index"] = int(next_case["case_index"])
 		report["campaign_repetition"] = int(next_case["repetition"])
 	var result_path: String = _save_report(report, String(_manifest["id"]))
+	if _campaign == null:
+		_refresh_provider_controls()
 	if _campaign != null:
 		if result_path.is_empty():
 			_finish_campaign(false)

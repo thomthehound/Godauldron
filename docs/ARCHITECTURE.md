@@ -46,6 +46,10 @@ The UI exposes separate nonnegative warmup and positive measurement step counts;
 
 The first implementation runs these callbacks on the Godot main thread and keeps the experiment scene loaded until a different experiment is selected. An experiment may perform its actual work asynchronously; its reported metrics must clearly distinguish submitted work from completed work.
 
+## Provider-owned runtime controls
+
+An active scene may implement `godauldron_runtime_controls()` and `godauldron_set_runtime_control(id, value)` to expose typed **effective** settings for live inspection. These are separate from manifest setup parameters. The host validates finite bounds, choices, renderer availability and edit/restart semantics, forwards accepted changes to the provider, and rereads actual state. The host does not mirror native resource builders. All edits are refused during measured runs, campaigns, captures and analysis; before/after descriptor snapshots are taken outside measured callback timing and recorded in reports. See [Provider runtime controls](PROVIDER_RUNTIME_CONTROLS.md).
+
 ## Scene inspection protocol
 
 Camera navigation is a host-level service that works with each experiment's own `Camera3D`; the host does not replace the experiment renderer or fabricate a separate source scene. **Frame** uses the optional scene-root method `godauldron_inspection_bounds() -> AABB` returning a world-space bounding box. If absent, the host computes a world-space bounding box from loaded `MeshInstance3D` descendants, with a small origin fallback for non-mesh experiments.

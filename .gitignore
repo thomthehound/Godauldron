@@ -3,6 +3,7 @@
 .import/
 
 # Native and engine builds
+/.ci-apt-archives/
 bin/
 build/
 /.native-build/

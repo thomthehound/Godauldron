@@ -17,7 +17,7 @@ func _ready() -> void:
 	title = "Godauldron · Native render buffers"
 	size = Vector2i(1020, 730)
 	min_size = Vector2i(520, 400)
-	close_requested.connect(hide)
+	close_requested.connect(_close_inspection)
 	var root := VBoxContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(root)
@@ -35,6 +35,16 @@ func _ready() -> void:
 	_readout = Label.new()
 	_readout.text = "Click the buffer image to inspect the original floating-point sample."
 	root.add_child(_readout)
+
+
+func _close_inspection() -> void:
+	hide()
+	# A float frame can occupy tens of MiB. Release both raw and preview
+	# allocations when inspection is dismissed.
+	_raw = null
+	_source.clear()
+	_mode = ""
+	_picture.texture = null
 
 
 static func preview_color(mode: String, raw: Color) -> Color:

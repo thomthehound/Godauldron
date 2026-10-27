@@ -4,6 +4,51 @@ extends Node3D
 
 var _native: Node3D
 
+# The provider owns the compiler invocation and its native Vulkan PSO.
+# Edit this shader and click Reload provider shader in the laboratory.
+@export_file("*.comp") var shader_source_path := "res://experiments/native-vulkan-provider/reload_compute.comp"
+@export var shader_compiler := "glslangValidator"
+
+
+func godauldron_reload_shader() -> Dictionary:
+	return godauldron_reload_shader_from_source(shader_source_path)
+
+
+func godauldron_reload_shader_from_source(path: String) -> Dictionary:
+	if _native == null:
+		return {"ok": false, "stage": "provider", "error": "Native Vulkan provider not installed"}
+	if not FileAccess.file_exists(path):
+		return {"ok": false, "stage": "source", "error": "Shader source not found: " + path}
+	if not bool(_native.call("godauldron_pipeline_diagnostics")["pipelines"][0].get("prepare_attempts", 0)):
+		_native.call("godauldron_setup", {})
+	var output_path: String = "user://godauldron_shader_reload_%d.spv" % Time.get_ticks_usec()
+	var compiler_messages: Array = []
+	var exit_code: int = OS.execute(shader_compiler, PackedStringArray([
+		"-V", "-S", "comp", "-o",
+		ProjectSettings.globalize_path(output_path),
+		ProjectSettings.globalize_path(path)
+	]), compiler_messages, true)
+	if exit_code != 0:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
+		return {"ok": false, "stage": "compile",
+			"error": ("Shader compiler failed (%d): " % exit_code) +
+				"\n".join(compiler_messages).substr(0, 1500)}
+	var spirv: PackedByteArray = FileAccess.get_file_as_bytes(output_path)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
+	if spirv.is_empty():
+		return {"ok": false, "stage": "compile", "error": "Compiler produced no SPIR-V bytecode"}
+	var applied: Dictionary = _native.call("godauldron_replace_shader", spirv)
+	if not applied.get("ok", false):
+		applied["stage"] = applied.get("failure_stage", "pipeline")
+	return applied
+
+
+func godauldron_replace_shader_bytes(spirv: PackedByteArray) -> Dictionary:
+	# Native API allows exact SPIR-V failure injection without shell tools.
+	if _native == null:
+		return {"ok": false, "error": "Native Vulkan provider not installed"}
+	return _native.call("godauldron_replace_shader", spirv)
+
 
 func _ready() -> void:
 	_native = ClassDB.instantiate(&"NativeGpuProbe3D") as Node3D

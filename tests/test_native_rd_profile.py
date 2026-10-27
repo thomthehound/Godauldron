@@ -157,9 +157,10 @@ class ExtendedNativeGPUProfileContract(unittest.TestCase):
         current = extended_fixture()
         # Expand the source records with a plausible high-latency GPU tail.
         current["settings"]["samples"] = 12
+        template = copy.deepcopy(current["records"][1])
         current["records"] = [copy.deepcopy(current["records"][0])]
         for i in range(1, 13):
-            rec = copy.deepcopy(current["records"][1])
+            rec = copy.deepcopy(template)
             rec["batch_index"] = i
             rec["warmup"] = False
             rec["device_frame"] = i * 2 + 1

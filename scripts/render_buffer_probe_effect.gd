@@ -94,6 +94,8 @@ func _free_staging(rd: RenderingDevice) -> void:
 
 
 func _on_bytes(data: PackedByteArray, width: int, height: int) -> void:
+	# Publish ready only after the transfer resources are retired.
+	_free_staging(RenderingServer.get_rendering_device())
 	_mutex.lock()
 	if _state == "pending":
 		_width = width
@@ -101,7 +103,6 @@ func _on_bytes(data: PackedByteArray, width: int, height: int) -> void:
 		_bytes = data
 		_state = "ready"
 	_mutex.unlock()
-	_free_staging(RenderingServer.get_rendering_device())
 
 
 func _render_callback(callback_type: int, render_data: RenderData) -> void:

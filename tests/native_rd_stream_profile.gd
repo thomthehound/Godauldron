@@ -108,6 +108,7 @@ func _run() -> void:
 	var passes: int = _settings["passes"]
 	var resident: int = _settings["resident_batches"]
 	var slots: int = _settings["slots"]
+	var interval: int = _settings["readback_interval"]
 	var effect: CompositorEffect = effect_script.new(
 		width, height, slots, _settings["mode"])
 	var compositor := Compositor.new()

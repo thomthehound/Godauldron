@@ -4,7 +4,7 @@ Godauldron validates an optional **C++23 native-authored compute workload** thro
 
 ## Same shader and provider semantics
 
-The canonical shader is `native/vulkan_provider/persistent_image.comp`. In Linux CI, `glslangValidator` compiles that source to SPIR-V and `embed_spirv.py` produces `persistent_compute_spirv.h`. The Windows native RD-only build downloads **that exact generated header** from its corresponding GitHub Actions workflow. It neither compiles a substitute HLSL shader nor embeds a hardcoded expected result. Godot's D3D12 backend performs its own SPIR-V-to-DXIL translation and GPU command lowering.
+The canonical shader is `native/vulkan_provider/persistent_image.comp`. Its compiled SPIR-V is pinned in `native/vulkan_provider/embedded/persistent_image.spv.b64`, with a small decoder in `pinned_spirv.py`. The Windows native RD-only build uses **that pinned module**, without requiring Ubuntu graphics dependencies or waiting for Linux CI. Linux CI independently recompiles the authored GLSL through `glslangValidator` and **byte-compares** its result with the checked-in module; a shader source change cannot silently leave Windows running old code. Windows neither compiles a substitute HLSL shader nor embeds a hardcoded expected result. Godot's D3D12 backend performs its own SPIR-V-to-DXIL translation and GPU command lowering.
 
 `GODAULDRON_RD_ONLY=ON` removes all native Vulkan API dependencies from the Windows extension binary. It registers `NativeRDWorkload` through a separate native extension entry point while retaining the exact same persistent C++ implementation and state machine that Vulkan CI exercises. The Windows package, under `native/rd_windows/package`, is installed only by the dedicated CI job.
 

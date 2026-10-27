@@ -24,6 +24,7 @@ const HdrExrCapture = preload("res://scripts/hdr_exr_capture.gd")
 const FrameSequence = preload("res://scripts/frame_sequence.gd")
 const Observability = preload("res://scripts/performance_observability.gd")
 const EngineViewportTelemetry = preload("res://scripts/engine_viewport_telemetry.gd")
+const ProviderTimelineWindow = preload("res://scripts/provider_gpu_timeline_window.gd")
 const GPUStageProbe = preload("res://scripts/gpu_stage_probe.gd")
 const GPUStageProfileReport = preload("res://scripts/gpu_stage_profile_report.gd")
 const PerformancePlot = preload("res://scripts/performance_plot.gd")
@@ -132,6 +133,8 @@ var _observability_plot: Control
 var _observability_label: Label
 var _provider_timing_label: Label
 var _provider_timeline_label: Label
+var _provider_timeline_window: Window
+var _provider_timeline_data: Dictionary = {}
 var _last_observability_ui_tick: int = -1
 var _run_steps: SpinBox
 var _warmup_steps: SpinBox
@@ -692,6 +695,14 @@ func _build_ui() -> void:
 	_provider_timeline_label.text = "Provider queue timeline: unavailable (no resolved device intervals)"
 	_provider_timeline_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	performance_text.add_child(_provider_timeline_label)
+	var inspect_gpu_lanes := Button.new()
+	inspect_gpu_lanes.text = "Inspect provider GPU lanes…"
+	inspect_gpu_lanes.tooltip_text = "View completed queue/clock unions, overlap and separate CPU waits"
+	inspect_gpu_lanes.pressed.connect(_show_provider_gpu_timeline)
+	performance_text.add_child(inspect_gpu_lanes)
+	_provider_timeline_window = ProviderTimelineWindow.new()
+	_provider_timeline_window.visible = false
+	add_child(_provider_timeline_window)
 	_observability_plot = PerformancePlot.new()
 	_observability_plot.custom_minimum_size = Vector2(260, 76)
 	_observability_plot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1871,6 +1882,9 @@ func _select_experiment(index: int) -> void:
 	_last_observability_ui_tick = -1
 	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
 	_provider_timeline_label.text = "Provider queue timeline: unavailable (no completed run)"
+	_provider_timeline_data.clear()
+	if _provider_timeline_window != null:
+		_provider_timeline_window.hide()
 	_gpu_stage_label.text = "GPU stage intervals: not captured for selected experiment"
 	_update_observability_ui()
 	_telemetry.text = "Host stepping: idle"
@@ -2867,6 +2881,9 @@ func _start_run() -> void:
 	_engine_render.reset()
 	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
 	_provider_timeline_label.text = "Provider queue timeline: pending completed run"
+	_provider_timeline_data.clear()
+	if _provider_timeline_window != null:
+		_provider_timeline_window.hide()
 	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
 	_console_filter.disabled = true
 	_run = ExperimentRun.new()
@@ -3026,6 +3043,17 @@ func _update_telemetry() -> void:
 	]
 
 
+func _show_provider_gpu_timeline() -> void:
+	if _capture_pending or _has_active_run():
+		_status.text = "Cannot open GPU lane detail during capture or a measured run"
+		return
+	if not bool(_provider_timeline_data.get("available", false)):
+		_status.text = "No resolved native provider GPU timeline for the current run"
+		return
+	if not bool(_provider_timeline_window.call("show_timeline", _provider_timeline_data)):
+		_status.text = "Provider GPU timeline cannot be displayed"
+
+
 func _finish_run(completed: bool) -> void:
 	if _run == null:
 		return
@@ -3087,6 +3115,7 @@ func _finish_run(completed: bool) -> void:
 	else:
 		_provider_timing_label.text = "Provider GPU: unavailable (%s)" % String(gpu.get("reason", "not reported"))
 	var timeline: Dictionary = report["provider_gpu_timeline"]
+	_provider_timeline_data = timeline.duplicate(true)
 	if bool(timeline.get("available", false)):
 		var queues: Array = timeline["queues"]
 		var waits: Dictionary = timeline["host_waits"]["duration"]

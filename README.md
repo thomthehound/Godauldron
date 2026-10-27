@@ -56,6 +56,10 @@ This saves a **reproducible configuration**, not a simulation checkpoint. Solver
 
 The optional [persistent C++23 compute adapter](docs/NATIVE_PERSISTENT_WORKLOAD.md) prepares one native-authored shader, pipeline and image descriptor set, then records repeatable GPU dispatch batches through Godot's own `RenderingDevice`. Inter-dispatch image barriers, real asynchronous readback completion, resource reuse and render-thread-only retirement are part of the adapter's contract. Software-Vulkan CI checks distinct cumulative GPU results and one-time resource creation; D3D12 and physical-GPU validation remain separate gates.
 
+## Physical native RD profiling
+
+The Windows D3D12 native acceptance script validates physical AMD device identity, persistent native GPU execution and on-device timestamp windows separately from asynchronous host readback. It exports per-batch measurements, normalized work rates, latency dispersion, lifetime evidence and strict like-for-like baseline comparisons. See [Native RD hardware profiling](docs/NATIVE_RD_PROFILING.md).
+
 ## Native Vulkan GPU diagnostic
 
 A separate [same-device Vulkan image resource diagnostic](docs/GODOT_NATIVE_VULKAN_RESOURCE_INTEROP.md) now exercises the native-extension path to a **Godot-owned** VkDevice and VkBuffer: a C++ GDExtension validates borrowed Vulkan image handles on the renderer thread, while Godot's command graph runs a genuine compute shader against that same storage image and verifies asynchronous readback. Godot retains queue/synchronization ownership. This is resource interoperability, **not** native command submission, producer-native compute graph integration, or validated cross-queue sharing.

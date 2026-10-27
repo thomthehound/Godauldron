@@ -30,10 +30,14 @@ def fixture(physical: bool) -> dict:
             "unit": "microseconds", "required_samples": 2,
             "resolved_samples": 2, "available": True,
             "summary": {"count": 2, "mean_usec": 2.5, "p50_usec": 2.5,
-                        "p95_usec": 2.5, "p99_usec": 2.5}},
+                        "p95_usec": 2.5, "p99_usec": 2.5,
+                        "minimum_usec": 2.5, "maximum_usec": 2.5}},
         "host_readback_latency": {
             "scope": "request through readback NOT GPU compute time",
-            "summary": {"count": 2}}
+            "summary": {"count": 2, "mean_usec": 1500.0,
+                        "p50_usec": 1500.0, "p95_usec": 1500.0,
+                        "p99_usec": 1500.0, "minimum_usec": 1500.0,
+                        "maximum_usec": 1500.0}}
     }
 
 
@@ -60,6 +64,18 @@ class NativeGPUProfileContract(unittest.TestCase):
     def test_software_never_reports_as_physical(self) -> None:
         record = fixture(False)
         record["settings"]["mode"] = "physical_amd"
+        with self.assertRaises(ValueError):
+            validate(record, physical=True)
+
+    def test_gpu_summary_cannot_disagree_with_real_gpu_samples(self) -> None:
+        record = fixture(True)
+        record["records"][2]["gpu_compute_window_usec"] = 2_500_000.0
+        with self.assertRaises(ValueError):
+            validate(record, physical=True)
+
+    def test_host_summary_cannot_disagree_with_readback_measurements(self) -> None:
+        record = fixture(True)
+        record["records"][1]["host_request_to_readback_usec"] = 9_999_999
         with self.assertRaises(ValueError):
             validate(record, physical=True)
 

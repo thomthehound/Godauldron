@@ -7,6 +7,10 @@
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include <cstring>
+#ifdef _WIN32
+#include <d3d12.h>
+#include <dxgi1_2.h>
+#endif
 
 using namespace godot;
 
@@ -20,6 +24,65 @@ void NativeRDWorkload::_bind_methods() {
     ClassDB::bind_method(D_METHOD("release", "rendering_device"),
                          &NativeRDWorkload::release);
     ClassDB::bind_method(D_METHOD("diagnostics"), &NativeRDWorkload::diagnostics);
+    ClassDB::bind_method(D_METHOD("inspect_d3d12_adapter", "device_handle", "adapter_handle"),
+                         &NativeRDWorkload::inspect_d3d12_adapter);
+}
+
+// Read-only witness of the exact D3D12 device and DXGI adapter obtained
+// from Godot's public RenderingDevice driver-resource API. Never cache,
+// submit to, or take ownership of these objects. QueryInterface takes a
+// temporary IDXGIAdapter1 reference, balanced immediately by Release.
+Dictionary NativeRDWorkload::inspect_d3d12_adapter(
+        int64_t device_handle, int64_t adapter_handle) const {
+    Dictionary result;
+    result["verified_software"] = false;
+#ifdef _WIN32
+    if (device_handle == 0 || adapter_handle == 0) {
+        result["error"] = "missing_borrowed_d3d12_device_or_adapter";
+        return result;
+    }
+    auto *device = reinterpret_cast<ID3D12Device *>(
+            static_cast<uintptr_t>(device_handle));
+    // Godot exposes an IDXGIAdapter, not an IDXGIAdapter1. Always query
+    // for the derived interface rather than reinterpret the base vtable.
+    auto *adapter = reinterpret_cast<IDXGIAdapter *>(
+            static_cast<uintptr_t>(adapter_handle));
+    IDXGIAdapter1 *adapter1 = nullptr;
+    if (FAILED(adapter->QueryInterface(__uuidof(IDXGIAdapter1),
+                                       reinterpret_cast<void **>(&adapter1))) ||
+        adapter1 == nullptr) {
+        result["error"] = "dxgi_adapter1_interface_unavailable";
+        return result;
+    }
+    DXGI_ADAPTER_DESC1 desc{};
+    const HRESULT hr = adapter1->GetDesc1(&desc);
+    adapter1->Release();
+    if (FAILED(hr)) {
+        result["error"] = "dxgi_adapter_descriptor_unavailable";
+        return result;
+    }
+    const LUID device_luid = device->GetAdapterLuid();
+    const bool same_device = desc.AdapterLuid.LowPart == device_luid.LowPart &&
+                             desc.AdapterLuid.HighPart == device_luid.HighPart;
+    const bool software_flag = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+    // Microsoft documents 1414:008C as the Basic Render Driver software
+    // implementation. Its *primary display* adapter can lack the software
+    // flag; use the exact PCI identity, never the human-readable name alone.
+    const bool microsoft_basic_render =
+            desc.VendorId == 0x1414 && desc.DeviceId == 0x008C;
+    result["backend"] = "d3d12";
+    result["vendor_id"] = static_cast<int64_t>(desc.VendorId);
+    result["device_id"] = static_cast<int64_t>(desc.DeviceId);
+    result["software_flag"] = software_flag;
+    result["microsoft_basic_render_id"] = microsoft_basic_render;
+    result["device_luid_matched"] = same_device;
+    result["verified_software"] = same_device &&
+                                 (software_flag || microsoft_basic_render);
+    result["error"] = same_device ? "" : "godot_device_adapter_luid_mismatch";
+#else
+    result["error"] = "d3d12_adapter_query_only_available_on_windows";
+#endif
+    return result;
 }
 
 Dictionary NativeRDWorkload::reject(const char *reason) {

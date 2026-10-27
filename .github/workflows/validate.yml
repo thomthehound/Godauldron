@@ -161,6 +161,8 @@ jobs:
           LIB="$(find .native-build -type f -name 'libgodauldron_native_vulkan_provider.so' -print -quit)"
           test -n "$LIB"
           python native/vulkan_provider/install_package.py "$LIB"
+      - name: Verify pinned native shader is identical to compiled GLSL
+        run: python native/vulkan_provider/pinned_spirv.py verify native/vulkan_provider/embedded/persistent_image.spv.b64 .native-build/generated/persistent_image.spv
       - name: Validate installed native package
         run: |
           python tools/validate_manifests.py
@@ -199,6 +201,50 @@ jobs:
             echo "Native workload reuse violated Vulkan validation"
             exit 1
           fi
+
+  windows-d3d12-native-rd:
+    runs-on: windows-latest
+    # Independent of Ubuntu package installation. The checked-in SPIR-V
+    # is byte-compared against freshly compiled GLSL by native-vulkan-device.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download Godot 4 for Windows (console and GUI binaries)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/fetch_preview.py --major 4 --platform win64.exe
+      - name: Configure and compile C++23 native RD-only extension
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\\Installer\\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "Visual Studio Installer discovery tool not found" }
+          $version = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion).Trim()
+          if (-not $version) { throw "MSVC C++ compiler toolchain is unavailable" }
+          $major = [int]($version.Split('.')[0])
+          $generator = switch ($major) {
+            18 { "Visual Studio 18 2026" }
+            17 { "Visual Studio 17 2022" }
+            default { throw "Unsupported installed Visual Studio version: $version" }
+          }
+          Write-Host "Building native C++23 extension with $generator ($version)"
+          cmake -S native/vulkan_provider -B .native-rd-windows-build -G $generator -A x64 -DGODAULDRON_RD_ONLY=ON
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build .native-rd-windows-build --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = Get-ChildItem .native-rd-windows-build -Recurse -Filter godauldron_native_rd_workload.dll | Select-Object -First 1
+          if (-not $binary) { throw "C++23 native RD-only GDExtension was not built" }
+          python native/rd_windows/install_package.py $binary.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Import Godot project with RD-only native Windows package
+        run: .\.engine\godot_console.exe --headless --path . --editor --import --quit
+      - name: Verify real D3D12 WARP compute, barriers, persistent resources and completion
+        shell: pwsh
+        run: |
+          & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_persistent_workload_smoke.gd
+          if ($LASTEXITCODE -ne 0) { throw "D3D12 WARP native compute test failed; never count a fallback renderer as coverage" }
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

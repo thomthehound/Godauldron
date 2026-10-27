@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "org.godauldron.native-rd-d3d12",
+  "display_name": "Native RD workload / Direct3D 12",
+  "category": "Native GPU diagnostics",
+  "description": "C++23 authored persistent compute, Godot-owned Direct3D 12 resource and scheduling. WARP validation does not measure physical GPU throughput.",
+  "entry_scene": "res://experiments/native-rd-windows/native_rd_scene.tscn",
+  "native_extensions": [
+    "res://experiments/native-rd-windows/native_rd.gdextension"
+  ],
+  "required_native_classes": ["NativeRDWorkload"],
+  "visualization_path": "godot_scene",
+  "parameters": []
+}

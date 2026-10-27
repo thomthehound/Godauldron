@@ -21,6 +21,10 @@ public:
     godot::Dictionary mark_readback_complete();
     godot::Dictionary release(godot::RenderingDevice *rd);
     godot::Dictionary diagnostics() const;
+    // Read-only DXGI verification of the actual engine-owned D3D12 adapter.
+    // Borrowed pointers valid only during the rendering callback on Windows.
+    godot::Dictionary inspect_d3d12_adapter(int64_t device_handle,
+                                            int64_t adapter_handle) const;
 
 protected:
     static void _bind_methods();

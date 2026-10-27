@@ -32,12 +32,29 @@ func _await_phase(effect: CompositorEffect, expected: String) -> Dictionary:
 
 
 func _run() -> void:
+	var windows_d3d12 := OS.get_name() == "Windows"
+	var expected_driver := "d3d12" if windows_d3d12 else "vulkan"
 	if RenderingServer.get_current_rendering_method() != "forward_plus" or \
-			RenderingServer.get_current_rendering_driver_name() != "vulkan":
-		_fail("Native persistent compute validation needs graphical Vulkan Forward+")
+			RenderingServer.get_current_rendering_driver_name() != expected_driver:
+		_fail("Native workload requires actual %s Forward+; no fallback accepted (observed %s)" %
+			[expected_driver, RenderingServer.get_current_rendering_driver_name()])
 		return
-	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(
-		"res://experiments/native-vulkan-provider/manifest.json"))
+	var rd: RenderingDevice = RenderingServer.get_rendering_device()
+	if rd == null:
+		_fail("No active rendering device for native workload")
+		return
+	var device_name: String = rd.get_device_name()
+	var device_type: int = RenderingServer.get_video_adapter_type()
+	print("Native RD validation backend=", expected_driver,
+		" device=", device_name, " type=", device_type)
+	# Godot's adapter type is a rendering heuristic, not a reliable DXGI
+	# software flag. The compositor C++ witness checks the exact DXGI
+	# adapter PCI identity and matches its LUID to the live D3D12 device.
+	var manifest_path := ("res://experiments/native-rd-windows/manifest.json"
+		if windows_d3d12 else "res://experiments/native-vulkan-provider/manifest.json")
+	var effect_path := ("res://experiments/native-rd-windows/native_persistent_workload_effect.gd"
+		if windows_d3d12 else "res://experiments/native-vulkan-provider/native_persistent_workload_effect.gd")
+	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(manifest_path))
 	if typeof(manifest) != TYPE_DICTIONARY or \
 			not Package.preflight(manifest).get("ok", false) or \
 			not ClassDB.class_exists("NativeRDWorkload"):
@@ -61,8 +78,7 @@ func _run() -> void:
 	if camera == null or camera.compositor != null:
 		_fail("No isolated camera compositor to attach native workload")
 		return
-	var script: GDScript = load(
-		"res://experiments/native-vulkan-provider/native_persistent_workload_effect.gd")
+	var script: GDScript = load(effect_path)
 	if script == null:
 		_fail("Installed native workload compositor effect missing")
 		return
@@ -106,6 +122,18 @@ func _run() -> void:
 		var bytes: PackedByteArray = result.get("bytes", PackedByteArray())
 		var recorded: Dictionary = result.get("record", {})
 		var completed: Dictionary = result.get("completion", {})
+		if windows_d3d12:
+			var dxgi: Dictionary = result.get("adapter_evidence", {})
+			if dxgi.get("backend") != "d3d12" or \
+					not dxgi.get("verified_software", false) or \
+					not dxgi.get("device_luid_matched", false) or \
+					int(dxgi.get("vendor_id", 0)) != 0x1414 or \
+					int(dxgi.get("device_id", 0)) != 0x008C:
+				_fail("Actual D3D12 device lacks matched Microsoft software DXGI identity: " + str(dxgi))
+				return
+			if batch_index == 0:
+				print("Verified actual software DXGI adapter: ", dxgi)
+
 		total_dispatches += seeds.size()
 		if not result.get("ok", false) or bytes.size() != ELEMENTS * 4 or \
 				not result.get("rejected_early_release", false) or \
@@ -183,5 +211,7 @@ func _run() -> void:
 	camera.compositor = null
 	print("Persistent native workload validated: ", BATCHES.size(),
 		" completed batches, ", total_dispatches,
-		" native dispatches, odd-size image, GPU barriers, per-session resource reuse and retirement")
+		" native dispatches, driver=", expected_driver,
+		" adapter=", device_name,
+		" odd-size image, GPU barriers, per-session resource reuse and retirement")
 	quit(0)

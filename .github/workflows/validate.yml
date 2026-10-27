@@ -133,7 +133,7 @@ jobs:
       - name: Install native Vulkan and shader build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential libvulkan-dev mesa-vulkan-drivers glslang-tools xvfb
+          sudo apt-get install -y cmake ninja-build build-essential libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools xvfb
           ICD="$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d -iname '*lvp*.json' -print -quit 2>/dev/null)"
           test -n "$ICD"
           echo "VK_DRIVER_FILES=$ICD" >> "$GITHUB_ENV"
@@ -158,7 +158,15 @@ jobs:
         run: |
           python tools/validate_manifests.py
           timeout --signal=TERM --kill-after=5s 120s .engine/godot --headless --path . --editor --import --quit
-      - name: Verify real native Vulkan compute/copy, GPU queries and fence completion
+      - name: Validate native Vulkan queue work against Vulkan API rules
+        run: |
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 150s .engine/godot --headless --path . --script res://tests/native_vulkan_provider_smoke.gd 2>&1 | tee native-vulkan-validation.log
+          if grep -E 'VUID-|Validation Error' native-vulkan-validation.log; then
+            echo "Vulkan validation found invalid native GPU commands"
+            exit 1
+          fi
+      - name: Verify real native Vulkan compute/copy, GPU queries and fence completion alongside Forward+
         run: timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_provider_smoke.gd
 
   forward-hdr-render:

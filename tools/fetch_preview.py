@@ -39,6 +39,18 @@ def choose_asset(releases: list[dict], platform: str, major: int | None = None) 
                 return tag, asset["browser_download_url"]
     raise RuntimeError("No matching upstream Godot release asset")
 
+def select_executable(entries: list[str], platform: str) -> str:
+    binaries = [name for name in entries if name.startswith("Godot_")
+                and not name.endswith("/") and "/" not in name]
+    if platform == "win64.exe":
+        # Windows archives contain both GUI and console executables.
+        # Use the console subsystem for reliable CI process exit/stdout.
+        binaries = [name for name in binaries if name.endswith("_console.exe")]
+    if len(binaries) != 1:
+        raise RuntimeError(f"Expected one Godot executable for {platform}; found {binaries}")
+    return binaries[0]
+
+
 def request(url: str, *, github_api: bool = False):
     headers = {"User-Agent": "Godauldron-CI"}
     if github_api:
@@ -66,12 +78,9 @@ def main():
     with request(url) as response, archive.open("wb") as output:
         shutil.copyfileobj(response, output)
     with zipfile.ZipFile(archive) as package:
-        entries = [name for name in package.namelist() if name.startswith("Godot_")
-                   and not name.endswith("/") and "/" not in name]
-        if len(entries) != 1:
-            raise RuntimeError(f"Expected a single engine executable; found {entries}")
-        target = args.output / "godot"
-        with package.open(entries[0]) as source, target.open("wb") as output:
+        entry = select_executable(package.namelist(), args.platform)
+        target = args.output / ("godot.exe" if args.platform == "win64.exe" else "godot")
+        with package.open(entry) as source, target.open("wb") as output:
             shutil.copyfileobj(source, output)
         target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     archive.unlink()

@@ -5,6 +5,10 @@ extends Node3D
 @export_file("*.hlsl") var hlsl_source_path := "res://experiments/native-rd-windows/reload_rd_image.hlsl"
 @export var hlsl_compiler := "dxc"
 var _reload_effect: CompositorEffect
+var _source_attempts := 0
+var _source_failures := 0
+var _source_last_error := ""
+var _source_last_stage := "none"
 
 
 func godauldron_reload_shader() -> Dictionary:
@@ -19,29 +23,32 @@ func godauldron_reload_shader() -> Dictionary:
 			return {"ok": false, "error": "Native RD compositor unavailable"}
 		_reload_effect = script.new(13, 9, "software")
 		var compositor := Compositor.new()
-		compositor.compositor_effects = [_reload_effect]
+		var effects: Array[CompositorEffect] = [_reload_effect]
+		compositor.compositor_effects = effects
 		camera.compositor = compositor
+	_source_attempts += 1
 	var result: Dictionary = _reload_effect.call("request_hlsl_reload",
 		hlsl_source_path, hlsl_compiler)
+	if not result.get("ok", false):
+		_source_failures += 1
+		_source_last_error = String(result.get("error", "HLSL compile failed")).substr(0, 1500)
+		_source_last_stage = "compile"
+	else:
+		_source_last_error = ""
+		_source_last_stage = "queued"
 	return result
 
 
 func godauldron_pipeline_diagnostics() -> Dictionary:
 	var entries: Array[Dictionary] = []
 	var source: Dictionary = {
-		"attempts": 0, "failures": 0, "source": hlsl_source_path,
+		"attempts": _source_attempts, "failures": _source_failures, "source": hlsl_source_path,
 		"language": "hlsl", "selected_language": "hlsl",
 		"active_language": "embedded_spirv", "compiler": hlsl_compiler,
-		"last_error": "", "last_stage": "none"
+		"last_error": _source_last_error, "last_stage": _source_last_stage
 	}
 	if _reload_effect != null:
 		var snapshot: Dictionary = _reload_effect.call("reload_snapshot")
-		source["attempts"] = 1 if snapshot.get("phase") != "idle" else 0
-		var compile: Dictionary = snapshot.get("source_reload", {})
-		if not compile.get("ok", true):
-			source["failures"] = 1
-			source["last_error"] = String(compile.get("error", "")).substr(0, 1500)
-			source["last_stage"] = "compile"
 		if snapshot.has("prepare_attempts"):
 			snapshot["name"] = "native_rd_storage_image"
 			snapshot["shader_origin"] = snapshot.get("shader_origin", "native_compiled_embedded_spirv")

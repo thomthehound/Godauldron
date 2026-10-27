@@ -252,6 +252,14 @@ bool NativeGpuProbe3D::create_compute_pipeline(
         failure_reason = "Compute shader is not SPIR-V";
         return false;
     }
+    // The native VkInstance/VkDevice advertises Vulkan 1.1; don't rely on
+    // a permissive driver accepting newer SPIR-V semantics. Vulkan 1.1
+    // supports SPIR-V through version 1.3.
+    if (words[1] < 0x00010000u || words[1] > 0x00010300u) {
+        failure_stage = "shader";
+        failure_reason = "Candidate SPIR-V version exceeds native Vulkan 1.1 capabilities";
+        return false;
+    }
     // The layout has exactly ONE storage-buffer descriptor (set 0,
     // binding 0) and NO push constants. SPIR-V decorations alone do not
     // establish descriptor type or count: follow the OpVariable pointer to

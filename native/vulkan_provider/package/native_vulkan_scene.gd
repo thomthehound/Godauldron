@@ -32,7 +32,7 @@ func godauldron_reload_shader_from_source(path: String) -> Dictionary:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
 		return {"ok": false, "stage": "compile",
 			"error": ("Shader compiler failed (%d): " % exit_code) +
-				"\n".join(compiler_messages).substr(0, 1500)}
+				str(compiler_messages).substr(0, 1500)}
 	var spirv: PackedByteArray = FileAccess.get_file_as_bytes(output_path)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
 	if spirv.is_empty():

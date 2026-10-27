@@ -183,6 +183,14 @@ jobs:
             echo "Native shared-device work violated Vulkan validation"
             exit 1
           fi
+      - name: Verify native C++ shader and compute dispatch recorded through Godot RD
+        run: |
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_authored_compute_smoke.gd 2>&1 | tee native-godot-authored-dispatch-validation.log
+          if grep -E 'VUID-|Validation Error' native-godot-authored-dispatch-validation.log; then
+            echo "Native-authored Godot RD compute violated Vulkan validation"
+            exit 1
+          fi
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

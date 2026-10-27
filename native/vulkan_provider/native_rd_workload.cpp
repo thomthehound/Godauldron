@@ -6,7 +6,16 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include <chrono>
 #include <cstring>
+
+namespace {
+using HostClock = std::chrono::steady_clock;
+int64_t elapsed_host_usec(HostClock::time_point since) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        HostClock::now() - since).count();
+}
+} // namespace
 #ifdef _WIN32
 #include <d3d12.h>
 #include <dxgi1_2.h>
@@ -100,13 +109,25 @@ Dictionary NativeRDWorkload::reject(const char *reason) {
     return out;
 }
 
+Dictionary NativeRDWorkload::prepare_failure(const char *stage, const char *reason) {
+    ++prepare_failures_;
+    last_prepare_failure_stage_ = stage;
+    last_prepare_error_ = reason;
+    Dictionary out = diagnostics();
+    out["ok"] = false;
+    out["error"] = reason;
+    return out;
+}
+
 Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
                                      int64_t width, int64_t height) {
     if (phase_ != Phase::NEW) return reject("workload_already_prepared_or_released");
+    ++prepare_attempts_;
+    const auto began = HostClock::now();
     if (rd == nullptr || !output_image.is_valid() ||
         width < 1 || height < 1 || width > 2048 || height > 2048 ||
         width * height > 1024 * 1024) {
-        return reject("missing_device_or_target");
+        return prepare_failure("preflight", "missing_device_or_target");
     }
     PackedByteArray shader_bytes;
     shader_bytes.resize(sizeof(kPersistentComputeSpirv));
@@ -115,13 +136,20 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     Ref<RDShaderSPIRV> spirv;
     spirv.instantiate();
     spirv->set_stage_bytecode(RenderingDevice::SHADER_STAGE_COMPUTE, shader_bytes);
+    const auto shader_start = HostClock::now();
     RID shader = rd->shader_create_from_spirv(spirv, "Godauldron Persistent Native RD");
-    if (!shader.is_valid()) return reject("provider_shader_creation_failed");
+    shader_create_host_usec_ = elapsed_host_usec(shader_start);
+    if (!shader.is_valid()) {
+        return prepare_failure("shader", "provider_shader_creation_failed");
+    }
+    ++shader_creations_;
 
+    const auto pipeline_start = HostClock::now();
     RID pipeline = rd->compute_pipeline_create(shader);
+    pipeline_create_host_usec_ = elapsed_host_usec(pipeline_start);
     if (!pipeline.is_valid()) {
         rd->free_rid(shader);
-        return reject("provider_pipeline_creation_failed");
+        return prepare_failure("pipeline", "provider_pipeline_creation_failed");
     }
 
     Ref<RDUniform> binding;
@@ -131,11 +159,13 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     binding->add_id(output_image);
     TypedArray<RDUniform> uniforms;
     uniforms.append(binding);
+    const auto descriptor_start = HostClock::now();
     RID uniform_set = rd->uniform_set_create(uniforms, shader, 0);
+    descriptor_create_host_usec_ = elapsed_host_usec(descriptor_start);
     if (!uniform_set.is_valid()) {
         rd->free_rid(pipeline);
         rd->free_rid(shader);
-        return reject("provider_descriptor_creation_failed");
+        return prepare_failure("descriptor", "provider_descriptor_creation_failed");
     }
 
     shader_ = shader;
@@ -152,6 +182,9 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     ++prepare_count_;
     ++pipeline_creations_;
     ++descriptor_creations_;
+    prepare_total_host_usec_ = elapsed_host_usec(began);
+    last_prepare_error_ = "";
+    last_prepare_failure_stage_ = "";
     Dictionary result = diagnostics();
     result["ok"] = true;
     return result;
@@ -206,6 +239,7 @@ Dictionary NativeRDWorkload::record_impl(RenderingDevice *rd,
     if (!checkpoint) rd->capture_timestamp("native_persistent_batch_start");
     int64_t commands = rd->compute_list_begin();
     rd->compute_list_bind_compute_pipeline(commands, pipeline_);
+    ++pipeline_binds_;
     rd->compute_list_bind_uniform_set(commands, uniform_set_, 0);
     // A barrier at the start of a later checkpoint list orders the prior
     // compute list's storage-image writes before this list reads the image.
@@ -307,6 +341,19 @@ Dictionary NativeRDWorkload::diagnostics() const {
         case Phase::RELEASED: result["phase"] = "released"; break;
     }
     result["prepare_count"] = prepare_count_;
+    result["prepare_attempts"] = prepare_attempts_;
+    result["prepare_failures"] = prepare_failures_;
+    result["shader_creations"] = shader_creations_;
+    result["pipeline_binds"] = pipeline_binds_;
+    result["shader_create_host_usec"] = shader_create_host_usec_;
+    result["pipeline_create_host_usec"] = pipeline_create_host_usec_;
+    result["descriptor_create_host_usec"] = descriptor_create_host_usec_;
+    result["prepare_total_host_usec"] = prepare_total_host_usec_;
+    result["last_prepare_error"] = last_prepare_error_;
+    result["last_prepare_failure_stage"] = last_prepare_failure_stage_;
+    result["cache_hit_observation"] = "not_exposed_by_rendering_device";
+    result["timing_source"] = "steady_host_wall_microseconds";
+    result["timing_scope"] = "Godot RD shader/pipeline/descriptor API calls in prepare; driver/cache internals unobservable; excludes GPU execution";
     result["pipeline_creations"] = pipeline_creations_;
     result["descriptor_creations"] = descriptor_creations_;
     result["batches_recorded"] = batches_recorded_;

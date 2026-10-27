@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dyl2yfjj8cqk7"
+path="res://.godot/imported/godot_shared_image.glsl-bbb41f9ba87f910d47dc0680cb08ed94.res"
+
+[deps]
+
+source_file="res://native/vulkan_provider/package/godot_shared_image.glsl"
+dest_files=["res://.godot/imported/godot_shared_image.glsl-bbb41f9ba87f910d47dc0680cb08ed94.res"]
+
+[params]
+

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://deys5il666oy3"
+path="res://.godot/imported/hdr_copy_rgba16f.glsl-c47bbbfcb5dd63fa20c9cb56962d3e1d.res"
+
+[deps]
+
+source_file="res://shaders/hdr_copy_rgba16f.glsl"
+dest_files=["res://.godot/imported/hdr_copy_rgba16f.glsl-c47bbbfcb5dd63fa20c9cb56962d3e1d.res"]
+
+[params]
+

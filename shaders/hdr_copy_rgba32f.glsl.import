@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://byptxp3b6iqyy"
+path="res://.godot/imported/hdr_copy_rgba32f.glsl-011d3a14945f6c34b1ece6ffdcc3b5df.res"
+
+[deps]
+
+source_file="res://shaders/hdr_copy_rgba32f.glsl"
+dest_files=["res://.godot/imported/hdr_copy_rgba32f.glsl-011d3a14945f6c34b1ece6ffdcc3b5df.res"]
+
+[params]
+

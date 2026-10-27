@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bd2vk0eos86xh"
+path="res://.godot/imported/inspect_normal_roughness.glsl-1fad51d129ece69fb890522de8f6205f.res"
+
+[deps]
+
+source_file="res://shaders/inspect_normal_roughness.glsl"
+dest_files=["res://.godot/imported/inspect_normal_roughness.glsl-1fad51d129ece69fb890522de8f6205f.res"]
+
+[params]
+

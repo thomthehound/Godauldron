@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bw4fpm4obs5j4"
+path="res://.godot/imported/inspect_velocity.glsl-ab27b75aaa10a089c13b3dc5e1b9a80a.res"
+
+[deps]
+
+source_file="res://shaders/inspect_velocity.glsl"
+dest_files=["res://.godot/imported/inspect_velocity.glsl-ab27b75aaa10a089c13b3dc5e1b9a80a.res"]
+
+[params]
+

@@ -1352,7 +1352,14 @@ func _profile_gpu_stages() -> void:
 		return
 	var windows: Dictionary = summary["windows"]
 	var covered: Dictionary = windows["covered_gpu_window"]
-	_gpu_stage_label.text = "GPU stage window p50 %.3f / p95 %.3f ms (not full frame or provider GPU)" % [
+	var stage_readouts: PackedStringArray = PackedStringArray()
+	for name in GPUStageProbe.WINDOWS:
+		var segment: Dictionary = windows[name]
+		stage_readouts.append("%s %.3f" % [
+			name.trim_suffix("_window").replace("_", "-"),
+			float(segment["p50_usec"]) / 1000.0])
+	_gpu_stage_label.text = "GPU stage p50 (ms): %s\nCovered marker span p50 %.3f / p95 %.3f ms (not full frame or provider GPU)" % [
+		", ".join(stage_readouts),
 		float(covered["p50_usec"]) / 1000.0, float(covered["p95_usec"]) / 1000.0]
 	_status.text = "Real GPU stage timeline saved: " + String(saved["path"])
 	_log_event("info", "profiling", "gpu_stage_profile_saved",

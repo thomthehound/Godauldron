@@ -74,7 +74,8 @@ static func resolve(value: Variant, expected_steps: int) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
 		return unavailable("invalid_timeline_payload")
 	var record: Dictionary = value
-	if int(record.get("format_version", -1)) != 1 or \
+	if typeof(record.get("format_version")) != TYPE_INT or \
+			int(record["format_version"]) != 1 or \
 			record.get("status") != "resolved" or record.get("phase") != "sample" or \
 			record.get("synchronization") != "completed" or \
 			record.get("measurement_source") != "device_timestamp" or \
@@ -168,7 +169,7 @@ static func resolve(value: Variant, expected_steps: int) -> Dictionary:
 			(kind_durations[kind] as Array[float]).append(
 				float(int(clean["end_ns"]) - int(clean["start_ns"])) / 1000.0)
 			kind_counts[kind] += 1
-		var step_waits: Array = step.get("host_waits", [])
+		var step_waits: Variant = step.get("host_waits", [])
 		if typeof(step_waits) != TYPE_ARRAY or step_waits.size() > MAX_WAITS - total_waits:
 			return unavailable("invalid_host_wait_count")
 		total_waits += step_waits.size()
@@ -213,6 +214,12 @@ static func resolve(value: Variant, expected_steps: int) -> Dictionary:
 		return unavailable("no_resolved_gpu_timeline_events")
 	# Resolve dependency names only after every step has been read. Dependency
 	# order is enforceable only when both markers share one GPU clock domain.
+	for step in output_steps:
+		for wait in step["host_waits"]:
+			if not String(wait["wait_for"]).is_empty():
+				if not event_lookup.has(wait["wait_for"]) or \
+						int(event_lookup[wait["wait_for"]]["step_index"]) > int(step["step_index"]):
+					return unavailable("unresolved_host_wait_event_reference")
 	for event in all_events:
 		for dependency_id in event["depends_on"]:
 			if not event_lookup.has(dependency_id):

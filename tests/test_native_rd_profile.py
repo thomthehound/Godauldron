@@ -137,7 +137,7 @@ class ExtendedNativeGPUProfileContract(unittest.TestCase):
         self.assertEqual(metrics["gpu_compute_window"]["p50_usec"], 2.5)
         self.assertEqual(metrics["host_request_to_readback"]["p50_usec"], 1500.0)
         self.assertEqual(metrics["host_validation"]["p50_usec"], 50.0)
-        self.assertEqual(metrics["gpu_compute_window"]["pixel_dispatches_per_second"]["p50_usec"],
+        self.assertEqual(metrics["gpu_compute_window"]["pixel_dispatches_per_second"]["p50_per_second"],
                          351 * 1_000_000 / 2.5)
 
     def test_geometry_timestamps_and_lifetime_cannot_be_fabricated(self) -> None:

@@ -1,0 +1,10 @@
+[configuration]
+entry_symbol = "godauldron_native_vulkan_init"
+compatibility_minimum = "4.7"
+reloadable = false
+
+[libraries]
+linux.debug.x86_64 = "res://experiments/native-vulkan-provider/bin/libgodauldron_native_vulkan_provider.so"
+linux.release.x86_64 = "res://experiments/native-vulkan-provider/bin/libgodauldron_native_vulkan_provider.so"
+windows.debug.x86_64 = "res://experiments/native-vulkan-provider/bin/godauldron_native_vulkan_provider.dll"
+windows.release.x86_64 = "res://experiments/native-vulkan-provider/bin/godauldron_native_vulkan_provider.dll"

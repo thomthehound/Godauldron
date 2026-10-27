@@ -31,7 +31,7 @@ func _verify() -> void:
 	raw.set_pixel(0, 0, Color(-0.1, 0.0, 1.0, 0.4))
 	raw.set_pixel(1, 0, Color(0.1, 0.3, -0.05, 1.0))
 	var n: Color = Viewer.preview_color("normal_roughness", raw.get_pixel(0, 0))
-	var velocity: Color = Viewer.preview_color("velocity", Color.ZERO)
+	var velocity: Color = Viewer.preview_color("velocity", Color(0.0, 0.0, 0.0, 1.0))
 	var d: Color = Viewer.preview_color("depth", Color(0.0, 0.0, 0.0, 1.0))
 	if absf(n.r - 0.45) > 0.0001 or \
 			absf(n.b - 1.0) > 0.0001 or \

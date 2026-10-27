@@ -142,6 +142,7 @@ var _observability_plot: Control
 var _observability_label: Label
 var _provider_timing_label: Label
 var _pipeline_lifecycle_label: Label
+var _reload_shader_button: Button
 var _provider_timeline_label: Label
 var _provider_timeline_window: Window
 var _provider_timeline_data: Dictionary = {}
@@ -744,6 +745,12 @@ func _build_ui() -> void:
 	inspect_pipelines.tooltip_text = "One provider-owned post-setup snapshot; host API timings, creations, binds and failures; no cache-hit guessing"
 	inspect_pipelines.pressed.connect(_inspect_provider_pipelines)
 	pipeline_row.add_child(inspect_pipelines)
+	_reload_shader_button = Button.new()
+	_reload_shader_button.text = "Reload provider shader"
+	_reload_shader_button.tooltip_text = "Explicit, unmeasured provider-owned GLSL compilation and safe native pipeline replacement"
+	_reload_shader_button.pressed.connect(_reload_provider_shader)
+	_reload_shader_button.disabled = true
+	pipeline_row.add_child(_reload_shader_button)
 	_pipeline_lifecycle_label = Label.new()
 	_pipeline_lifecycle_label.text = "Provider pipelines: not inspected"
 	_pipeline_lifecycle_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1940,6 +1947,7 @@ func _select_experiment(index: int) -> void:
 	_last_observability_ui_tick = -1
 	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
 	_pipeline_lifecycle_label.text = "Provider pipelines: not inspected for selected experiment"
+	_reload_shader_button.disabled = true
 	_provider_timeline_label.text = "Provider queue timeline: unavailable (no completed run)"
 	_provider_timeline_data.clear()
 	if _provider_timeline_window != null:
@@ -2029,6 +2037,7 @@ func _select_experiment(index: int) -> void:
 	_bind_inspection()
 	_apply_graphics()
 	var provider_valid: bool = _refresh_provider_controls()
+	_reload_shader_button.disabled = not _active_scene.has_method("godauldron_reload_shader")
 	if provider_valid:
 		_status.text = String(_manifest.get("description", _manifest["display_name"]))
 	_discover_campaigns()
@@ -3284,6 +3293,23 @@ func _update_telemetry() -> void:
 		_run.phase_label(), _run.warmup_steps_completed, _run.requested_warmup_steps,
 		sampled, _run.requested_steps, mean_usec / 1000.0, Engine.get_frames_per_second()
 	]
+
+
+func _reload_provider_shader() -> void:
+	if _capture_pending or _has_active_run() or _campaign != null or \
+			(_comparison_window != null and \
+			(_comparison_window.visible or bool(_comparison_window.call("analysis_busy")))):
+		_status.text = "Shader reload unavailable during measured runs, capture or analysis"
+		return
+	if _active_scene == null or not _active_scene.has_method("godauldron_reload_shader"):
+		_status.text = "Selected provider does not implement shader reload"
+		return
+	var result: Variant = _active_scene.call("godauldron_reload_shader")
+	if typeof(result) != TYPE_DICTIONARY or result.get("ok") != true:
+		_status.text = "Native shader reload failed: " + str(result)
+	else:
+		_status.text = "Native shader pipeline replaced (generation %d)" % int(result.get("generation", -1))
+	_pipeline_lifecycle_label.text = PipelineDiagnostics.summary(PipelineDiagnostics.read(_active_scene))
 
 
 func _inspect_provider_pipelines() -> void:

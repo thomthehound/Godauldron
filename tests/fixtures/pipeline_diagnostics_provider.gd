@@ -27,3 +27,11 @@ var evidence: Dictionary = {
 
 func godauldron_pipeline_diagnostics() -> Dictionary:
 	return evidence.duplicate(true)
+
+
+var reload_calls := 0
+
+
+func godauldron_reload_shader() -> Dictionary:
+	reload_calls += 1
+	return {"ok": true, "generation": reload_calls}

@@ -47,10 +47,22 @@ The native, backend-neutral RD workload separately measures Godot's `RenderingDe
 
 **Host-wall API duration is not GPU shader execution time.** Cache hit ratios are likewise **not observable** from these public Godot RD calls, and the independent Vulkan probe creates its compute pipeline with `VK_NULL_HANDLE` as the explicit Vulkan pipeline-cache argument. Neither absence of a cache handle nor a faster pipeline creation proves a cache hit or miss. No cache rate, shader hot-reload, cross-session persistent cache or driver-side compilation history is claimed.
 
+## Provider-owned native Vulkan shader hot reload
+
+The independent Vulkan experiment provides a real **Reload provider shader** action in the laboratory's pipeline diagnostics row. Edit the installed `experiments/native-vulkan-provider/reload_compute.comp` file, select that experiment and click **Reload provider shader**. The scene owns the compiler executable (`glslangValidator`, configurable via `shader_compiler`) and GLSL source path (`shader_source_path`). The host only invokes `godauldron_reload_shader()`, displays the outcome, and updates diagnostics. It never compiles shaders, rebinds native GPU memory, or creates Vulkan resources.
+
+At an explicit unmeasured action, the scene runs `glslangValidator -V -S comp` into a temporary file under `user://`, reads the produced SPIR-V bytes and removes the temporary file. Compiler stderr and nonzero exit codes are reported as source compilation failures. The provider validates the SPIR-V structure, compute stage, fixed **64×1×1 workgroup**, and its existing **set 0 / binding 0 storage buffer** before creating the candidate native shader module and compute pipeline. Validation traces the SPIR-V descriptor variable through its pointer and struct decorations to prove **exactly one storage-buffer descriptor**, rejecting storage images, uniform buffers, descriptor arrays, added resource bindings and unsupported push constants rather than treating matching binding numbers as proof of ABI compatibility. The single persistent Vulkan descriptor/pipeline layout remains provider-owned.
+
+The candidate pipeline is created **before** the active pipeline changes. On creation failure, the candidate is destroyed and the previous PSO stays active. The provider rejects reloads during sampling or while prior native GPU submissions remain unresolved; it performs no device-wide wait or retirement in the measured path. The existing post-run GPU timeline resolver waits for every submitted fence and validates the final GPU output. Only after that successful completion is the previous pipeline eligible for replacement and destruction. Successful compiled SPIR-V bytes remain selected for subsequent provider setup and sampled runs, rather than reverting silently to the embedded shader.
+
+The provider reports actual native `reload_attempts`, accepted `reload_generation`, `reload_failures`, retired replaced pipelines, last native failure stage, and unmeasured reload host-wall duration. The scene separately reports source compiler attempts and errors under `provider_pipeline_lifecycle.source_reload`, including validation failures before native pipeline creation. Neither counter pretends a source compilation failure allocated GPU resources. The existing one-time setup stage timings remain separate from later reload costs.
+
+**Current boundary:** this gate implements explicit on-demand GLSL recompilation and actual compute PSO replacement for the **independently owned Vulkan provider**. It does not silently reload filesystem changes, and does not yet reload Godot-owned `RenderingDevice` pipelines or native D3D12 pipelines. Other providers may implement the same scene protocol with their own safe native resource and fence semantics. A future per-backend gate must prove those lifecycles independently.
+
 ## Remaining shader development parity
 
 - Expose real shader compile errors and source mapping where a provider or engine API provides them; the current embedded SPIR-V is compiled ahead of execution.
-- Implement provider-owned shader/pipeline reload with explicit in-flight completion, atomic rollback, resource retirement and visible failure status.
+- Extend the now-proven independent-Vulkan transactional shader reload contract to Godot-owned RenderingDevice pipelines, D3D12 and additional provider-specific native backends, using their own actual completion boundaries.
 - Surface shader variant, wave/workgroup dimensions, PSO build and cache behavior **only** when backed by actual provider evidence. Never infer shader cache hits from bind counts.
 - Compare cold-start, prewarmed and rebuilt pipeline costs on real hardware, keeping compiler/driver host time separate from GPU timestamps.
 

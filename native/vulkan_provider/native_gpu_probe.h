@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <vulkan/vulkan.h>
 
@@ -23,6 +24,11 @@ public:
     godot::Dictionary godauldron_resolved_gpu_timeline();
     godot::Dictionary godauldron_metrics() const;
     godot::Dictionary godauldron_pipeline_diagnostics() const;
+    // Rebuild native compute PSO from a compiled SPIR-V candidate. The
+    // existing pipeline remains live until the replacement is fully valid.
+    godot::Dictionary godauldron_replace_shader(const godot::PackedByteArray &spirv);
+    bool godauldron_shader_reload_available() const;
+
     // Called only on Godot's rendering thread, inside the compositor callback.
     // Records native-authored shader and workload into Godot's RenderingDevice.
     // Godot retains queue submission, resource barriers and memory ownership.
@@ -83,10 +89,24 @@ private:
     int64_t prepare_total_host_usec_ = 0;
     std::string pipeline_failure_stage_;
     std::string pipeline_prepare_error_;
+    godot::PackedByteArray accepted_shader_bytes_;
+    int64_t shader_reload_attempts_ = 0;
+    int64_t shader_reload_successes_ = 0;
+    int64_t shader_reload_failures_ = 0;
+    int64_t retired_replaced_pipelines_ = 0;
+    int64_t shader_reload_host_usec_ = 0;
+    std::string shader_reload_error_;
+    std::string shader_reload_failure_stage_;
+
 
     static constexpr uint32_t kWords = 4096;
     static constexpr uint32_t kMaxSamples = 256;
     bool initialize(int sample_capacity);
+    bool create_compute_pipeline(const godot::PackedByteArray &bytecode,
+                                 VkPipeline &created, std::string &failure_stage,
+                                 std::string &failure_reason);
+    godot::Dictionary shader_reload_result(bool ok, const char *error) const;
+
     bool create_buffer(VkDeviceSize bytes, VkBufferUsageFlags usage,
                        VkMemoryPropertyFlags required, VkBuffer &buffer,
                        VkDeviceMemory &memory);

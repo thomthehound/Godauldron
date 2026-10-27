@@ -97,6 +97,15 @@ func _verify() -> void:
 	var original: Node = host.get("_active_scene")
 	host.set("_active_scene", provider)
 	host.call("_inspect_provider_pipelines")
+	var reload_button: Button = host.get("_reload_shader_button")
+	if reload_button == null:
+		_fail("Laboratory did not present its provider-owned shader reload action")
+		return
+	host.call("_reload_provider_shader")
+	if provider.reload_calls != 1 or \
+			not String((host.get("_status") as Label).text).contains("generation 1"):
+		_fail("Host did not route idle reload directly to active provider")
+		return
 	var label: Label = host.get("_pipeline_lifecycle_label")
 	if not label.text.contains("3 bound") or not label.text.contains("0 failed prepares"):
 		_fail("Host did not display explicit provider-owned pipeline evidence")
@@ -109,6 +118,11 @@ func _verify() -> void:
 	if label.text != old_text or \
 			not (host.get("_status") as Label).text.contains("unavailable during measurement"):
 		_fail("Host queried pipeline diagnostics while benchmark active")
+		return
+	host.call("_reload_provider_shader")
+	if provider.reload_calls != 1 or \
+			not (host.get("_status") as Label).text.contains("unavailable during measured runs"):
+		_fail("Host allowed provider shader reload inside measured run")
 		return
 	host.set("_run", null)
 	host.set("_active_scene", original)

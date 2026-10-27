@@ -89,11 +89,11 @@ func begin_stream(seeds: PackedInt32Array, repetitions: int,
 			seeds.is_empty() or seeds.size() > 32 or \
 			repetitions < 1 or repetitions > 256 or \
 			repetitions * seeds.size() > 2048 or \
-			warmup < _capacity * readback_interval or warmup > 64 or
-			samples < 2 or samples > 1024 or
-			readback_interval < 1 or readback_interval > 16 or
-			(warmup % readback_interval) != 0 or
-			(samples % readback_interval) != 0 or
+			warmup < _capacity * readback_interval or warmup > 64 or \
+			samples < 2 or samples > 1024 or \
+			readback_interval < 1 or readback_interval > 16 or \
+			(warmup % readback_interval) != 0 or \
+			(samples % readback_interval) != 0 or \
 			repetitions * seeds.size() * readback_interval > 32768:
 		return false
 	for seed in seeds:

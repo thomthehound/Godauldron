@@ -273,6 +273,13 @@ jobs:
         run: |
           & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_inflight_smoke.gd
           if ($LASTEXITCODE -ne 0) { throw "D3D12 native RD in-flight ring test failed" }
+      - name: Verify autonomous D3D12 sustained stream with measured host overhead
+        shell: pwsh
+        run: |
+          & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_stream_profile.gd -- --mode software --width 13 --height 9 --slots 3 --warmup 3 --samples 12 --passes 3 --resident_batches 2 --output res://native_rd_warp_stream.json
+          if ($LASTEXITCODE -ne 0) { throw "D3D12 WARP sustained native RD workload failed" }
+          python tools/validate_native_rd_stream_profile.py native_rd_warp_stream.json --mode software
+          if ($LASTEXITCODE -ne 0) { throw "Sustained native RD throughput evidence failed validation" }
       - name: Verify on-device profiler collects WARP GPU execution and distinct timing domains
         shell: pwsh
         run: |

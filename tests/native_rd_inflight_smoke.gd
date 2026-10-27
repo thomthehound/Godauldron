@@ -5,6 +5,7 @@ extends SceneTree
 const Package = preload("res://scripts/native_experiment_package.gd")
 const WIDTH := 13
 const HEIGHT := 9
+const ELEMENTS := WIDTH * HEIGHT
 const CAPACITY := 3
 const REQUESTS := [
 	{"seeds": [2, 4, 6], "repetitions": 1},
@@ -152,6 +153,60 @@ func _run() -> void:
 	if not terminal.get("released", false) or 			int(terminal.get("released_slots", -1)) != CAPACITY or 			not String(terminal.get("error", "")).is_empty():
 		_fail("Ring failed to retire all GPU resources: " + str(terminal))
 		return
+	# A second ring runs a sustained finite stream without host-managed
+	# per-batch submissions or full-size per-batch pixel scans.
+	var streaming: CompositorEffect = effect_script.new(WIDTH, HEIGHT, CAPACITY)
+	var stream_effects: Array[CompositorEffect] = [streaming]
+	compositor.compositor_effects = stream_effects
+	if bool(streaming.call("begin_stream", PackedInt32Array([2, 4]), 2, 2, 8)) or \
+			not bool(streaming.call("begin_stream", PackedInt32Array([2, 4]), 2, 3, 12)):
+		_fail("Sustained stream accepted insufficient warmup or rejected valid work")
+		return
+	if int(streaming.call("submit_series", PackedInt32Array([1]), 1)) != -1 or \
+			bool(streaming.call("request_release")):
+		_fail("Autonomous ring allowed competing submission or premature retirement")
+		return
+	var stream_done: Dictionary = {}
+	for frame in range(600):
+		await process_frame
+		stream_done = streaming.call("stream_snapshot")
+		if not String(stream_done.get("error", "")).is_empty() or \
+				stream_done.get("finished", false):
+			break
+	if not stream_done.get("finished", false) or \
+			int(stream_done.get("submitted", -1)) != 15 or \
+			int(stream_done.get("completed", -1)) != 15 or \
+			int(stream_done.get("sentinel_checked", -1)) != 15 or \
+			int(stream_done.get("created_slots", -1)) != CAPACITY or \
+			int(stream_done.get("high_water_in_flight", -1)) != CAPACITY or \
+			int(stream_done.get("measured_elapsed_usec", 0)) <= 0 or \
+			int(stream_done.get("in_flight", -1)) != 0 or \
+			not String(stream_done.get("error", "")).is_empty():
+		_fail("Autonomous stream did not keep native readback slots busy: " + str(stream_done))
+		return
+	var final_bytes: PackedByteArray = streaming.call("take_stream_final")
+	if final_bytes.size() != ELEMENTS * 4:
+		_fail("Autonomous stream omitted final output or refused retirement")
+		return
+	for pixel in range(ELEMENTS):
+		if final_bytes.decode_u32(pixel * 4) != 12 + 4 * pixel:
+			_fail("Autonomous stream final output mismatch at pixel %d" % pixel)
+			return
+	if not bool(streaming.call("request_release")):
+		_fail("Autonomous ring refused retirement after output validation")
+		return
+	var stream_released: Dictionary = {}
+	for frame in range(210):
+		await process_frame
+		stream_released = streaming.call("status")
+		if stream_released.get("released", false) or \
+				not String(stream_released.get("error", "")).is_empty():
+			break
+	if not stream_released.get("released", false) or \
+			int(stream_released.get("released_slots", -1)) != CAPACITY:
+		_fail("Autonomous stream leaked resources: " + str(stream_released))
+		return
+
 	camera.compositor = null
 	print("Native RD in-flight ring passed: ", REQUESTS.size(),
 		" independently verified submissions, ", CAPACITY,

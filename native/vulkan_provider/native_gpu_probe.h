@@ -80,7 +80,9 @@ private:
     int64_t shader_create_host_usec_ = 0;
     int64_t pipeline_create_host_usec_ = 0;
     int64_t descriptor_create_host_usec_ = 0;
+    int64_t prepare_total_host_usec_ = 0;
     std::string pipeline_failure_stage_;
+    std::string pipeline_prepare_error_;
 
     static constexpr uint32_t kWords = 4096;
     static constexpr uint32_t kMaxSamples = 256;

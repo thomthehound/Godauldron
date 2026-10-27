@@ -91,6 +91,8 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/gallery_smoke.gd
       - name: Verify provider runtime capability controls, real scene effects and run isolation
         run: .engine/godot --headless --path . --script res://tests/provider_runtime_controls_smoke.gd
+      - name: Verify pipeline lifecycle provenance and idle-only diagnostics
+        run: .engine/godot --headless --path . --script res://tests/pipeline_diagnostics_smoke.gd
       - name: Verify graphics ownership, presets and image persistence
         run: .engine/godot --headless --path . --script res://tests/capture_graphics_smoke.gd
       - name: Verify camera-only exposure grading and provider Environment preservation

@@ -29,8 +29,9 @@ void NativeRDWorkload::_bind_methods() {
 }
 
 // Read-only witness of the exact D3D12 device and DXGI adapter obtained
-// from Godot's public RenderingDevice driver-resource API. Never AddRef,
-// Release, cache, submit to, or otherwise take ownership of these objects.
+// from Godot's public RenderingDevice driver-resource API. Never cache,
+// submit to, or take ownership of these objects. QueryInterface takes a
+// temporary IDXGIAdapter1 reference, balanced immediately by Release.
 Dictionary NativeRDWorkload::inspect_d3d12_adapter(
         int64_t device_handle, int64_t adapter_handle) const {
     Dictionary result;
@@ -42,10 +43,21 @@ Dictionary NativeRDWorkload::inspect_d3d12_adapter(
     }
     auto *device = reinterpret_cast<ID3D12Device *>(
             static_cast<uintptr_t>(device_handle));
-    auto *adapter = reinterpret_cast<IDXGIAdapter1 *>(
+    // Godot exposes an IDXGIAdapter, not an IDXGIAdapter1. Always query
+    // for the derived interface rather than reinterpret the base vtable.
+    auto *adapter = reinterpret_cast<IDXGIAdapter *>(
             static_cast<uintptr_t>(adapter_handle));
+    IDXGIAdapter1 *adapter1 = nullptr;
+    if (FAILED(adapter->QueryInterface(__uuidof(IDXGIAdapter1),
+                                       reinterpret_cast<void **>(&adapter1))) ||
+        adapter1 == nullptr) {
+        result["error"] = "dxgi_adapter1_interface_unavailable";
+        return result;
+    }
     DXGI_ADAPTER_DESC1 desc{};
-    if (FAILED(adapter->GetDesc1(&desc))) {
+    const HRESULT hr = adapter1->GetDesc1(&desc);
+    adapter1->Release();
+    if (FAILED(hr)) {
         result["error"] = "dxgi_adapter_descriptor_unavailable";
         return result;
     }

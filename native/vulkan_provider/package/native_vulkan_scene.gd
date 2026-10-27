@@ -84,7 +84,7 @@ func godauldron_reload_shader_from_source(path: String) -> Dictionary:
 	if _reload_language == "hlsl":
 		args = PackedStringArray([
 			"-spirv", "-T", "cs_6_6", "-E", "main",
-			"-fspv-target-env=vulkan1.2",
+			"-fspv-target-env=vulkan1.1",
 			"-Fo", output_file, source_file
 		])
 	else:

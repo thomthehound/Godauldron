@@ -3,6 +3,7 @@ extends SceneTree
 ## inter-dispatch barriers on Godot's Forward+ RenderingDevice.
 
 const Package = preload("res://scripts/native_experiment_package.gd")
+const PipelineDiagnostics = preload("res://scripts/provider_pipeline_diagnostics.gd")
 const WIDTH := 13
 const HEIGHT := 9
 const ELEMENTS := WIDTH * HEIGHT
@@ -300,6 +301,27 @@ func _run() -> void:
 		_fail("Second native adapter did not release its Godot GPU resources")
 		return
 	camera.compositor = null
+	if windows_d3d12:
+		# The actual laboratory scene must expose the same effect-owned
+		# HLSL pipeline replacement, not a second host-built DX12 PSO.
+		var queued: Dictionary = stage.call("godauldron_reload_shader")
+		if not queued.get("ok", false) or not queued.get("queued", false):
+			_fail("RD provider scene could not request explicit DXC shader reload: " + str(queued))
+			return
+		var scene_report: Dictionary = {}
+		for frame in range(210):
+			await process_frame
+			scene_report = stage.call("godauldron_pipeline_diagnostics")
+			var entries: Array = scene_report.get("pipelines", [])
+			if not entries.is_empty() and int(entries[0].get("reload_generation", 0)) == 1:
+				break
+		var inspected: Dictionary = PipelineDiagnostics.read(stage)
+		if not inspected.get("available", false) or \
+				inspected["pipelines"].size() != 1 or \
+				int(inspected["pipelines"][0].get("reload_generation", 0)) != 1 or \
+				inspected.get("source_reload", {}).get("active_language") != "hlsl":
+			_fail("Host-visible RD provider HLSL pipeline/diagnostic integration failed: " + str(inspected))
+			return
 	print("Persistent native workload validated: ", BATCHES.size(),
 		" completed batches, ", total_dispatches,
 		" native dispatches, driver=", expected_driver,

@@ -365,6 +365,22 @@ func _run() -> void:
 		return
 	camera.compositor = null
 	if windows_d3d12:
+		# Source selection is a provider-owned runtime setting, not an
+		# assertion that another shader has been compiled or accepted.
+		var options: Array[Dictionary] = stage.call("godauldron_runtime_controls")
+		if options.size() != 1 or options[0].get("value") != "hlsl" or \
+				options[0].get("options", []).size() != 2 or \
+				not stage.call("godauldron_set_runtime_control", "shader_reload_language", "glsl").get("ok", false):
+			_fail("RD provider does not offer both source languages")
+			return
+		var unmodified: Dictionary = stage.call("godauldron_pipeline_diagnostics")
+		if unmodified.get("source_reload", {}).get("selected_language") != "glsl" or \
+				unmodified.get("source_reload", {}).get("active_language") != "embedded_spirv":
+			_fail("GLSL selection falsely claimed a compiled RD pipeline")
+			return
+		if not stage.call("godauldron_set_runtime_control", "shader_reload_language", "hlsl").get("ok", false):
+			_fail("RD provider could not restore default HLSL selection")
+			return
 		# The actual laboratory scene must expose the same effect-owned
 		# HLSL pipeline replacement, not a second host-built DX12 PSO.
 		var queued: Dictionary = stage.call("godauldron_reload_shader")

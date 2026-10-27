@@ -216,7 +216,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python tools/fetch_preview.py --major 4 --platform win64.exe
-      - name: Configure and compile C++23 native RD-only extension
+      - name: Identify MSVC toolchain
+        id: msvc
         shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\\Installer\\vswhere.exe"
@@ -229,8 +230,18 @@ jobs:
             17 { "Visual Studio 17 2022" }
             default { throw "Unsupported installed Visual Studio version: $version" }
           }
-          Write-Host "Building native C++23 extension with $generator ($version)"
-          cmake -S native/vulkan_provider -B .native-rd-windows-build -G $generator -A x64 -DGODAULDRON_RD_ONLY=ON
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "generator=$generator" >> $env:GITHUB_OUTPUT
+      - name: Cache native RD Windows build
+        uses: actions/cache@v4
+        with:
+          path: .native-rd-windows-build
+          key: native-rd-windows-${{ runner.os }}-${{ runner.arch }}-${{ steps.msvc.outputs.version }}-${{ hashFiles('native/vulkan_provider/CMakeLists.txt') }}
+      - name: Configure and compile C++23 native RD-only extension
+        shell: pwsh
+        run: |
+          Write-Host "Building native C++23 extension with ${{ steps.msvc.outputs.generator }} (${{ steps.msvc.outputs.version }})"
+          cmake -S native/vulkan_provider -B .native-rd-windows-build -G "${{ steps.msvc.outputs.generator }}" -A x64 -DGODAULDRON_RD_ONLY=ON
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build .native-rd-windows-build --config Release --parallel 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

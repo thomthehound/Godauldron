@@ -3,6 +3,7 @@ extends SceneTree
 ## Proves controller arithmetic, scene bounds and overlay isolation; not GPU rendering.
 
 const InspectionCamera = preload("res://scripts/inspection_camera.gd")
+const PixelInspector = preload("res://scripts/pixel_inspector.gd")
 
 
 func _initialize() -> void:
@@ -24,6 +25,34 @@ func _select_reference(host: Node) -> bool:
 
 
 func _verify() -> void:
+	# Tiny RGBA image proves that clamped display borders never bias the
+	# numeric neighborhood mean, and that input coordinates stay bounded.
+	var pixels := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	pixels.set_pixel(0, 0, Color8(255, 0, 0))
+	pixels.set_pixel(1, 0, Color8(0, 255, 0))
+	pixels.set_pixel(0, 1, Color8(0, 0, 255))
+	pixels.set_pixel(1, 1, Color8(255, 255, 255))
+	var measured: Dictionary = PixelInspector.sample(pixels, Vector2.ZERO,
+		Vector2(200, 100), 9)
+	var mean_rgb: Array = measured.get("rgb_mean", [])
+	if not measured.get("ok", false) or \
+			measured.get("point") != Vector2i.ZERO or \
+			measured.get("rgba8") != [255, 0, 0, 255] or \
+			int(measured.get("sampled_pixels", -1)) != 4 or \
+			int(measured.get("clamped_border_texels", -1)) != 77 or \
+			mean_rgb.size() != 3 or \
+			absf(float(mean_rgb[0]) - 127.5) > 0.01 or \
+			absf(float(mean_rgb[1]) - 127.5) > 0.01 or \
+			absf(float(mean_rgb[2]) - 127.5) > 0.01 or \
+			absf(float(measured.get("encoded_luma_mean", 0.0)) - 127.5) > 0.1:
+		_fail("Pixel neighborhood analysis biased its clamped border")
+		return
+	if bool(PixelInspector.sample(pixels, Vector2(200, 50),
+			Vector2(200, 100), 9).get("ok", false)) or \
+			bool(PixelInspector.sample(pixels, Vector2.ZERO,
+			Vector2(200, 100), 10).get("ok", false)):
+		_fail("Pixel inspector accepted invalid coordinates or region size")
+		return
 	var packed: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	if packed == null:
 		_fail("Main scene missing")

@@ -8,6 +8,12 @@ var _native: Node3D
 # Edit this shader and click Reload provider shader in the laboratory.
 @export_file("*.comp") var shader_source_path := "res://experiments/native-vulkan-provider/reload_compute.comp"
 @export var shader_compiler := "glslangValidator"
+@export_file("*.hlsl") var hlsl_source_path := "res://experiments/native-vulkan-provider/reload_compute.hlsl"
+@export var hlsl_compiler := "dxc"
+
+# Selection only chooses the next source compile. It never changes an active
+# GPU pipeline until the provider successfully replaces that pipeline.
+var _reload_language := "glsl"
 
 
 var _source_reload := {
@@ -15,8 +21,32 @@ var _source_reload := {
 	"failures": 0,
 	"last_stage": "none",
 	"last_error": "",
-	"source": ""
+	"source": "",
+	"language": "glsl",
+	"active_language": "embedded_spirv",
+	"compiler": ""
 }
+
+
+func godauldron_runtime_controls() -> Array[Dictionary]:
+	return [{
+		"id": "shader_reload_language",
+		"label": "Reload shader source",
+		"type": "choice",
+		"mode": "live",
+		"value": _reload_language,
+		"options": [
+			{"label": "GLSL", "value": "glsl"},
+			{"label": "HLSL (DXC)", "value": "hlsl"}
+		]
+	}]
+
+
+func godauldron_set_runtime_control(id: String, value: Variant) -> Dictionary:
+	if id != "shader_reload_language" or value not in ["glsl", "hlsl"]:
+		return {"ok": false, "error": "Unsupported shader source language"}
+	_reload_language = value
+	return {"ok": true}
 
 
 func _reload_rejected(stage: String, reason: String) -> Dictionary:
@@ -27,12 +57,15 @@ func _reload_rejected(stage: String, reason: String) -> Dictionary:
 
 
 func godauldron_reload_shader() -> Dictionary:
-	return godauldron_reload_shader_from_source(shader_source_path)
+	var selected_path: String = hlsl_source_path if _reload_language == "hlsl" else shader_source_path
+	return godauldron_reload_shader_from_source(selected_path)
 
 
 func godauldron_reload_shader_from_source(path: String) -> Dictionary:
 	_source_reload["attempts"] += 1
 	_source_reload["source"] = path.substr(0, 240)
+	_source_reload["language"] = _reload_language
+	_source_reload["compiler"] = hlsl_compiler if _reload_language == "hlsl" else shader_compiler
 	if _native == null:
 		return _reload_rejected("provider", "Native Vulkan provider not installed")
 	if not FileAccess.file_exists(path):
@@ -45,11 +78,19 @@ func godauldron_reload_shader_from_source(path: String) -> Dictionary:
 			"Native provider is not idle or prior GPU submissions remain unresolved")
 	var output_path: String = "user://godauldron_shader_reload_%d.spv" % Time.get_ticks_usec()
 	var compiler_messages: Array = []
-	var exit_code: int = OS.execute(shader_compiler, PackedStringArray([
-		"-V", "-S", "comp", "-o",
-		ProjectSettings.globalize_path(output_path),
-		ProjectSettings.globalize_path(path)
-	]), compiler_messages, true)
+	var output_file: String = ProjectSettings.globalize_path(output_path)
+	var source_file: String = ProjectSettings.globalize_path(path)
+	var args := PackedStringArray()
+	if _reload_language == "hlsl":
+		args = PackedStringArray([
+			"-spirv", "-T", "cs_6_6", "-E", "main",
+			"-fspv-target-env=vulkan1.2",
+			"-Fo", output_file, source_file
+		])
+	else:
+		args = PackedStringArray(["-V", "-S", "comp", "-o", output_file, source_file])
+	var compiler: String = hlsl_compiler if _reload_language == "hlsl" else shader_compiler
+	var exit_code: int = OS.execute(compiler, args, compiler_messages, true)
 	if exit_code != 0:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
 		return _reload_rejected("compile", ("Shader compiler failed (%d): " % exit_code) +
@@ -67,6 +108,8 @@ func godauldron_reload_shader_from_source(path: String) -> Dictionary:
 		return applied
 	_source_reload["last_stage"] = "applied"
 	_source_reload["last_error"] = ""
+	_source_reload["active_language"] = _reload_language
+	applied["source_language"] = _reload_language
 	return applied
 
 

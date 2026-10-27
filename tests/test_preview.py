@@ -1,7 +1,7 @@
 """Rolling-release policy regressions."""
 import unittest
 
-from tools.fetch_preview import choose_asset, order
+from tools.fetch_preview import choose_asset, order, select_executable
 
 
 def release(tag: str, platform: str = "linux.x86_64", *, draft: bool = False) -> dict:
@@ -40,6 +40,29 @@ class PreviewSelectionTests(unittest.TestCase):
         ]
         tag, _ = choose_asset(releases, "linux.x86_64")
         self.assertEqual(tag, "4.8-beta1")
+
+    def test_windows_console_release_executable(self):
+        entries = [
+            "Godot_v4.8-beta1_win64.exe",
+            "Godot_v4.8-beta1_win64_console.exe",
+            "Godot_v4.8-beta1_win64.exe.import",
+        ]
+        self.assertEqual(
+            select_executable(entries, "win64.exe"),
+            "Godot_v4.8-beta1_win64_console.exe",
+        )
+        with self.assertRaisesRegex(RuntimeError, "Expected one"):
+            select_executable(["Godot_v4.8-beta1_win64.exe"], "win64.exe")
+        self.assertEqual(
+            select_executable(["Godot_v4.8-beta1_linux.x86_64"], "linux.x86_64"),
+            "Godot_v4.8-beta1_linux.x86_64",
+        )
+
+    def test_windows_asset_name(self):
+        self.assertEqual(
+            choose_asset([release("4.8-beta1", "win64.exe")], "win64.exe", major=4)[0],
+            "4.8-beta1",
+        )
 
     def test_missing_major_fails_explicitly(self):
         with self.assertRaisesRegex(RuntimeError, "No matching"):

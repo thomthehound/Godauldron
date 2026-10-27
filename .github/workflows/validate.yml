@@ -61,6 +61,8 @@ jobs:
         run: .engine/godot --headless --path . --script res://tests/campaign_smoke.gd
       - name: Verify host observability statistics and provider GPU provenance
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/observability_smoke.gd
+      - name: Verify resolved native-provider queue timelines and CPU wait isolation
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/provider_gpu_timeline_smoke.gd
       - name: Verify bounded messages console and post-run provider diagnostics
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/diagnostics_console_smoke.gd
       - name: Verify renderer viewport timing and hardware provenance
@@ -95,6 +97,25 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/session_smoke.gd
       - name: Verify fixed-step sequence writer, provenance and host exclusion
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/frame_sequence_smoke.gd
+
+  windows-native-timeline:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download current Godot 4 for Windows (console)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/fetch_preview.py --major 4 --platform win64.exe
+      - name: Import project on Windows
+        run: .\.engine\godot_console.exe --headless --path . --editor --import --quit
+      - name: Verify provider GPU queue timeline and lifecycle on Windows
+        run: .\.engine\godot_console.exe --headless --path . --script res://tests/provider_gpu_timeline_smoke.gd
+      - name: Verify legacy provider timing remains compatible
+        run: .\.engine\godot_console.exe --headless --path . --script res://tests/observability_smoke.gd
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

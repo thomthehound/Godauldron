@@ -26,6 +26,10 @@ var _batch_sequence := 0
 var _last_resolved_frame := -1
 var _gpu_intervals: Dictionary = {}
 var _rejected_gpu_intervals := 0
+var _reload_bytecode := PackedByteArray()
+var _reload_result: Dictionary = {}
+var _source_reload: Dictionary = {}
+
 
 
 func _init(width: int = 8, height: int = 8,
@@ -67,6 +71,75 @@ func request_series(seeds: PackedInt32Array, repetitions: int) -> bool:
 		_failure = ""
 	_mutex.unlock()
 	return allowed
+
+
+# One explicit host-side compile per request. All native RIDs are created,
+# swapped and destroyed by the compositor on Godot's render thread.
+func request_reload_spirv(bytecode: PackedByteArray) -> bool:
+	if bytecode.is_empty() or bytecode.size() > 1024 * 1024:
+		return false
+	_mutex.lock()
+	var allowed: bool = _phase in ["idle", "consumed"]
+	if allowed:
+		_reload_bytecode = bytecode.duplicate()
+		_reload_result = {}
+		_phase = "reload_armed"
+	_mutex.unlock()
+	return allowed
+
+
+func request_hlsl_reload(source_path: String,
+		compiler: String = "dxc") -> Dictionary:
+	_mutex.lock()
+	var available: bool = _phase in ["idle", "consumed"]
+	if available:
+		_phase = "compiling"
+	_mutex.unlock()
+	if not available:
+		return {"ok": false, "error": "native_rd_pipeline_not_idle"}
+	var compile_result: Dictionary = {}
+	var output_path: String = "user://native_rd_hlsl_%d.spv" % Time.get_ticks_usec()
+	if not FileAccess.file_exists(source_path):
+		compile_result = {"ok": false, "error": "native_rd_hlsl_source_missing"}
+	else:
+		var logs: Array = []
+		var exit_code: int = OS.execute(compiler, PackedStringArray([
+			"-spirv", "-T", "cs_6_6", "-E", "main",
+			"-fspv-target-env=vulkan1.1",
+			"-Fo", ProjectSettings.globalize_path(output_path),
+			ProjectSettings.globalize_path(source_path)
+		]), logs, true)
+		if exit_code != 0:
+			compile_result = {"ok": false, "error":
+				"DXC failed (%d): %s" % [exit_code, str(logs).substr(0, 1200)]}
+		else:
+			var bytes: PackedByteArray = FileAccess.get_file_as_bytes(output_path)
+			if bytes.is_empty() or bytes.size() > 1024 * 1024:
+				compile_result = {"ok": false, "error": "DXC generated no valid bytecode"}
+			else:
+				compile_result = {"ok": true, "bytes": bytes}
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
+	_mutex.lock()
+	if compile_result.get("ok", false):
+		_reload_bytecode = compile_result["bytes"]
+		_phase = "reload_armed"
+	else:
+		_phase = "consumed"
+		_source_reload = {"ok": false, "stage": "compile",
+			"error": compile_result.get("error", "DXC failed")}
+	_mutex.unlock()
+	if compile_result.get("ok", false):
+		return {"ok": true, "queued": true}
+	return compile_result
+
+
+func reload_snapshot() -> Dictionary:
+	_mutex.lock()
+	var report := _reload_result.duplicate(true)
+	report["phase"] = _phase
+	report["source_reload"] = _source_reload.duplicate(true)
+	_mutex.unlock()
+	return report
 
 
 func take_batch() -> Dictionary:
@@ -249,7 +322,7 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	if action == "armed":
 		_phase = "in_flight"
 	_mutex.unlock()
-	if action not in ["armed", "release_requested"] and not _profiling:
+	if action not in ["armed", "release_requested", "reload_armed"] and not _profiling:
 		return
 	var rd: RenderingDevice = RenderingServer.get_rendering_device()
 	if rd == null:
@@ -257,7 +330,21 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 		return
 	if _profiling:
 		_harvest_gpu_timestamps(rd)
-	if action not in ["armed", "release_requested"]:
+	if action not in ["armed", "release_requested", "reload_armed"]:
+		return
+	if action == "reload_armed":
+		# A queued batch is never allowed to race resource replacement.
+		if not _ensure_workload(rd):
+			return
+		_mutex.lock()
+		var candidate: PackedByteArray = _reload_bytecode
+		_reload_bytecode = PackedByteArray()
+		_mutex.unlock()
+		var replacement: Dictionary = _workload.call("replace_spirv", rd, candidate)
+		_mutex.lock()
+		_reload_result = replacement.duplicate(true)
+		_phase = "consumed"
+		_mutex.unlock()
 		return
 	if action == "release_requested":
 		var report: Dictionary = {}

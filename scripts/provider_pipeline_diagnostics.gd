@@ -58,8 +58,14 @@ static func read(scene: Node) -> Dictionary:
 		# Descriptor sets can be allocated before the shader/pipeline (native
 		# Vulkan), after them (Godot RenderingDevice), or multiple per pipeline.
 		# They do not imply a successful pipeline creation.
+		# Native reloads create additional shader modules and pipelines
+		# without making another preparation attempt. Keep the causal bound
+		# tied to both creation entry points rather than the initial setup.
+		var reloads := int(item.get("reload_attempts", 0))
+		if typeof(item.get("reload_attempts", 0)) != TYPE_INT or reloads < 0:
+			return unavailable("invalid_reload_attempts")
 		if entry["prepare_failures"] > entry["prepare_attempts"] or \
-				entry["shader_creations"] > entry["prepare_attempts"] or \
+				entry["shader_creations"] > entry["prepare_attempts"] + reloads or \
 				entry["pipeline_creations"] > entry["shader_creations"] or \
 				(entry["pipeline_binds"] > 0 and entry["pipeline_creations"] == 0):
 			return unavailable("inconsistent_pipeline_lifecycle")
@@ -71,6 +77,24 @@ static func read(scene: Node) -> Dictionary:
 			return unavailable("invalid_pipeline_failure_evidence")
 		entry["last_prepare_error"] = failure
 		entry["last_prepare_failure_stage"] = stage
+		if item.has("reload_attempts"):
+			for key in ["reload_attempts", "reload_generation", "reload_failures",
+					"reload_retired_pipelines", "reload_host_usec"]:
+				if typeof(item.get(key)) != TYPE_INT or int(item[key]) < 0:
+					return unavailable("invalid_reload_measurement_" + key)
+				entry[key] = item[key]
+			if int(item["reload_generation"]) + int(item["reload_failures"]) != reloads or \
+					int(item["reload_retired_pipelines"]) != int(item["reload_generation"]):
+				return unavailable("inconsistent_pipeline_reload_lifecycle")
+			if typeof(item.get("reload_available")) != TYPE_BOOL or \
+					typeof(item.get("reload_error")) != TYPE_STRING or \
+					String(item["reload_error"]).length() > MAX_LABEL or \
+					item.get("reload_failure_stage") not in ["", "shader", "pipeline",
+						"lifecycle", "in_flight"]:
+				return unavailable("invalid_pipeline_reload_failure")
+			entry["reload_available"] = item["reload_available"]
+			entry["reload_error"] = item["reload_error"]
+			entry["reload_failure_stage"] = item["reload_failure_stage"]
 		measured.append(entry)
 	return {"available": true, "provider": provider, "backend": backend,
 		"pipelines": measured, "timing_domain": "host_wall_microseconds",
@@ -102,4 +126,12 @@ static func summary(report: Dictionary) -> String:
 		pipelines.size(), count, binds, failures, float(host_usec) / 1000.0]
 	if not failed_stages.is_empty():
 		line += "; failed stages: " + "; ".join(failed_stages)
+	for entry in pipelines:
+		if entry.has("reload_generation"):
+			line += "; reload %s generation %d, %d failed, %d retired" % [
+				String(entry["name"]), int(entry["reload_generation"]),
+				int(entry["reload_failures"]), int(entry["reload_retired_pipelines"])]
+			if not String(entry["reload_error"]).is_empty():
+				line += "; last reload %s: %s" % [
+					String(entry["reload_failure_stage"]), String(entry["reload_error"])]
 	return line

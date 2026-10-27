@@ -26,47 +26,46 @@ void NativeGpuProbe3D::_bind_methods() {
                          &NativeGpuProbe3D::godauldron_resolved_gpu_timeline);
     ClassDB::bind_method(D_METHOD("godauldron_metrics"),
                          &NativeGpuProbe3D::godauldron_metrics);
-    ClassDB::bind_method(D_METHOD("inspect_godot_vulkan_buffer", "device",
-                                 "physical_device", "buffer", "requested_bytes"),
-                         &NativeGpuProbe3D::inspect_godot_vulkan_buffer);
+    ClassDB::bind_method(D_METHOD("inspect_godot_vulkan_image", "device",
+                                 "physical_device", "image", "requested_bytes"),
+                         &NativeGpuProbe3D::inspect_godot_vulkan_image);
 }
 
 NativeGpuProbe3D::~NativeGpuProbe3D() {
     cleanup();
 }
 
-// A native GDExtension can consume the driver's actual same-device handles
-// without owning them. Caller must be the compositor rendering callback,
-// with a live Godot-owned buffer. This performs NO queue operations or writes.
-Dictionary NativeGpuProbe3D::inspect_godot_vulkan_buffer(
+// Read-only Vulkan query of a live Godot-owned VkImage obtained from the
+// public RenderingDevice DRIVER_RESOURCE_TEXTURE path. No queue submission.
+// In current Godot Vulkan, DRIVER_RESOURCE_BUFFER returns an internal
+// BufferInfo pointer rather than a VkBuffer. NEVER reinterpret that as Vulkan.
+Dictionary NativeGpuProbe3D::inspect_godot_vulkan_image(
         int64_t borrowed_device, int64_t borrowed_physical_device,
-        int64_t borrowed_buffer, int64_t requested_bytes) const {
+        int64_t borrowed_image, int64_t requested_bytes) const {
     Dictionary out;
     out["available"] = false;
     if (borrowed_device == 0 || borrowed_physical_device == 0 ||
-        borrowed_buffer == 0 || requested_bytes <= 0 ||
+        borrowed_image == 0 || requested_bytes <= 0 ||
         requested_bytes > 16 * 1024 * 1024) {
-        out["reason"] = "invalid_engine_native_handles_or_size";
+        out["reason"] = "invalid_engine_native_image_handles_or_size";
         return out;
     }
-    // A Vulkan buffer is an opaque handle on this very VkDevice. Query its
-    // memory requirements, not its contents or Godot's VMA allocation.
     VkDevice device = reinterpret_cast<VkDevice>(static_cast<uintptr_t>(borrowed_device));
     VkPhysicalDevice physical =
         reinterpret_cast<VkPhysicalDevice>(static_cast<uintptr_t>(borrowed_physical_device));
-    VkBuffer buffer = VK_NULL_HANDLE;
+    VkImage image = VK_NULL_HANDLE;
 #if VK_USE_64_BIT_PTR_DEFINES
-    buffer = reinterpret_cast<VkBuffer>(static_cast<uintptr_t>(borrowed_buffer));
+    image = reinterpret_cast<VkImage>(static_cast<uintptr_t>(borrowed_image));
 #else
-    buffer = static_cast<VkBuffer>(borrowed_buffer);
+    image = static_cast<VkImage>(borrowed_image);
 #endif
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(physical, &properties);
     VkMemoryRequirements requirements{};
-    vkGetBufferMemoryRequirements(device, buffer, &requirements);
+    vkGetImageMemoryRequirements(device, image, &requirements);
     if (requirements.size < static_cast<VkDeviceSize>(requested_bytes) ||
         requirements.memoryTypeBits == 0 || requirements.alignment == 0) {
-        out["reason"] = "borrowed_buffer_memory_requirements_invalid";
+        out["reason"] = "borrowed_image_memory_requirements_invalid";
         return out;
     }
     out["available"] = true;
@@ -78,11 +77,10 @@ Dictionary NativeGpuProbe3D::inspect_godot_vulkan_buffer(
     out["device_name"] = String(properties.deviceName);
     out["vendor_id"] = static_cast<int64_t>(properties.vendorID);
     out["device_id"] = static_cast<int64_t>(properties.deviceID);
-    out["buffer_required_bytes"] = requested_bytes;
-    out["buffer_allocation_requirement_bytes"] =
+    out["image_required_bytes"] = requested_bytes;
+    out["image_allocation_requirement_bytes"] =
         static_cast<int64_t>(requirements.size);
-    out["buffer_allocation_alignment"] = static_cast<int64_t>(requirements.alignment);
-    // Do not return borrowed raw device/queue/buffer pointers or retain them.
+    out["image_allocation_alignment"] = static_cast<int64_t>(requirements.alignment);
     return out;
 }
 

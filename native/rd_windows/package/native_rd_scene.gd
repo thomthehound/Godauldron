@@ -58,6 +58,13 @@ func godauldron_pipeline_diagnostics() -> Dictionary:
 		"pipelines": entries, "source_reload": source}
 
 
+func _exit_tree() -> void:
+	if _reload_effect != null:
+		# The effect queues its RID teardown onto Godot's render thread,
+		# independently of whether this camera renders another frame.
+		_reload_effect.call("request_shutdown")
+
+
 func _ready() -> void:
 	var camera := Camera3D.new()
 	camera.position = Vector3(0, 0, 4)

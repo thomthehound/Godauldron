@@ -39,6 +39,7 @@ func _verify() -> void:
 	box.material_override = material
 	scene.add_child(box)
 	var world := WorldEnvironment.new()
+	world.environment = Environment.new()
 	var original := Compositor.new()
 	var preserved: CompositorEffect = preload("res://scripts/hdr_scene_color_effect.gd").new()
 	preserved.enabled = false

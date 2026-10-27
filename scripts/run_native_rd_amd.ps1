@@ -7,6 +7,7 @@ param(
     [int]$Samples = 12,
     [int]$Passes = 8,
     [int]$ResidentBatches = 1,
+    [int]$StreamSlots = 0,
     [string]$Output = "native_rd_amd_profile.json",
     [string]$Baseline = ""
 )
@@ -36,24 +37,40 @@ try {
     $destination = if ([System.IO.Path]::IsPathRooted($Output)) { $Output } else {
         Join-Path $root $Output
     }
-    $gpuArgs = @("--path", ".", "--rendering-method", "forward_plus", "--rendering-driver", "d3d12",
-        "--script", "res://tests/native_rd_hardware_profile.gd", "--", "--mode", "physical_amd",
-        "--width", "$Width", "--height", "$Height", "--warmup", "$Warmup", "--samples", "$Samples",
-        "--passes", "$Passes", "--resident_batches", "$ResidentBatches", "--output", "$destination")
+    if ($StreamSlots -ne 0 -and ($StreamSlots -lt 2 -or $StreamSlots -gt 4)) {
+        throw "StreamSlots must be 0 (serial) or 2..4 (autonomous)"
+    }
+    $script = if ($StreamSlots -gt 0) {
+        "res://tests/native_rd_stream_profile.gd"
+    } else {
+        "res://tests/native_rd_hardware_profile.gd"
+    }
+    $gpuArgs = @("--path", ".", "--rendering-method", "forward_plus",
+        "--rendering-driver", "d3d12", "--script", $script, "--",
+        "--mode", "physical_amd", "--width", "$Width", "--height", "$Height",
+        "--warmup", "$Warmup", "--samples", "$Samples", "--passes", "$Passes",
+        "--resident_batches", "$ResidentBatches", "--output", "$destination")
+    if ($StreamSlots -gt 0) { $gpuArgs += @("--slots", "$StreamSlots") }
     & $godot @gpuArgs
     if ($LASTEXITCODE -ne 0) { throw "Physical AMD native GPU acceptance failed" }
-    python tools/validate_native_rd_profile.py $destination --mode physical_amd
-    if ($LASTEXITCODE -ne 0) { throw "GPU report validation failed" }
-    $analysisJson = [System.IO.Path]::ChangeExtension($destination, ".analysis.json")
-    $analysisCsv = [System.IO.Path]::ChangeExtension($destination, ".csv")
-    $analysisArgs = @("tools/analyze_native_rd_profile.py", $destination,
-        "--json-output", $analysisJson, "--csv-output", $analysisCsv)
-    if ($Baseline) { $analysisArgs += @("--baseline", $Baseline) }
-    python @analysisArgs
-    if ($LASTEXITCODE -ne 0) { throw "Native RD performance analysis failed" }
-    Write-Host "Validated native AMD report: $destination"
-    Write-Host "Profile analysis: $analysisJson"
-    Write-Host "Per-batch measurements: $analysisCsv"
+    if ($StreamSlots -gt 0) {
+        python tools/validate_native_rd_stream_profile.py $destination --mode physical_amd
+        if ($LASTEXITCODE -ne 0) { throw "Sustained native GPU report validation failed" }
+        Write-Host "Validated sustained native AMD throughput report: $destination"
+    } else {
+        python tools/validate_native_rd_profile.py $destination --mode physical_amd
+        if ($LASTEXITCODE -ne 0) { throw "GPU report validation failed" }
+        $analysisJson = [System.IO.Path]::ChangeExtension($destination, ".analysis.json")
+        $analysisCsv = [System.IO.Path]::ChangeExtension($destination, ".csv")
+        $analysisArgs = @("tools/analyze_native_rd_profile.py", $destination,
+            "--json-output", $analysisJson, "--csv-output", $analysisCsv)
+        if ($Baseline) { $analysisArgs += @("--baseline", $Baseline) }
+        python @analysisArgs
+        if ($LASTEXITCODE -ne 0) { throw "Native RD performance analysis failed" }
+        Write-Host "Validated native AMD report: $destination"
+        Write-Host "Profile analysis: $analysisJson"
+        Write-Host "Per-batch measurements: $analysisCsv"
+    }
 } finally {
     Pop-Location
 }

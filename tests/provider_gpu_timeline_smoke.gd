@@ -162,6 +162,12 @@ func _verify() -> void:
 	if not ui.text.contains("3 queues") or not ui.text.contains("9 events"):
 		_fail("Lab UI failed to attribute completed provider queue intervals")
 		return
+	host.call("_show_provider_gpu_timeline")
+	var viewer: Window = host.get("_provider_timeline_window")
+	if not viewer.visible or viewer.get("_record").get("queues", []).size() != 3:
+		_fail("Completed native provider queue timeline is not browsable in the lab")
+		return
+	viewer.hide()
 	var results: PackedStringArray = DirAccess.get_files_at(destination)
 	if results.size() != 1:
 		_fail("Provider GPU timeline was not saved in the run report")

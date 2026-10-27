@@ -42,6 +42,8 @@ var _stream_callback_cpu_usec := 0
 var _stream_checked := 0
 var _stream_last_bytes := PackedByteArray()
 var _stream_result_taken := false
+var _stream_expected_seed_sum := 0
+var _stream_dispatches := 0
 
 
 func _init(width: int = 13, height: int = 9,
@@ -64,7 +66,7 @@ func submit_series(seeds: PackedInt32Array, repetitions: int = 1) -> int:
 			return -1
 	_mutex.lock()
 	var id := -1
-	if _failure.is_empty() and not _stream_enabled and not _release_requested and not _released and 			_pending.size() + _in_flight < _capacity:
+	if _failure.is_empty() and not _stream_enabled and not _release_requested and not _released and 			_pending.size() + _in_flight + _completed.size() < _capacity:
 		id = _next_id
 		_next_id += 1
 		_accepted += 1
@@ -98,6 +100,10 @@ func begin_stream(seeds: PackedInt32Array, repetitions: int,
 			not _release_requested and not _released
 	if allowed:
 		_stream_seeds = seeds.duplicate()
+		_stream_dispatches = repetitions * seeds.size()
+		_stream_expected_seed_sum = 0
+		for seed in seeds:
+			_stream_expected_seed_sum += seed * repetitions
 		_stream_repetitions = repetitions
 		_stream_warmup = warmup
 		_stream_samples = samples
@@ -263,6 +269,7 @@ func _free_slot(rd: RenderingDevice) -> int:
 
 func _on_readback(data: PackedByteArray, slot_index: int, request_id: int,
 		submitted_usec: int) -> void:
+	var callback_start: int = Time.get_ticks_usec()
 	var slot: Dictionary = _slots[slot_index]
 	if not bool(slot["busy"]) or int(slot["id"]) != request_id:
 		_fail("Readback callback did not match its in-flight resource")
@@ -272,6 +279,33 @@ func _on_readback(data: PackedByteArray, slot_index: int, request_id: int,
 		_fail("Native completion acknowledgement failed: " + str(completed))
 		return
 	slot["busy"] = false
+	if _stream_enabled:
+		# Constant-cost check per readback, regardless of image dimensions.
+		# Full per-pixel verification occurs once, after all measured work.
+		if data.size() != _width * _height * 4:
+			_fail("Autonomous stream readback has incorrect output size")
+			return
+		var count: int = _width * _height
+		for pixel in [0, count / 2, count - 1]:
+			var index: int = int(pixel)
+			if data.decode_u32(index * 4) != \
+					_stream_expected_seed_sum + _stream_dispatches * index:
+				_fail("Autonomous stream GPU result incorrect at request %d pixel %d" %
+					[request_id, index])
+				return
+		var now: int = Time.get_ticks_usec()
+		_mutex.lock()
+		_in_flight -= 1
+		_stream_completed += 1
+		_stream_checked += 1
+		if request_id == _stream_warmup + _stream_samples - 1:
+			_stream_last_bytes = data
+		if _stream_completed == _stream_warmup + _stream_samples:
+			_stream_last_completed_usec = now
+		if request_id >= _stream_warmup:
+			_stream_callback_cpu_usec += now - callback_start
+		_mutex.unlock()
+		return
 	var now: int = Time.get_ticks_usec()
 	var result := {
 		"ok": true, "id": request_id, "bytes": data,
@@ -288,20 +322,16 @@ func _on_readback(data: PackedByteArray, slot_index: int, request_id: int,
 	_completed.append(result)
 	_mutex.unlock()
 
-
 func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	if callback_type != EFFECT_CALLBACK_TYPE_POST_TRANSPARENT:
 		return
 	_mutex.lock()
 	var has_failure: bool = not _failure.is_empty()
 	var retiring: bool = _release_requested and not _released
+	var has_work: bool = not _pending.is_empty() or \
+			(_stream_enabled and _stream_next < _stream_warmup + _stream_samples)
 	_mutex.unlock()
-	if has_failure:
-		return
-	_mutex.lock()
-	var has_pending: bool = not _pending.is_empty()
-	_mutex.unlock()
-	if not retiring and not has_pending:
+	if has_failure or (not retiring and not has_work):
 		return
 	var rd: RenderingDevice = RenderingServer.get_rendering_device()
 	if rd == null:
@@ -325,11 +355,23 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 		_released = true
 		_mutex.unlock()
 		return
+
+	# No host-frame producer loop. Each compositor pass fills every free
+	# slot and the readback callback makes that slot eligible for reuse.
 	while true:
 		_mutex.lock()
 		var request: Dictionary = {}
-		if not _pending.is_empty():
-			request = _pending.pop_front()
+		if _in_flight < _capacity:
+			if not _pending.is_empty():
+				request = _pending.pop_front()
+			elif _stream_enabled and _stream_next < \
+					_stream_warmup + _stream_samples:
+				request = {
+					"id": _stream_next,
+					"seeds": _stream_seeds,
+					"repetitions": _stream_repetitions
+				}
+				_stream_next += 1
 		_mutex.unlock()
 		if request.is_empty():
 			break
@@ -338,21 +380,32 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 			_fail("No independent GPU output slot available")
 			return
 		var slot: Dictionary = _slots[slot_index]
+		var record_start: int = Time.get_ticks_usec()
+		if _stream_enabled and int(request["id"]) == _stream_warmup:
+			_mutex.lock()
+			_stream_first_measured_usec = record_start
+			_mutex.unlock()
 		var record: Dictionary = slot["workload"].call(
 			"record_series", rd, request["seeds"], request["repetitions"])
 		if not bool(record.get("ok", false)):
 			_fail("Native ring dispatch rejected: " + str(record))
 			return
+		if _stream_enabled and int(request["id"]) >= _stream_warmup:
+			_mutex.lock()
+			_stream_record_cpu_usec += Time.get_ticks_usec() - record_start
+			_mutex.unlock()
 		slot["busy"] = true
 		slot["id"] = int(request["id"])
-		slot["record"] = record
+		# Avoid copying diagnostic dictionaries for every streamed batch.
+		if not _stream_enabled:
+			slot["record"] = record
 		_mutex.lock()
 		_in_flight += 1
 		_high_water = maxi(_high_water, _in_flight)
 		_mutex.unlock()
+		var submitted_usec: int = int(request.get("submitted_usec", record_start))
 		var err: Error = rd.texture_get_data_async(slot["image"], 0,
-			_on_readback.bind(slot_index, int(request["id"]),
-				int(request["submitted_usec"])))
+			_on_readback.bind(slot_index, int(request["id"]), submitted_usec))
 		if err != OK:
 			_fail("Native ring async readback rejected: %d" % int(err))
 			return

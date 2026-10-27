@@ -4,6 +4,8 @@ Godauldron is a general-purpose technology experimentation, integration, demonst
 
 Godauldron is not coupled to any particular SDK, graphics vendor, compute backend, or technical domain. Subjects may include render passes, shaders, simulation, physics, hair, animation, upscaling, image processing, rendering middleware, GPU libraries, and unrelated future technologies.
 
+For an evidence-based comparison with AMD FidelityFX Cauldron, including deliberately delegated engine capabilities and open parity gates, see [Cauldron coverage](docs/CAULDRON_PARITY.md).
+
 ## Current implementation
 
 - Interactive Godot host with experiment discovery, a parameter inspector, and scene-owned-camera inspection controls (orbit, pan, zoom, frame, reset).

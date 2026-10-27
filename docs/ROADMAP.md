@@ -1,6 +1,6 @@
 # Roadmap and acceptance gates
 
-Milestones are defined by demonstrated capabilities rather than time estimates or ownership by particular SDKs.
+Milestones are defined by demonstrated capabilities rather than time estimates or ownership by particular SDKs. A source-grounded [Cauldron capability inventory](CAULDRON_PARITY.md) distinguishes proven Godauldron workflows, engine-provided functionality, native-provider ownership and remaining gates.
 
 ## M0 — Host bootstrap
 

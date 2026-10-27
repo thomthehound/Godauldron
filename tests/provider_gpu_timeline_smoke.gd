@@ -99,6 +99,10 @@ func _verify() -> void:
 	unknown_dependency["steps"][0]["events"][2]["depends_on"] = ["missing"]
 	if not _rejected(unknown_dependency, 3, "unknown dependency"):
 		return
+	var missing_wait: Dictionary = raw.duplicate(true)
+	missing_wait["steps"][0]["host_waits"][0]["wait_for"] = "unknown_event"
+	if not _rejected(missing_wait, 3, "unknown completion event"):
+		return
 	var cross_clock: Dictionary = raw.duplicate(true)
 	for record in cross_clock["steps"]:
 		record["events"][1]["clock_domain"] = "copy_clock_1"
@@ -122,6 +126,53 @@ func _verify() -> void:
 			abort["provider_gpu_timeline"]["reason"] != "run_not_completed" or \
 			int(canceled.get("timeline_calls")) != 0:
 		_fail("Cancelled run invoked native timeline synchronization")
+		return
+	var old_style = preload("res://tests/fixtures/observability_probe.gd").new()
+	root.add_child(old_style)
+	var ordinary = Runner.new()
+	ordinary.begin(old_style, {}, 0, 2, 1.0 / 60.0)
+	ordinary.advance()
+	ordinary.advance()
+	var legacy: Dictionary = ordinary.make_report("org.godauldron.legacy-no-timeline")
+	if not ordinary.sample_step_submissions.is_empty() or \
+			bool(legacy["sample_step_submission_correlation"]["available"]) or \
+			bool(legacy["provider_gpu_timeline"]["available"]) or \
+			legacy["provider_gpu_timeline"]["reason"] != "provider_timeline_not_reported":
+		_fail("Ordinary provider acquired unnecessary per-step correlation allocations")
+		return
+	# Exercise the complete reporting path, not only the standalone validator.
+	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	root.add_child(host)
+	var viewport: SubViewport = host.get("_viewport")
+	var previous: Node = host.get("_active_scene")
+	viewport.remove_child(previous)
+	previous.queue_free()
+	var consumer: Node = Fixture.new()
+	viewport.add_child(consumer)
+	host.set("_active_scene", consumer)
+	var destination: String = "user://gpu-provider-reports-%d" % OS.get_process_id()
+	host.set("_results_directory", destination)
+	var completed = Runner.new()
+	completed.begin(consumer, {}, 0, 3, 1.0 / 60.0)
+	for i in range(3):
+		completed.advance()
+	host.set("_run", completed)
+	host.call("_finish_run", true)
+	var ui: Label = host.get("_provider_timeline_label")
+	if not ui.text.contains("3 queues") or not ui.text.contains("9 events"):
+		_fail("Lab UI failed to attribute completed provider queue intervals")
+		return
+	var results: PackedStringArray = DirAccess.get_files_at(destination)
+	if results.size() != 1:
+		_fail("Provider GPU timeline was not saved in the run report")
+		return
+	var persisted: Variant = JSON.parse_string(FileAccess.get_file_as_string(
+		destination.path_join(results[0])))
+	if typeof(persisted) != TYPE_DICTIONARY or \
+			not persisted.get("provider_gpu_timeline", {}).get("available", false) or \
+			persisted["provider_gpu_timeline"]["steps"].size() != 3 or \
+			persisted["sample_step_submission_correlation"]["steps"].size() != 3:
+		_fail("Persisted provider timeline lacks resolved steps or host correlation metadata")
 		return
 	print("Provider GPU timeline validated: overlap, attribution, strict sample steps, lifecycle")
 	quit(0)

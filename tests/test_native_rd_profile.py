@@ -5,7 +5,7 @@ import copy
 import unittest
 
 from tools.validate_native_rd_profile import validate
-from tools.analyze_native_rd_profile import analyze, compare
+from tools.analyze_native_rd_profile import analyze, compare, distribution
 
 
 def fixture(physical: bool) -> dict:
@@ -139,6 +139,34 @@ class ExtendedNativeGPUProfileContract(unittest.TestCase):
         self.assertEqual(metrics["host_validation"]["p50_usec"], 50.0)
         self.assertEqual(metrics["gpu_compute_window"]["pixel_dispatches_per_second"]["p50_per_second"],
                          351 * 1_000_000 / 2.5)
+        cadence = metrics["gpu_batch_cadence"]
+        self.assertTrue(cadence["available"])
+        self.assertEqual(cadence["start_to_start_usec"]["p50_usec"], 10.0)
+        self.assertEqual(cadence["device_frame_delta"]["median"], 2)
+        self.assertEqual(cadence["nominal_pixel_dispatch_rate_per_second"],
+                         2 * 351 * 1_000_000_000 / 12_500)
+        self.assertEqual(cadence["marker_window_fraction_of_observed_elapsed"], 0.4)
+
+    def test_outlier_tails_retain_original_batch_ids(self) -> None:
+        slow_majority = distribution([35.0, 35.0, *([153.0] * 10)],
+                                     list(range(10, 22)))
+        self.assertEqual(slow_majority["low_outlier_batch_indices"], [10, 11])
+        self.assertEqual(slow_majority["high_outlier_batch_indices"], [])
+        fast_majority = distribution([*([35.0] * 10), 153.0, 153.0],
+                                     list(range(10, 22)))
+        self.assertEqual(fast_majority["high_outlier_batch_indices"], [20, 21])
+        self.assertEqual(fast_majority["low_outlier_batch_indices"], [])
+
+    def test_device_marker_non_monotonicity_is_rejected(self) -> None:
+        report = extended_fixture()
+        report["records"][2]["gpu_start_ns"] = report["records"][1]["gpu_start_ns"] - 100
+        report["records"][2]["gpu_end_ns"] = report["records"][2]["gpu_start_ns"] + 2500
+        validate(report, physical=True)
+        with self.assertRaisesRegex(ValueError, "not monotonic"):
+            analyze(report)
+
+    def test_legacy_report_has_no_invented_device_cadence(self) -> None:
+        self.assertFalse(analyze(fixture(True))["gpu_batch_cadence"]["available"])
 
     def test_geometry_timestamps_and_lifetime_cannot_be_fabricated(self) -> None:
         for modify in (

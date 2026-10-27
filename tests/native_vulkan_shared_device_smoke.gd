@@ -3,7 +3,6 @@ extends SceneTree
 ## extension, with compute/async readback submitted by Godot's RenderingDevice.
 
 const Package = preload("res://scripts/native_experiment_package.gd")
-const Effect = preload("res://experiments/native-vulkan-provider/godot_shared_device_effect.gd")
 const EXPECTED_ELEMENTS := 64
 
 
@@ -47,7 +46,12 @@ func _verify() -> void:
 			not native.has_method("inspect_godot_vulkan_buffer") or camera.compositor != null:
 		_fail("Native resource-witness method or active scene-owned camera missing")
 		return
-	var effect: CompositorEffect = Effect.new(native)
+	var effect_script: GDScript = load(
+		"res://experiments/native-vulkan-provider/godot_shared_device_effect.gd")
+	if effect_script == null:
+		_fail("Installed same-device compositor effect is missing")
+		return
+	var effect: CompositorEffect = effect_script.new(native)
 	var original: Compositor = camera.compositor
 	var temporary := Compositor.new()
 	var effects: Array[CompositorEffect] = [effect]

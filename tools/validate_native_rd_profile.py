@@ -42,7 +42,7 @@ def validate_summary(summary: dict, values: list[float], label: str) -> None:
 
 
 def validate(data: dict, *, physical: bool) -> None:
-    if data.get("schema_version") != 1 or data.get("capture_type") != "godauldron_native_rd_physical_device_compute":
+    if data.get("schema_version") not in (1, 2) or data.get("capture_type") != "godauldron_native_rd_physical_device_compute":
         raise ValueError("Wrong native GPU report schema")
     if data.get("backend") != "d3d12" or not data.get("validated", False):
         raise ValueError("Report is not a successful D3D12 native workload run")
@@ -56,8 +56,22 @@ def validate(data: dict, *, physical: bool) -> None:
     passes = settings.get("passes", 0)
     if not all(type(x) is int and x > 0 for x in [width, height, samples, warmup, passes]):
         raise ValueError("Invalid workload dimensions/sample counts")
-    if width * height > 1024 * 1024 or samples > 64 or warmup > 32 or passes > 32:
+    if width * height > 1024 * 1024 or samples > (256 if data["schema_version"] == 2 else 64) or warmup > 32 or passes > 32:
         raise ValueError("Unbounded workload in report")
+    if data["schema_version"] == 2:
+        geometry = data.get("workload_geometry", {})
+        expected_geometry = {
+            "image_pixels": width * height,
+            "output_bytes": width * height * 4,
+            "workgroups_x": (width + 7) // 8,
+            "workgroups_y": (height + 7) // 8,
+            "workgroups_per_dispatch": ((width + 7) // 8) * ((height + 7) // 8),
+            "storage_image_barriers_per_batch": passes - 1,
+            "pixel_dispatches_per_batch": width * height * passes,
+        }
+        if any(type(geometry.get(key)) is not int or geometry[key] != value
+               for key, value in expected_geometry.items()):
+            raise ValueError("Native GPU workload geometry contradicts dispatch settings")
     provenance = data.get("adapter_provenance", {})
     if (provenance.get("backend") != "d3d12" or
             provenance.get("device_luid_matched") is not True):
@@ -82,6 +96,28 @@ def validate(data: dict, *, physical: bool) -> None:
                 type(record.get("host_request_to_readback_usec")) is not int or
                 record["host_request_to_readback_usec"] <= 0):
             raise ValueError(f"Failed native GPU work/readback sample {i}")
+        if data["schema_version"] == 2:
+            validation_usec = record.get("host_validation_usec")
+            validated_usec = record.get("host_request_to_validated_usec")
+            readback_usec = record["host_request_to_readback_usec"]
+            if (type(validation_usec) is not int or validation_usec < 0 or
+                    type(validated_usec) is not int or
+                    validated_usec < readback_usec + validation_usec):
+                raise ValueError(f"CPU validation timing contradicts readback timing in sample {i}")
+            gpu_usec = record.get("gpu_compute_window_usec")
+            start_ns = record.get("gpu_start_ns")
+            end_ns = record.get("gpu_end_ns")
+            device_frame = record.get("device_frame")
+            if gpu_usec is None:
+                if start_ns is not None or end_ns is not None or device_frame is not None:
+                    raise ValueError(f"Missing device GPU interval has fabricated bounds in sample {i}")
+            elif (type(gpu_usec) not in (int, float) or not math.isfinite(gpu_usec) or
+                  gpu_usec <= 0 or type(start_ns) is not int or start_ns <= 0 or
+                  type(end_ns) is not int or end_ns <= start_ns or
+                  type(device_frame) is not int or device_frame < 0 or
+                  not math.isclose(gpu_usec, (end_ns - start_ns) / 1000.0,
+                                   rel_tol=1e-8, abs_tol=1e-4)):
+                raise ValueError(f"Resolved GPU nanosecond markers contradict interval in sample {i}")
     gpu = data.get("gpu_timing", {})
     if (gpu.get("source") != "RenderingDevice.capture_timestamp / get_captured_timestamp_gpu_time" or
             gpu.get("unit") != "microseconds" or
@@ -104,6 +140,29 @@ def validate(data: dict, *, physical: bool) -> None:
     validate_summary(host.get("summary", {}),
                      [float(r["host_request_to_readback_usec"]) for r in sampled],
                      "host_readback")
+    if data["schema_version"] == 2:
+        for name, key in (("host_validation", "host_validation_usec"),
+                          ("host_request_to_validated", "host_request_to_validated_usec")):
+            measurement = data.get(name, {})
+            if measurement.get("unit") != "microseconds" or not measurement.get("scope"):
+                raise ValueError(f"{name} lacks an explicit timing boundary")
+            if name == "host_request_to_validated" and "NOT GPU compute time" not in measurement["scope"]:
+                raise ValueError("Total host latency was presented as GPU compute time")
+            validate_summary(measurement.get("summary", {}),
+                             [float(record[key]) for record in sampled], name)
+        lifecycle = data.get("resource_lifecycle", {})
+        completed = lifecycle.get("after_last_readback", {})
+        released = lifecycle.get("after_release", {})
+        expected_counts = {"completed_batches": samples + warmup,
+                           "dispatch_count": (samples + warmup) * passes,
+                           "pipeline_creations": 1,
+                           "descriptor_creations": 1, "prepare_count": 1}
+        for phase, snapshot in (("prepared", completed), ("released", released)):
+            if (snapshot.get("phase") != phase or
+                    snapshot.get("active_resources") is not (phase == "prepared") or
+                    any(type(snapshot.get(key)) is not int or snapshot[key] != value
+                        for key, value in expected_counts.items())):
+                raise ValueError("Persistent native RD resource lifecycle evidence is inconsistent")
 
 
 def main() -> None:

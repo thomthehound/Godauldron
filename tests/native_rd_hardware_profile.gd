@@ -45,7 +45,7 @@ func _parse_args() -> bool:
 	return _settings["mode"] in ["physical_amd", "software"] and \
 		width > 0 and height > 0 and width <= 2048 and height <= 2048 and \
 		width * height <= 1024 * 1024 and \
-		int(_settings["samples"]) >= 2 and int(_settings["samples"]) <= 64 and \
+		int(_settings["samples"]) >= 2 and int(_settings["samples"]) <= 256 and \
 		int(_settings["warmup"]) >= 1 and int(_settings["warmup"]) <= 32 and \
 		int(_settings["passes"]) >= 1 and int(_settings["passes"]) <= 32 and \
 		not String(_settings["output"]).is_empty()
@@ -116,6 +116,7 @@ func _run() -> void:
 	var count: int = int(_settings["warmup"]) + int(_settings["samples"])
 	var records: Array[Dictionary] = []
 	var provenance: Dictionary = {}
+	var last_completed: Dictionary = {}
 	for batch_index in range(count):
 		var start_usec := Time.get_ticks_usec()
 		if not bool(effect.call("request_batch", seeds)):
@@ -136,6 +137,7 @@ func _run() -> void:
 				int(completed.get("completed_batches", 0)) != batch_index + 1:
 			_fail("GPU batch completion/resource proof failed at %d: %s" % [batch_index, result])
 			return
+		var validation_start_usec := Time.get_ticks_usec()
 		for pixel in range(width * height):
 			if data.decode_u32(pixel * 4) != expected_seed_sum + passes * pixel:
 				_fail("GPU output mismatch at batch %d pixel %d" % [batch_index, pixel])
@@ -148,9 +150,13 @@ func _run() -> void:
 				_fail("Native GPU device provenance is not verified: " + str(provenance))
 				return
 			print("Native GPU adapter verified: ", provenance)
+		var validated_usec: int = Time.get_ticks_usec()
+		last_completed = completed.duplicate(true)
 		records.append({"batch_index": batch_index,
 			"warmup": batch_index < int(_settings["warmup"]),
 			"host_request_to_readback_usec": elapsed_usec,
+			"host_validation_usec": validated_usec - validation_start_usec,
+			"host_request_to_validated_usec": validated_usec - start_usec,
 			"correct_pixels": width * height,
 			"dispatches": passes})
 	# Keep the compositor alive while Godot's timestamp query ring resolves.
@@ -164,16 +170,24 @@ func _run() -> void:
 	var resolved_gpu: Dictionary = profile.get("gpu_intervals", {})
 	var gpu_usec: Array[float] = []
 	var host_usec: Array[float] = []
+	var validation_usec: Array[float] = []
+	var end_to_end_usec: Array[float] = []
 	for i in range(records.size()):
 		var sample: Dictionary = records[i]
 		var entry: Dictionary = resolved_gpu.get(i, {})
 		if entry.has("gpu_usec") and float(entry["gpu_usec"]) > 0.0:
 			sample["gpu_compute_window_usec"] = float(entry["gpu_usec"])
 			sample["device_frame"] = int(entry.get("device_frame", -1))
+			sample["gpu_start_ns"] = int(entry.get("start_gpu_ns", 0))
+			sample["gpu_end_ns"] = int(entry.get("end_gpu_ns", 0))
 		else:
 			sample["gpu_compute_window_usec"] = null
 			sample["device_frame"] = null
+			sample["gpu_start_ns"] = null
+			sample["gpu_end_ns"] = null
 		if not sample["warmup"]:
+			validation_usec.append(float(sample["host_validation_usec"]))
+			end_to_end_usec.append(float(sample["host_request_to_validated_usec"]))
 			host_usec.append(float(sample["host_request_to_readback_usec"]))
 			if sample["gpu_compute_window_usec"] != null:
 				gpu_usec.append(float(sample["gpu_compute_window_usec"]))
@@ -196,7 +210,7 @@ func _run() -> void:
 			[gpu_usec.size(), required])
 		return
 	var report := {
-		"schema_version": 1,
+		"schema_version": 2,
 		"capture_type": "godauldron_native_rd_physical_device_compute",
 		"backend": "d3d12",
 		"device": RenderingServer.get_video_adapter_name(),
@@ -204,6 +218,15 @@ func _run() -> void:
 		"device_driver_info": Array(OS.get_video_adapter_driver_info()),
 		"adapter_provenance": provenance,
 		"settings": _settings.duplicate(true),
+		"workload_geometry": {
+			"image_pixels": width * height,
+			"output_bytes": width * height * 4,
+			"workgroups_x": (width + 7) / 8,
+			"workgroups_y": (height + 7) / 8,
+			"workgroups_per_dispatch": ((width + 7) / 8) * ((height + 7) / 8),
+			"storage_image_barriers_per_batch": passes - 1,
+			"pixel_dispatches_per_batch": width * height * passes
+		},
 		"shader_source": "native/vulkan_provider/persistent_image.comp",
 		"shader": "native_build_embedded_spirv_translated_by_godot",
 		"gpu_timing": {
@@ -221,6 +244,20 @@ func _run() -> void:
 			"unit": "microseconds",
 			"scope": "host request to completed async readback, includes frame scheduling and GPU transfer; NOT GPU compute time",
 			"summary": Observability.describe(host_usec)
+		},
+		"host_validation": {
+			"unit": "microseconds",
+			"scope": "CPU wall time checking all readback pixels and first-batch adapter provenance; excludes queued GPU execution",
+			"summary": Observability.describe(validation_usec)
+		},
+		"host_request_to_validated": {
+			"unit": "microseconds",
+			"scope": "request through completed readback and full correctness validation; NOT GPU compute time",
+			"summary": Observability.describe(end_to_end_usec)
+		},
+		"resource_lifecycle": {
+			"after_last_readback": last_completed,
+			"after_release": retired.get("completion", {}).duplicate(true)
 		},
 		"records": records,
 		"validated": true,

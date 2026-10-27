@@ -6,7 +6,8 @@ param(
     [int]$Warmup = 3,
     [int]$Samples = 12,
     [int]$Passes = 8,
-    [string]$Output = "native_rd_amd_profile.json"
+    [string]$Output = "native_rd_amd_profile.json",
+    [string]$Baseline = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,7 +43,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Physical AMD native GPU acceptance failed" }
     python tools/validate_native_rd_profile.py $destination --mode physical_amd
     if ($LASTEXITCODE -ne 0) { throw "GPU report validation failed" }
+    $analysisJson = [System.IO.Path]::ChangeExtension($destination, ".analysis.json")
+    $analysisCsv = [System.IO.Path]::ChangeExtension($destination, ".csv")
+    $analysisArgs = @("tools/analyze_native_rd_profile.py", $destination,
+        "--json-output", $analysisJson, "--csv-output", $analysisCsv)
+    if ($Baseline) { $analysisArgs += @("--baseline", $Baseline) }
+    python @analysisArgs
+    if ($LASTEXITCODE -ne 0) { throw "Native RD performance analysis failed" }
     Write-Host "Validated native AMD report: $destination"
+    Write-Host "Profile analysis: $analysisJson"
+    Write-Host "Per-batch measurements: $analysisCsv"
 } finally {
     Pop-Location
 }

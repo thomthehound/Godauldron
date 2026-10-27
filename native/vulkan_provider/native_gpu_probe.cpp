@@ -374,6 +374,8 @@ bool NativeGpuProbe3D::initialize(int capacity) {
         return fail("Cannot create native Vulkan compute pipeline");
     }
     ++pipeline_creation_count_;
+    // Any later initialization failure is not a shader or PSO failure.
+    pipeline_failure_stage_ = "initialization";
     VkQueryPoolCreateInfo query_info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
     query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
     query_info.queryCount = static_cast<uint32_t>(capacity) * 3;
@@ -515,12 +517,20 @@ void NativeGpuProbe3D::godauldron_setup(const Dictionary &) {
     shader_create_host_usec_ = 0;
     pipeline_create_host_usec_ = 0;
     descriptor_create_host_usec_ = 0;
-    if (!initialize(kMaxSamples)) {
-        const auto explanation = error_;
+    prepare_total_host_usec_ = 0;
+    pipeline_prepare_error_.clear();
+    const auto started = std::chrono::steady_clock::now();
+    const bool prepared = initialize(kMaxSamples);
+    prepare_total_host_usec_ = elapsed_pipeline_host_usec(started);
+    if (!prepared) {
+        pipeline_prepare_error_ = error_;
         ++pipeline_prepare_failures_;
-        if (pipeline_failure_stage_.empty()) pipeline_failure_stage_ = "preflight";
+        if (pipeline_failure_stage_.empty()) pipeline_failure_stage_ = "initialization";
+        // cleanup() must not discard measurements from the failed attempt.
         cleanup();
-        error_ = explanation;
+        error_ = pipeline_prepare_error_;
+    } else {
+        pipeline_failure_stage_.clear();
     }
 }
 
@@ -547,9 +557,8 @@ Dictionary NativeGpuProbe3D::godauldron_pipeline_diagnostics() const {
     entry["shader_create_host_usec"] = shader_create_host_usec_;
     entry["pipeline_create_host_usec"] = pipeline_create_host_usec_;
     entry["descriptor_create_host_usec"] = descriptor_create_host_usec_;
-    entry["prepare_total_host_usec"] = shader_create_host_usec_ +
-        pipeline_create_host_usec_ + descriptor_create_host_usec_;
-    entry["last_prepare_error"] = String(error_.c_str());
+    entry["prepare_total_host_usec"] = prepare_total_host_usec_;
+    entry["last_prepare_error"] = String(pipeline_prepare_error_.c_str());
     entry["last_prepare_failure_stage"] = String(pipeline_failure_stage_.c_str());
     entry["cache_hit_observation"] = "not_reported";
     entry["timing_source"] = "steady_host_wall_microseconds";

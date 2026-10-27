@@ -7,7 +7,7 @@ The physical AMD acceptance path executes a Godot-owned native C++23 compute wor
 From a Windows PowerShell session in the repository:
 
 ```powershell
-.scriptsun_native_rd_amd.ps1 -Warmup 10 -Samples 100 -Passes 8 -Output native_rd_amd_profile_long.json
+.\scripts\run_native_rd_amd.ps1 -Warmup 10 -Samples 100 -Passes 8 -Output native_rd_amd_profile_long.json
 ```
 
 The script rebuilds and installs the native RD extension, executes the device workload and validates its evidence. On success, it writes the primary JSON record, a sibling `.analysis.json` summary, and a `.csv` with every batch including warmup rows. Sample counts range from 2 to 256, warmup from 1 to 32, and dispatches per batch from 1 to 32; the native image is limited to 1,048,576 pixels. The default configuration remains 512×512, three warmups, twelve samples and eight passes.
@@ -33,7 +33,8 @@ Positive change percentages mean slower GPU dispatch windows. A regression limit
 - **Host validation:** Additional CPU wall time checking pixels and first-batch adapter provenance, after the readback result is available.
 - **Host request to validated:** CPU monotonic time from the request through output verification.
 - **Normalized rates:** Dispatches or pixel-dispatches per second calculated from the measured *GPU marker window*, not hardware bandwidth, actual shader instruction rate, occupancy or completed-frame throughput. A pixel-dispatch is one nominal image pixel processed by one shader dispatch, including bounds-guarded workgroups.
-- **Dispersion:** Mean, p50/p95/p99, population deviation, median absolute deviation, coefficient of variation, p95/p50 ratio, first/second-half medians and high-tail batch indices. The high-tail detector uses the upper Tukey fence (Q3 + 1.5×IQR) for at least eight observations. It describes unusual samples, not their cause.
+- **Measured device-marker cadence:** When all samples expose valid same-device GPU marker bounds, the analyzer reports consecutive batch start gaps, observed device-frame gaps, elapsed first-to-last batch time, and actual dispatch/pixel-dispatch rates across that interval. These rates **include inter-batch pacing**, unlike GPU-window-normalized rates. The marker-window fraction describes only coverage by measured native work; it is not a GPU occupancy or utilization estimate.
+- **Dispersion:** Mean, p50/p95/p99, population deviation, median absolute deviation, coefficient of variation, p95/p50 ratio, first/second-half medians and both low- and high-tail batch indices. The descriptive Tukey fences (Q1 − 1.5×IQR, Q3 + 1.5×IQR) are applied when there are at least eight observations, retaining original batch indices. Neither tail automatically indicates a hardware fault or an explanation for the variation.
 
 The measured summaries exclude warmup batches; the CSV retains them for inspection. Missing software-device GPU timestamps are reported as unavailable, never inferred from host latency. Physical-device acceptance rejects any missing measured timestamp. Schema-2 records also retain timestamp start/end values, workload dispatch geometry, and one-time shader/pipeline/descriptor lifetime evidence across the full run and after release.
 

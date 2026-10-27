@@ -1,7 +1,7 @@
 #version 450
 // Native-owned reusable shader program: Godot owns the VkImage and scheduling.
-// Each batch starts with pass_index=0. Later passes depend on a Godot RD
-// compute_list_add_barrier between dispatches on the same storage image.
+// The first dispatch in a submitted list has pass_index=0. Later passes,
+// including resident-series boundaries, depend on a Godot RD image barrier.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, r32ui) uniform uimage2D result_image;
 layout(push_constant) uniform Parameters {

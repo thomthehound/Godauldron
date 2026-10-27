@@ -8,11 +8,13 @@ These are editor-style camera positions, **not** simulations or playback checkpo
 
 ## Rendered pixel magnifier
 
-Enable **Inspect pixel**, then left-click the experiment viewport. The host pauses unmeasured playback, awaits the next completed rendered frame, and reads the viewport texture **once**. The detail strip shows the exact pixel coordinates and final RGBA8 values, plus a 13×13 texel region enlarged with nearest-neighbor sampling. The magnified strip lives outside the experiment's viewport and is not included in screenshots/PNG sequences.
+Enable **Inspect pixel**, then left-click the experiment viewport. The host pauses unmeasured playback, awaits the next completed rendered frame, and reads the viewport texture **once**. The detail strip shows the exact pixel coordinates and final RGBA8 values, plus a selectable **9×9, 13×13 or 21×21** source-texel neighborhood enlarged using nearest-neighbor sampling. **Zoom (4–12×)** resizes the already captured tile, without reading the GPU again. **Pin sample** freezes the rendered pixel, camera identity and diagnostic provenance until explicitly unpinned. The strip lives outside the rendered viewport and is excluded from PNG/EXR captures.
 
-Coordinates are mapped from the `SubViewportContainer`'s local display coordinates to the actual captured image dimensions. Out-of-bounds clicks are rejected. The pixel value is the final displayed output **after rendering/postprocessing and RGBA8 conversion**, not HDR linear radiance, material albedo, object identity, or a GPU duration.
+The inspector computes RGB channel **minima, maxima and means**, a local encoded Rec.709 Y′ mean/range, the number of genuine sampled image texels, and the count of duplicated pixels used only for displaying a clamped border. Clamped borders do **not** bias the neighborhood statistics, including on a 1×1 or corner image. Only pixels in the selected neighborhood are decoded for analysis and texture enlargement—there is no extra full-resolution image copy or RGBA conversion. Changes to the neighborhood selector apply on the **next explicit click**, never through continuous hidden sampling.
 
-Readback is excluded from measured benchmarks: clicking the magnifier during an active run is rejected, and readback reserves the same capture lifecycle that prevents starting a benchmark until completion. There is no continuously polling pixel sampler or hidden device readback.
+Coordinates are mapped from the `SubViewportContainer`'s local display coordinates to actual captured image dimensions. Out-of-bounds clicks are rejected. Values represent **post-rendering SDR RGBA8** and encoded luma, not scene-linear luminance, HDR radiance, material albedo, object identity or GPU duration. This is a captured-frame inspection tool, not an automatically updated live sampling pass.
+
+Readback is excluded from measured benchmarks: clicking the magnifier during an active run is rejected, and readback reserves the same capture lifecycle that prevents starting a benchmark until completion. Pinned and zoom-only interactions do not request a new readback. Experiments still own the rendered viewport; host magnification is outside their render graph.
 
 ## Remaining inspection work
 

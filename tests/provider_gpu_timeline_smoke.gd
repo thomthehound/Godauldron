@@ -84,7 +84,7 @@ func _verify() -> void:
 	if not _rejected(duplicate, 3, "duplicate event identity"):
 		return
 	var invalid_time: Dictionary = raw.duplicate(true)
-	invalid_time["steps"][0]["events"][0]["end_ns"] = 100000001
+	invalid_time["steps"][0]["events"][0]["end_ns"] = 100000000
 	if not _rejected(invalid_time, 3, "causality"):
 		return
 	var invalid_source: Dictionary = raw.duplicate(true)

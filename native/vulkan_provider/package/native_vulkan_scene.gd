@@ -10,20 +10,39 @@ var _native: Node3D
 @export var shader_compiler := "glslangValidator"
 
 
+var _source_reload := {
+	"attempts": 0,
+	"failures": 0,
+	"last_stage": "none",
+	"last_error": "",
+	"source": ""
+}
+
+
+func _reload_rejected(stage: String, reason: String) -> Dictionary:
+	_source_reload["failures"] += 1
+	_source_reload["last_stage"] = stage
+	_source_reload["last_error"] = reason.substr(0, 1500)
+	return {"ok": false, "stage": stage, "error": reason.substr(0, 1500)}
+
+
 func godauldron_reload_shader() -> Dictionary:
 	return godauldron_reload_shader_from_source(shader_source_path)
 
 
 func godauldron_reload_shader_from_source(path: String) -> Dictionary:
+	_source_reload["attempts"] += 1
+	_source_reload["source"] = path.substr(0, 240)
 	if _native == null:
-		return {"ok": false, "stage": "provider", "error": "Native Vulkan provider not installed"}
+		return _reload_rejected("provider", "Native Vulkan provider not installed")
 	if not FileAccess.file_exists(path):
-		return {"ok": false, "stage": "source", "error": "Shader source not found: " + path}
-	if not bool(_native.call("godauldron_pipeline_diagnostics")["pipelines"][0].get("prepare_attempts", 0)):
+		return _reload_rejected("source", "Shader source not found: " + path)
+	var initial: Dictionary = _native.call("godauldron_pipeline_diagnostics")
+	if int(initial["pipelines"][0].get("prepare_attempts", 0)) == 0:
 		_native.call("godauldron_setup", {})
 	if not bool(_native.call("godauldron_shader_reload_available")):
-		return {"ok": false, "stage": "in_flight",
-			"error": "Native provider is not idle or prior GPU submissions remain unresolved"}
+		return _reload_rejected("in_flight",
+			"Native provider is not idle or prior GPU submissions remain unresolved")
 	var output_path: String = "user://godauldron_shader_reload_%d.spv" % Time.get_ticks_usec()
 	var compiler_messages: Array = []
 	var exit_code: int = OS.execute(shader_compiler, PackedStringArray([
@@ -33,21 +52,26 @@ func godauldron_reload_shader_from_source(path: String) -> Dictionary:
 	]), compiler_messages, true)
 	if exit_code != 0:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
-		return {"ok": false, "stage": "compile",
-			"error": ("Shader compiler failed (%d): " % exit_code) +
-				str(compiler_messages).substr(0, 1500)}
+		return _reload_rejected("compile", ("Shader compiler failed (%d): " % exit_code) +
+			str(compiler_messages))
 	var spirv: PackedByteArray = FileAccess.get_file_as_bytes(output_path)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
 	if spirv.is_empty():
-		return {"ok": false, "stage": "compile", "error": "Compiler produced no SPIR-V bytecode"}
+		return _reload_rejected("compile", "Compiler produced no SPIR-V bytecode")
 	var applied: Dictionary = _native.call("godauldron_replace_shader", spirv)
 	if not applied.get("ok", false):
-		applied["stage"] = applied.get("failure_stage", "pipeline")
+		var stage: String = String(applied.get("failure_stage", "pipeline"))
+		var error: String = String(applied.get("error", "Native pipeline creation failed"))
+		_reload_rejected(stage, error)
+		applied["stage"] = stage
+		return applied
+	_source_reload["last_stage"] = "applied"
+	_source_reload["last_error"] = ""
 	return applied
 
 
 func godauldron_replace_shader_bytes(spirv: PackedByteArray) -> Dictionary:
-	# Native API allows exact SPIR-V failure injection without shell tools.
+	# Exact SPIR-V failure injection, independent of the source compiler.
 	if _native == null:
 		return {"ok": false, "error": "Native Vulkan provider not installed"}
 	return _native.call("godauldron_replace_shader", spirv)
@@ -90,7 +114,9 @@ func godauldron_resolved_gpu_timeline() -> Dictionary:
 func godauldron_pipeline_diagnostics() -> Dictionary:
 	if _native == null:
 		return {"provider": "native-vulkan-queue-probe", "backend": "Vulkan", "pipelines": []}
-	return _native.call("godauldron_pipeline_diagnostics")
+	var pipeline_report: Dictionary = _native.call("godauldron_pipeline_diagnostics")
+	pipeline_report["source_reload"] = _source_reload.duplicate(true)
+	return pipeline_report
 
 
 func godauldron_metrics() -> Dictionary:

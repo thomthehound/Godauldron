@@ -35,7 +35,7 @@ func godauldron_reload_shader() -> Dictionary:
 		_source_last_stage = "compile"
 	else:
 		_source_last_error = ""
-		_source_last_stage = "queued"
+		_source_last_stage = "none"
 	return result
 
 

@@ -34,6 +34,8 @@ void NativeRDWorkload::_bind_methods() {
                          &NativeRDWorkload::record_checkpoint_series);
     ClassDB::bind_method(D_METHOD("mark_readback_complete"),
                          &NativeRDWorkload::mark_readback_complete);
+    ClassDB::bind_method(D_METHOD("replace_spirv", "rendering_device", "bytecode"),
+                         &NativeRDWorkload::replace_spirv);
     ClassDB::bind_method(D_METHOD("release", "rendering_device"),
                          &NativeRDWorkload::release);
     ClassDB::bind_method(D_METHOD("diagnostics"), &NativeRDWorkload::diagnostics);
@@ -304,6 +306,98 @@ Dictionary NativeRDWorkload::mark_readback_complete() {
     return result;
 }
 
+Dictionary NativeRDWorkload::replace_spirv(
+        RenderingDevice *rd, const PackedByteArray &bytecode) {
+    ++reload_attempts_;
+    const auto started = HostClock::now();
+    const auto failure = [&](const char *stage, const char *reason) {
+        ++reload_failures_;
+        reload_failure_stage_ = stage;
+        reload_error_ = reason;
+        reload_host_usec_ = elapsed_host_usec(started);
+        Dictionary out = diagnostics();
+        out["ok"] = false;
+        out["error"] = reason;
+        return out;
+    };
+    if (phase_ != Phase::PREPARED || rd == nullptr || rd != rd_ ||
+        checkpoint_active_ || pending_batch_count_ != 0) {
+        return failure("in_flight", "rd_pipeline_reload_requires_completed_readback");
+    }
+    if (!image_.is_valid() || !uniform_set_.is_valid() ||
+        !shader_.is_valid() || !pipeline_.is_valid()) {
+        return failure("lifecycle", "rd_pipeline_reload_missing_live_resources");
+    }
+    if (bytecode.size() < 20 || bytecode.size() > 1024 * 1024 ||
+        bytecode.size() % sizeof(uint32_t) != 0 ||
+        bytecode.decode_u32(0) != 0x07230203u ||
+        bytecode.decode_u32(4) < 0x00010000u ||
+        bytecode.decode_u32(4) > 0x00010300u) {
+        return failure("shader", "rd_pipeline_reload_invalid_vulkan11_spirv");
+    }
+    Ref<RDShaderSPIRV> shader_code;
+    shader_code.instantiate();
+    shader_code->set_stage_bytecode(RenderingDevice::SHADER_STAGE_COMPUTE, bytecode);
+    const auto shader_start = HostClock::now();
+    RID candidate_shader = rd->shader_create_from_spirv(
+        shader_code, "Godauldron Reloaded Native RD");
+    const int64_t shader_usec = elapsed_host_usec(shader_start);
+    if (!candidate_shader.is_valid()) {
+        return failure("shader", "rd_pipeline_reload_shader_creation_failed");
+    }
+    ++shader_creations_;
+    const auto pipeline_start = HostClock::now();
+    RID candidate_pipeline = rd->compute_pipeline_create(candidate_shader);
+    const int64_t pipeline_usec = elapsed_host_usec(pipeline_start);
+    if (!candidate_pipeline.is_valid()) {
+        rd->free_rid(candidate_shader);
+        return failure("pipeline", "rd_pipeline_reload_pipeline_creation_failed");
+    }
+    ++pipeline_creations_;
+    Ref<RDUniform> binding;
+    binding.instantiate();
+    binding->set_uniform_type(RenderingDevice::UNIFORM_TYPE_IMAGE);
+    binding->set_binding(0);
+    binding->add_id(image_);
+    TypedArray<RDUniform> uniforms;
+    uniforms.append(binding);
+    const auto descriptor_start = HostClock::now();
+    RID candidate_set = rd->uniform_set_create(uniforms, candidate_shader, 0);
+    const int64_t descriptor_usec = elapsed_host_usec(descriptor_start);
+    if (!candidate_set.is_valid()) {
+        rd->free_rid(candidate_pipeline);
+        rd->free_rid(candidate_shader);
+        return failure("descriptor", "rd_pipeline_reload_descriptor_creation_failed");
+    }
+    ++descriptor_creations_;
+
+    // Completed readback is the engine-owned GPU completion boundary; no
+    // additional submission may overlap this method on the render thread.
+    // Publish all three compatible resources atomically, then release the
+    // superseded engine-owned RIDs in descriptor/pipeline/shader order.
+    RID old_set = uniform_set_;
+    RID old_pipeline = pipeline_;
+    RID old_shader = shader_;
+    uniform_set_ = candidate_set;
+    pipeline_ = candidate_pipeline;
+    shader_ = candidate_shader;
+    rd->free_rid(old_set);
+    rd->free_rid(old_pipeline);
+    rd->free_rid(old_shader);
+    ++reload_generation_;
+    ++reload_retirements_;
+    shader_origin_ = "provider_reloaded_spirv";
+    reload_error_ = "";
+    reload_failure_stage_ = "";
+    reload_host_usec_ = elapsed_host_usec(started);
+    Dictionary out = diagnostics();
+    out["ok"] = true;
+    out["reload_shader_create_host_usec"] = shader_usec;
+    out["reload_pipeline_create_host_usec"] = pipeline_usec;
+    out["reload_descriptor_create_host_usec"] = descriptor_usec;
+    return out;
+}
+
 Dictionary NativeRDWorkload::release(RenderingDevice *rd) {
     if (phase_ == Phase::RELEASED) {
         Dictionary result = diagnostics();
@@ -366,7 +460,16 @@ Dictionary NativeRDWorkload::diagnostics() const {
     result["checkpoint_dispatches_pending"] = checkpoint_dispatches_pending_;
     result["active_resources"] = phase_ == Phase::PREPARED || phase_ == Phase::PENDING;
     result["backend_contract"] = "godot_rendering_device_backend_neutral";
-    result["shader_origin"] = "native_compiled_embedded_spirv";
+    result["shader_origin"] = shader_origin_;
+    result["reload_attempts"] = reload_attempts_;
+    result["reload_failures"] = reload_failures_;
+    result["reload_generation"] = reload_generation_;
+    result["reload_retired_pipelines"] = reload_retirements_;
+    result["reload_host_usec"] = reload_host_usec_;
+    result["reload_error"] = reload_error_;
+    result["reload_failure_stage"] = reload_failure_stage_;
+    result["reload_available"] = phase_ == Phase::PREPARED &&
+                                  !checkpoint_active_ && pending_batch_count_ == 0;
     result["image_width"] = width_;
     result["image_height"] = height_;
     result["workgroups_x"] = groups_x_;

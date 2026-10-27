@@ -18,6 +18,8 @@ const RenderDiagnostics = preload("res://scripts/render_diagnostics.gd")
 const GraphicsSettings = preload("res://scripts/graphics_settings.gd")
 const ImageCapture = preload("res://scripts/image_capture.gd")
 const HdrSceneCapture = preload("res://scripts/hdr_scene_capture.gd")
+const RenderBufferProbe = preload("res://scripts/render_buffer_probe.gd")
+const BufferInspectionWindow = preload("res://scripts/render_buffer_inspection_window.gd")
 const HdrExrCapture = preload("res://scripts/hdr_exr_capture.gd")
 const FrameSequence = preload("res://scripts/frame_sequence.gd")
 const Observability = preload("res://scripts/performance_observability.gd")
@@ -62,6 +64,9 @@ var _capture_sequence: int = 0
 var _capture_pending: bool = false
 var _capture_directory: String = "user://captures"
 var _hdr_capture = HdrSceneCapture.new()
+var _buffer_probe = RenderBufferProbe.new()
+var _buffer_picker: OptionButton
+var _buffer_window: Window
 var _hdr_directory: String = "user://captures"
 var _comparison_window: Window
 var _camera_inspector: RefCounted = null
@@ -161,6 +166,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	_hdr_capture.release()
+	_buffer_probe.release()
 	_grade_controller.release()
 	_engine_render.deactivate(_viewport)
 
@@ -446,9 +452,31 @@ func _build_ui() -> void:
 		_diagnostic_picker.set_item_metadata(_diagnostic_picker.item_count - 1, String(entry["key"]))
 	_diagnostic_picker.select(0)
 	_diagnostic_picker.disabled = _diagnostic_picker.item_count == 1
-	_diagnostic_picker.tooltip_text = "Debug draw is renderer-dependent. Compatibility exposes authored rendering only; normal buffer requires Forward+. Depth unavailable."
+	_diagnostic_picker.tooltip_text = "Godot Viewport debug draws; native depth/normal/motion samples use Inspect buffer"
 	_diagnostic_picker.item_selected.connect(_select_render_diagnostic)
 	navigation_row.add_child(_diagnostic_picker)
+	_buffer_picker = OptionButton.new()
+	for mode in [
+		{"key": "depth", "label": "Device depth"},
+		{"key": "normal_roughness", "label": "Normal + roughness"},
+		{"key": "velocity", "label": "Motion vectors"}
+	]:
+		if _rendering_method == "gl_compatibility" or \
+				(mode["key"] == "normal_roughness" and _rendering_method != "forward_plus"):
+			continue
+		_buffer_picker.add_item(String(mode["label"]))
+		_buffer_picker.set_item_metadata(_buffer_picker.item_count - 1, String(mode["key"]))
+	_buffer_picker.disabled = _buffer_picker.item_count == 0
+	_buffer_picker.tooltip_text = "Select a genuine Godot internal 3D buffer for one-shot float sampling"
+	navigation_row.add_child(_buffer_picker)
+	var inspect_buffer := Button.new()
+	inspect_buffer.text = "Inspect buffer"
+	inspect_buffer.disabled = _buffer_picker.disabled
+	inspect_buffer.tooltip_text = "Unmeasured asynchronous GPU readback with numeric pixel inspection"
+	inspect_buffer.pressed.connect(_inspect_native_buffer)
+	navigation_row.add_child(inspect_buffer)
+	_buffer_window = BufferInspectionWindow.new()
+	add_child(_buffer_window)
 	var camera_row := HBoxContainer.new()
 	viewer.add_child(camera_row)
 	var camera_label := Label.new()
@@ -1157,6 +1185,69 @@ func _capture_provider_state(scene: Node) -> Dictionary:
 		return {}
 	var observed: Variant = scene.call("godauldron_capture_metadata")
 	return observed.duplicate(true) if typeof(observed) == TYPE_DICTIONARY else {}
+
+
+func _inspect_native_buffer() -> void:
+	if _capture_pending or _has_active_run() or _campaign != null or _active_scene == null:
+		_status.text = "Stop measurement/capture before native buffer inspection"
+		return
+	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
+		_status.text = "Close image comparison before GPU buffer readback"
+		return
+	if _buffer_picker.selected < 0:
+		_status.text = "No native buffer mode is available for this renderer"
+		return
+	var mode: String = String(_buffer_picker.get_item_metadata(_buffer_picker.selected))
+	var scene: Node = _active_scene
+	var camera: Camera3D = _viewport.get_camera_3d()
+	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
+		_status.text = "Buffer inspection requires a scene-owned 3D camera"
+		return
+	_playback.pause()
+	_playback_accumulator = 0.0
+	_update_playback_ui()
+	var fixed_step: int = _playback.step_index
+	if _track_enabled != null and _track_enabled.button_pressed and \
+			not _apply_camera_track(fixed_step):
+		_status.text = "Cannot evaluate selected camera track at frozen inspection step"
+		return
+	camera = _viewport.get_camera_3d()
+	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
+		_status.text = "Buffer inspection camera changed during timeline freeze"
+		return
+	var started: Dictionary = _buffer_probe.begin(_rendering_method, _viewport, camera, scene, mode)
+	if not bool(started.get("ok", false)):
+		_status.text = "GPU buffer unavailable: " + String(started.get("error", "unsupported"))
+		return
+	_capture_pending = true
+	_status.text = "Inspecting native %s via GPU float readback…" % mode
+	var result: Dictionary = {}
+	for frame in range(180):
+		await RenderingServer.frame_post_draw
+		if not is_instance_valid(scene) or _active_scene != scene or \
+				not is_instance_valid(camera) or _viewport.get_camera_3d() != camera:
+			result = {"ok": false, "error": "Scene or camera changed during GPU buffer inspection"}
+			break
+		var state: Dictionary = _buffer_probe.status()
+		if state.get("state") == "ready":
+			result = _buffer_probe.take_image()
+			break
+		if state.get("state") == "failed":
+			result = {"ok": false, "error": String(state.get("error", ""))}
+			break
+	if result.is_empty():
+		result = {"ok": false, "error": "GPU buffer readback timed out after 180 rendered frames"}
+	var source: Dictionary = _buffer_probe.source(mode, result) if bool(result.get("ok", false)) else {}
+	_buffer_probe.release()
+	_capture_pending = false
+	if bool(result.get("ok", false)) and bool(_buffer_window.call(
+			"show_buffer", result["image"], mode, source)):
+		_status.text = "Captured real %s buffer at step %d (%d × %d; unmeasured)" % [
+			mode, fixed_step, int(result["width"]), int(result["height"])]
+		_log_event("info", "inspection", "render_buffer_readback", "Native render buffer sampled",
+			{"buffer": mode, "internal_width": int(result["width"]), "internal_height": int(result["height"])})
+	else:
+		_status.text = "GPU buffer inspection unavailable: " + String(result.get("error", "Cannot visualize float samples"))
 
 
 func _capture_linear_exr() -> void:

@@ -84,6 +84,8 @@ This allows developers to locate **which host callback submitted or accounted fo
 
 The existing `provider_gpu_timing`, `engine_viewport_telemetry` and standalone `Profile GPU stages` reports retain their independent measurement lanes. The provider timeline is not added to viewport GPU time; the compositor profiler's resolved frame IDs are not equated to `Engine.get_frames_drawn()`. True cross-system calibration, resource/queue handoff and synchronization attribution require an instrumented native adapter that exposes its actual queue/fence ownership.
 
+A separately packaged [native Vulkan device diagnostic](NATIVE_VULKAN_PROVIDER.md) exercises this exact contract using real C++23 GDExtension device submissions, GPU compute and transfers, timestamp queries, and completion fences. Its software-Vulkan CI covers actual backend execution but does not demonstrate physical GPU performance or shared-device interoperation.
+
 ## Validation
 
 The headless contract fixture deliberately uses **synthetic test values**, not claimed hardware measurements. It verifies resolved callback lifecycle, strict step identity, duplicate-event rejection, malformed timestamps and unresolved-wait rejection, dependency consistency, multiple queues with overlapping timestamps, different clock domains that cannot be compared, bounded reports, and absence of provider synchronization calls on cancellation. The ordinary legacy duration-only report remains compatible.

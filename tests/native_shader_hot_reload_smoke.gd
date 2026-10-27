@@ -5,6 +5,7 @@ extends SceneTree
 const Package = preload("res://scripts/native_experiment_package.gd")
 const Runner = preload("res://scripts/experiment_run.gd")
 const PipelineDiagnostics = preload("res://scripts/provider_pipeline_diagnostics.gd")
+const ProviderControls = preload("res://scripts/provider_runtime_controls.gd")
 const SAMPLES := 6
 
 
@@ -187,10 +188,56 @@ func _verify() -> void:
 	if not second_epoch.get("ok", false):
 		_fail("Reloaded shader failed second real GPU epoch: " + str(second_epoch))
 		return
+	# The shader-language selector uses the same provider runtime-control
+	# protocol as any other live provider setting; no host-owned compiler path.
+	var selected: Dictionary = ProviderControls.apply(scene, "forward_plus",
+		"shader_reload_language", "hlsl")
+	if not selected.get("ok", false):
+		_fail("Cannot select provider-owned HLSL mode: " + str(selected))
+		return
+	var hlsl_path := "res://experiments/native-vulkan-provider/reload_compute.hlsl"
+	if not FileAccess.file_exists(hlsl_path):
+		_fail("Installed provider does not include editable HLSL")
+		return
+	var hlsl_applied: Dictionary = scene.call("godauldron_reload_shader")
+	if not hlsl_applied.get("ok", false) or \
+			hlsl_applied.get("source_language") != "hlsl" or \
+			int(hlsl_applied.get("generation", -1)) != 3 or \
+			int(hlsl_applied.get("retired_pipelines", -1)) != 3:
+		_fail("DXC HLSL did not replace the Vulkan native pipeline: " + str(hlsl_applied))
+		return
+	var third_epoch: Dictionary = _run_epoch(scene)
+	if not third_epoch.get("ok", false):
+		_fail("DXC HLSL pipeline failed GPU output/fence verification: " + str(third_epoch))
+		return
+
+	# HLSL syntax failures must preserve the active HLSL pipeline.
+	var hlsl_failure: FileAccess = FileAccess.open("user://native_shader_bad.hlsl",
+		FileAccess.WRITE)
+	if hlsl_failure == null:
+		_fail("Could not stage HLSL compiler error")
+		return
+	hlsl_failure.store_string("not valid HLSL @@@")
+	hlsl_failure.close()
+	var bad_hlsl: Dictionary = scene.call("godauldron_reload_shader_from_source",
+		"user://native_shader_bad.hlsl")
+	if bad_hlsl.get("ok", true) or bad_hlsl.get("stage") != "compile":
+		_fail("Broken HLSL source was not rejected by DXC: " + str(bad_hlsl))
+		return
+	var diag_after_hlsl: Dictionary = PipelineDiagnostics.read(scene)
+	var source: Dictionary = diag_after_hlsl.get("source_reload", {})
+	if not diag_after_hlsl.get("available", false) or \
+			source.get("language") != "hlsl" or \
+			source.get("active_language") != "hlsl" or \
+			source.get("last_stage") != "compile" or \
+			int(diag_after_hlsl["pipelines"][0]["reload_generation"]) != 3:
+		_fail("HLSL compiler failure lost accepted pipeline or provenance: " +
+			str(diag_after_hlsl))
+		return
 	var final_diag: Dictionary = PipelineDiagnostics.read(scene)
 	if not final_diag.get("available", false) or \
-			int(final_diag["pipelines"][0].get("reload_generation", -1)) != 2:
-		_fail("Reloaded bytecode was not retained over provider setup")
+			int(final_diag["pipelines"][0].get("reload_generation", -1)) != 3:
+		_fail("Reloaded HLSL bytecode was not retained over provider setup")
 		return
-	print("Native Vulkan shader hot reload passed: compiled GLSL, rejected broken source/SPIR-V, retained PSO on failure, fenced retirement, verified GPU output twice")
+	print("Native Vulkan shader hot reload passed: GLSL and DXC HLSL compiled, three fenced GPU epochs correct, invalid source/ABI rejected without PSO retirement")
 	quit(0)

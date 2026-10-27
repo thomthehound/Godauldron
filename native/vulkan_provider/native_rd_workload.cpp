@@ -8,12 +8,107 @@
 
 #include <chrono>
 #include <cstring>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace {
 using HostClock = std::chrono::steady_clock;
 int64_t elapsed_host_usec(HostClock::time_point since) {
     return std::chrono::duration_cast<std::chrono::microseconds>(
         HostClock::now() - since).count();
+}
+// The persistent RD shader owns one r32ui 2D storage image at set 0,
+// binding 0, one 8x8x1 compute entry and an 8-byte push-constant block.
+// Validate the *types* behind descriptor decorations, not just their numbers.
+// Godot still validates/compiles the candidate via RenderingDevice.
+bool has_rd_image_abi(const godot::PackedByteArray &bytecode) {
+    if (bytecode.size() < 20 || bytecode.size() > 1024 * 1024 ||
+        bytecode.size() % 4 != 0) return false;
+    std::vector<uint32_t> w(static_cast<size_t>(bytecode.size()) / 4);
+    std::memcpy(w.data(), bytecode.ptr(), static_cast<size_t>(bytecode.size()));
+    if (w[0] != 0x07230203u || w[1] < 0x00010000u ||
+        w[1] > 0x00010300u) return false;
+    struct Pointer { uint32_t storage; uint32_t target; };
+    struct Var { uint32_t type; uint32_t storage; };
+    struct Image { uint32_t dim; uint32_t arrayed; uint32_t ms;
+                   uint32_t sampled; uint32_t format; };
+    std::unordered_map<uint32_t, Pointer> pointers;
+    std::unordered_map<uint32_t, Var> vars;
+    std::unordered_map<uint32_t, Image> images;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> structures;
+    std::unordered_set<uint32_t> uint32_types;
+    std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint32_t>> offsets;
+    std::unordered_map<uint32_t, uint32_t> sets, bindings;
+    bool local_size = false;
+    uint32_t entry_count = 0;
+    for (size_t i = 5; i < w.size();) {
+        const uint32_t count = w[i] >> 16;
+        const uint32_t op = w[i] & 0xffffu;
+        if (!count || i + count > w.size()) return false;
+        if (op == 15 && count >= 4) { // OpEntryPoint
+            if (w[i + 1] != 5) return false;
+            ++entry_count;
+        } else if (op == 16 && count >= 3 && w[i + 2] == 17) {
+            if (count != 6 || w[i + 3] != 8 || w[i + 4] != 8 ||
+                w[i + 5] != 1) return false;
+            local_size = true;
+        } else if (op == 71 && count == 4) { // OpDecorate
+            if (w[i + 2] == 34) sets[w[i + 1]] = w[i + 3];
+            if (w[i + 2] == 33) bindings[w[i + 1]] = w[i + 3];
+        } else if (op == 72 && count == 5 && w[i + 3] == 35) {
+            // OpMemberDecorate Offset
+            offsets[w[i + 1]][w[i + 2]] = w[i + 4];
+        } else if (op == 21 && count == 4 && w[i + 2] == 32 &&
+                   w[i + 3] == 0) {
+            uint32_types.insert(w[i + 1]);
+        } else if (op == 25 && count >= 9) { // OpTypeImage
+            images[w[i + 1]] = {w[i + 3], w[i + 5], w[i + 6],
+                                w[i + 7], w[i + 8]};
+        } else if (op == 30 && count >= 2) { // OpTypeStruct
+            structures[w[i + 1]] = std::vector<uint32_t>(
+                w.begin() + i + 2, w.begin() + i + count);
+        } else if (op == 32 && count == 4) { // OpTypePointer
+            pointers[w[i + 1]] = {w[i + 2], w[i + 3]};
+        } else if (op == 59 && count >= 4) { // OpVariable
+            vars[w[i + 2]] = {w[i + 1], w[i + 3]};
+        }
+        i += count;
+    }
+    if (entry_count != 1 || !local_size) return false;
+    uint32_t images_found = 0, push_found = 0;
+    for (const auto &[id, var] : vars) {
+        if (var.storage != 0 && var.storage != 2 &&
+            var.storage != 9 && var.storage != 12) continue;
+        const auto ptr = pointers.find(var.type);
+        if (ptr == pointers.end() || ptr->second.storage != var.storage)
+            return false;
+        if (var.storage == 0) {
+            ++images_found;
+            if (sets.find(id) == sets.end() || bindings.find(id) == bindings.end() ||
+                sets.at(id) != 0 || bindings.at(id) != 0) return false;
+            const auto img = images.find(ptr->second.target);
+            if (img == images.end() || img->second.dim != 1 ||
+                img->second.arrayed != 0 || img->second.ms != 0 ||
+                img->second.sampled != 2 || img->second.format != 33)
+                return false;
+        } else if (var.storage == 9) {
+            ++push_found;
+            const auto type = structures.find(ptr->second.target);
+            const auto layout = offsets.find(ptr->second.target);
+            if (type == structures.end() || type->second.size() != 2 ||
+                !uint32_types.contains(type->second[0]) ||
+                !uint32_types.contains(type->second[1]) ||
+                layout == offsets.end() || layout->second.size() != 2 ||
+                layout->second.find(0) == layout->second.end() ||
+                layout->second.find(1) == layout->second.end() ||
+                layout->second.at(0) != 0 || layout->second.at(1) != 4)
+                return false;
+        } else {
+            return false; // Other uniform/storage resources not in this PSO.
+        }
+    }
+    return images_found == 1 && push_found == 1;
 }
 } // namespace
 #ifdef _WIN32
@@ -334,6 +429,9 @@ Dictionary NativeRDWorkload::replace_spirv(
         bytecode.decode_u32(4) < 0x00010000u ||
         bytecode.decode_u32(4) > 0x00010300u) {
         return failure("shader", "rd_pipeline_reload_invalid_vulkan11_spirv");
+    }
+    if (!has_rd_image_abi(bytecode)) {
+        return failure("shader", "rd_pipeline_reload_incompatible_image_or_push_constant_abi");
     }
     Ref<RDShaderSPIRV> shader_code;
     shader_code.instantiate();

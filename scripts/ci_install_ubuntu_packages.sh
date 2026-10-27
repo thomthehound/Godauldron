@@ -55,6 +55,13 @@ printf 'Installing missing Ubuntu dependencies: %s\n' "${missing[*]}"
 # never installed merely because they exist in the cache.
 cache_dir="${GITHUB_WORKSPACE:-$PWD}/.ci-apt-archives"
 mkdir -p "$cache_dir"
+# APT creates unreadable root-owned lock and partial entries. Remove those
+# after the last package operation so actions/cache can archive the .deb files.
+cleanup_cache() {
+    sudo rm -f -- "$cache_dir/lock"
+    sudo rm -rf -- "$cache_dir/partial"
+}
+trap cleanup_cache EXIT
 sudo install -d -o _apt -g root -m 755 "$cache_dir/partial"
 apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20
              -o Acquire::https::Timeout=20

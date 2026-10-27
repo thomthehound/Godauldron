@@ -3,6 +3,7 @@ extends RefCounted
 ## GPU completion and rendering time are NOT measured here.
 
 const Observability = preload("res://scripts/performance_observability.gd")
+const ProviderGPUTimeline = preload("res://scripts/provider_gpu_timeline.gd")
 
 enum Phase { IDLE, WARMUP, SAMPLE, COMPLETED, CANCELLED }
 
@@ -115,11 +116,16 @@ func make_report(experiment_id: String) -> Dictionary:
 		if typeof(reported) == TYPE_DICTIONARY:
 			metrics = reported.duplicate(true)
 	var gpu_timing: Dictionary = {"available": false, "reason": "run_not_completed"}
+	var provider_timeline: Dictionary = ProviderGPUTimeline.unavailable("run_not_completed")
 	if phase == Phase.COMPLETED:
 		gpu_timing = Observability.resolved_gpu_report(null)
 		if _scene != null and _scene.has_method("godauldron_resolved_gpu_timings"):
 			# Evaluated only after sampling; never charged to host callback timing.
 			gpu_timing = Observability.resolved_gpu_report(_scene.call("godauldron_resolved_gpu_timings"))
+		provider_timeline = ProviderGPUTimeline.unavailable("provider_gpu_timeline_not_reported")
+		if _scene != null and _scene.has_method("godauldron_resolved_gpu_timeline"):
+			provider_timeline = ProviderGPUTimeline.resolved_report(
+				_scene.call("godauldron_resolved_gpu_timeline"), sample_steps_completed)
 	return {
 		"format_version": 1,
 		"experiment_id": experiment_id,
@@ -141,6 +147,7 @@ func make_report(experiment_id: String) -> Dictionary:
 		"host_observability": host_observations.duplicate(true),
 		"invalid_reason": _invalid_reason,
 		"provider_gpu_timing": gpu_timing,
+		"provider_gpu_timeline": provider_timeline,
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
 		"timestamp": Time.get_datetime_string_from_system()

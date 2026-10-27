@@ -3307,6 +3307,8 @@ func _reload_provider_shader() -> void:
 	var result: Variant = _active_scene.call("godauldron_reload_shader")
 	if typeof(result) != TYPE_DICTIONARY or result.get("ok") != true:
 		_status.text = "Native shader reload failed: " + str(result)
+	elif result.get("queued", false):
+		_status.text = "Native shader replacement queued on provider render thread; inspect pipelines after completion"
 	else:
 		_status.text = "Native shader pipeline replaced (generation %d)" % int(result.get("generation", -1))
 	_pipeline_lifecycle_label.text = PipelineDiagnostics.summary(PipelineDiagnostics.read(_active_scene))

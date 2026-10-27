@@ -131,6 +131,7 @@ var _environment_label: Label
 var _observability_plot: Control
 var _observability_label: Label
 var _provider_timing_label: Label
+var _provider_timeline_label: Label
 var _last_observability_ui_tick: int = -1
 var _run_steps: SpinBox
 var _warmup_steps: SpinBox
@@ -687,6 +688,10 @@ func _build_ui() -> void:
 	_provider_timing_label.text = "Provider GPU: unavailable (no resolved device report)"
 	_provider_timing_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	performance_text.add_child(_provider_timing_label)
+	_provider_timeline_label = Label.new()
+	_provider_timeline_label.text = "Native timeline: unavailable (not reported)"
+	_provider_timeline_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	performance_text.add_child(_provider_timeline_label)
 	_observability_plot = PerformancePlot.new()
 	_observability_plot.custom_minimum_size = Vector2(260, 76)
 	_observability_plot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1865,6 +1870,7 @@ func _select_experiment(index: int) -> void:
 	_engine_render.reset()
 	_last_observability_ui_tick = -1
 	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
+	_provider_timeline_label.text = "Native timeline: unavailable (no completed run)"
 	_gpu_stage_label.text = "GPU stage intervals: not captured for selected experiment"
 	_update_observability_ui()
 	_telemetry.text = "Host stepping: idle"
@@ -2860,6 +2866,7 @@ func _start_run() -> void:
 	_observability.reset_run()
 	_engine_render.reset()
 	_provider_timing_label.text = "Provider GPU: pending completed run (not measured by host)"
+	_provider_timeline_label.text = "Native timeline: pending completed provider report"
 	_run_diagnostic_cursor = int(_diagnostics.snapshot()["total_recorded"])
 	_console_filter.disabled = true
 	_run = ExperimentRun.new()
@@ -3069,7 +3076,7 @@ func _finish_run(completed: bool) -> void:
 		"truncated": run_events_truncated or ring_evicted_current_run
 	}
 	report["report_preparation_host_wall_usec"] = Time.get_ticks_usec() - report_preparation_started_usec
-	report["report_preparation_boundary"] = "run report construction, experiment metrics, provider timing and optional diagnostics queries; excludes JSON serialization and disk I/O"
+	report["report_preparation_boundary"] = "run report construction, experiment metrics, provider timing/timeline resolution and optional diagnostics queries; excludes JSON serialization and disk I/O"
 	var gpu: Dictionary = report["provider_gpu_timing"]
 	if bool(gpu.get("available", false)):
 		_provider_timing_label.text = "Provider GPU (%s; declared resolved): p50 %.3f / p95 %.3f ms" % [
@@ -3079,6 +3086,19 @@ func _finish_run(completed: bool) -> void:
 		]
 	else:
 		_provider_timing_label.text = "Provider GPU: unavailable (%s)" % String(gpu.get("reason", "not reported"))
+	var timeline: Dictionary = report["provider_gpu_timeline"]
+	if bool(timeline.get("available", false)):
+		var entries: PackedStringArray = PackedStringArray()
+		for kind in ["compute", "transfer", "graphics", "barrier_window"]:
+			var stats: Dictionary = timeline["gpu_segments_by_kind"][kind]
+			if int(stats["count"]) > 0:
+				entries.append("%s p50 %.3f ms" % [
+					kind.replace("_", " "), float(stats["p50_usec"]) / 1000.0])
+		var waits: int = int(timeline["host_wait_count"])
+		_provider_timeline_label.text = "Native GPU (provider-reported): %s | %d host waits (separate CPU wall) | %d queues/steps (no shared clock)" % [
+			", ".join(entries), waits, timeline["queue_step_unions"].size()]
+	else:
+		_provider_timeline_label.text = "Native timeline: unavailable (%s)" % String(timeline.get("reason", "not reported"))
 	report["engine_viewport_telemetry"] = _engine_render.sample_report()
 	report["runtime_environment"] = _runtime_environment.duplicate(true)
 	report["environment"] = _environment_provenance()

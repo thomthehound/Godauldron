@@ -112,7 +112,7 @@ func _run() -> void:
 	var seeds := PackedInt32Array()
 	for i in range(passes):
 		seeds.append(i + 1)
-	var expected_seed_sum: int = passes * (passes + 1) / 2
+	var expected_seed_sum: int = (passes * (passes + 1)) >> 1
 	var count: int = int(_settings["warmup"]) + int(_settings["samples"])
 	var records: Array[Dictionary] = []
 	var provenance: Dictionary = {}

@@ -3076,7 +3076,7 @@ func _finish_run(completed: bool) -> void:
 		"truncated": run_events_truncated or ring_evicted_current_run
 	}
 	report["report_preparation_host_wall_usec"] = Time.get_ticks_usec() - report_preparation_started_usec
-	report["report_preparation_boundary"] = "run report construction, experiment metrics, resolved provider GPU timelines and timing, optional diagnostics queries; excludes JSON serialization and disk I/O"
+	report["report_preparation_boundary"] = "run report construction, experiment metrics, provider timing, resolved GPU timeline synchronization and optional diagnostics queries; excludes JSON serialization and disk I/O"
 	var gpu: Dictionary = report["provider_gpu_timing"]
 	if bool(gpu.get("available", false)):
 		_provider_timing_label.text = "Provider GPU (%s; declared resolved): p50 %.3f / p95 %.3f ms" % [

@@ -47,9 +47,9 @@ func _run() -> void:
 	var device_type: int = RenderingServer.get_video_adapter_type()
 	print("Native RD validation backend=", expected_driver,
 		" device=", device_name, " type=", device_type)
-	if windows_d3d12 and device_type != RenderingDevice.DEVICE_TYPE_CPU:
-		_fail("D3D12 software WARP required; current adapter is not CPU-backed: " + device_name)
-		return
+	# Godot's adapter type is a rendering heuristic, not a reliable DXGI
+	# software flag. The compositor C++ witness checks the exact DXGI
+	# adapter PCI identity and matches its LUID to the live D3D12 device.
 	var manifest_path := ("res://experiments/native-rd-windows/manifest.json"
 		if windows_d3d12 else "res://experiments/native-vulkan-provider/manifest.json")
 	var effect_path := ("res://experiments/native-rd-windows/native_persistent_workload_effect.gd"
@@ -122,6 +122,18 @@ func _run() -> void:
 		var bytes: PackedByteArray = result.get("bytes", PackedByteArray())
 		var recorded: Dictionary = result.get("record", {})
 		var completed: Dictionary = result.get("completion", {})
+		if windows_d3d12:
+			var dxgi: Dictionary = result.get("adapter_evidence", {})
+			if dxgi.get("backend") != "d3d12" or \
+					not dxgi.get("verified_software", false) or \
+					not dxgi.get("device_luid_matched", false) or \
+					int(dxgi.get("vendor_id", 0)) != 0x1414 or \
+					int(dxgi.get("device_id", 0)) != 0x008C:
+				_fail("Actual D3D12 device lacks matched Microsoft software DXGI identity: " + str(dxgi))
+				return
+			if batch_index == 0:
+				print("Verified actual software DXGI adapter: ", dxgi)
+
 		total_dispatches += seeds.size()
 		if not result.get("ok", false) or bytes.size() != ELEMENTS * 4 or \
 				not result.get("rejected_early_release", false) or \

@@ -92,8 +92,8 @@ func _verify() -> void:
 		_fail("Pinned magnifier allowed an unexpected GPU readback")
 		return
 	pin.button_pressed = false
-	var picker: OptionButton = host.get("_pixel_tile_picker")
-	picker.select(2)
+	var tile_picker: OptionButton = host.get("_pixel_tile_picker")
+	tile_picker.select(2)
 	container.gui_input.emit(click)
 	if not bool(host.get("_capture_pending")):
 		_fail("New 21×21 neighborhood did not request an explicit frame")

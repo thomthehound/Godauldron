@@ -2,6 +2,18 @@
 
 The physical AMD acceptance path executes a Godot-owned native C++23 compute workload on D3D12. It verifies the actual DXGI adapter against the live D3D12 device, checks every output pixel, and requires resolved GPU timestamps for all measured batches. These measurements are distinct from the laboratory's frame, rendering, and independent-provider profiles.
 
+### Periodic GPU checkpoints without per-submission readback
+
+The sustained runner also supports a **readback checkpoint interval**:
+
+```powershell
+.\scripts\run_native_rd_amd.ps1 -StreamSlots 3 -ReadbackInterval 4 -Warmup 12 -Samples 100 -Passes 8 -ResidentBatches 4 -Output native_rd_amd_checkpoint4.json
+```
+
+With `-ReadbackInterval 4`, each of the three slots records **four separate native compute lists** against its own retained image. A storage-image barrier orders each additional list after the preceding list. One asynchronous texture readback of the accumulated output acknowledges completion of all four lists; the adapter never signals completion early. Every checkpoint's three-pixel test depends on the contributions of all four lists, and the final checkpoint undergoes a full-image scan outside the measured window.
+
+The result reports *recorded compute lists* and *completed readback checkpoints* as distinct counts. This mode removes 75% of previously mandatory GPU-to-host transfers per fixed number of lists, without removing the final correctness and resource-retirement proof. Readback timing, driver overhead and Godot frame cadence still contribute to host-observed throughput; these numbers are not GPU-only execution times. The existing default `-ReadbackInterval 1` retains one readback per list. The warmup must be at least `StreamSlots × ReadbackInterval`, and warmup and sample counts must be multiples of the interval (so measurement never straddles a checkpoint). Intervals are bounded to 1–16.
+
 ## Sustained execution with minimized test-appliance overhead
 
 To test **sustained dispatch throughput** without submitting and validating each sample from the host frame loop, use the same runner in autonomous mode:

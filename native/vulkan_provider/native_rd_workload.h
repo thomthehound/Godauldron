@@ -21,6 +21,11 @@ public:
     godot::Dictionary record_series(godot::RenderingDevice *rd,
                                     const godot::PackedInt32Array &seeds,
                                     int64_t repetitions);
+    // Record further compute lists against the same image without a CPU
+    // readback. A final asynchronous readback completes the whole checkpoint.
+    godot::Dictionary record_checkpoint_series(godot::RenderingDevice *rd,
+                                               const godot::PackedInt32Array &seeds,
+                                               int64_t repetitions);
     godot::Dictionary mark_readback_complete();
     godot::Dictionary release(godot::RenderingDevice *rd);
     godot::Dictionary diagnostics() const;
@@ -52,6 +57,12 @@ private:
     int64_t dispatch_count_ = 0;
     int64_t completion_count_ = 0;
     int64_t pending_batch_count_ = 0;
+    int64_t checkpoint_dispatches_pending_ = 0;
+    int64_t checkpoint_lists_pending_ = 0;
+    bool checkpoint_active_ = false;
+    godot::Dictionary record_impl(godot::RenderingDevice *rd,
+                                  const godot::PackedInt32Array &seeds,
+                                  int64_t repetitions, bool checkpoint);
 
     static godot::Dictionary reject(const char *reason);
 };

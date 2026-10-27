@@ -44,6 +44,7 @@ var _stream_last_bytes := PackedByteArray()
 var _stream_result_taken := false
 var _stream_expected_seed_sum := 0
 var _stream_dispatches := 0
+var _stream_readback_interval := 1
 
 
 func _init(width: int = 13, height: int = 9,
@@ -80,7 +81,7 @@ func submit_series(seeds: PackedInt32Array, repetitions: int = 1) -> int:
 # The render callback automatically replenishes the ring until this finite
 # workload finishes. Only the final output requires a full CPU pixel scan.
 func begin_stream(seeds: PackedInt32Array, repetitions: int,
-		warmup: int, samples: int) -> bool:
+		warmup: int, samples: int, readback_interval: int = 1) -> bool:
 	if _capacity < 2 or _capacity > 4 or \
 			_width < 1 or _height < 1 or _width > 2048 or _height > 2048 or \
 			_width * _height > MAX_PIXELS or \
@@ -88,7 +89,12 @@ func begin_stream(seeds: PackedInt32Array, repetitions: int,
 			seeds.is_empty() or seeds.size() > 32 or \
 			repetitions < 1 or repetitions > 256 or \
 			repetitions * seeds.size() > 2048 or \
-			warmup < _capacity or warmup > 64 or samples < 2 or samples > 1024:
+			warmup < _capacity * readback_interval or warmup > 64 or \
+			samples < 2 or samples > 1024 or \
+			readback_interval < 1 or readback_interval > 16 or \
+			(warmup % readback_interval) != 0 or \
+			(samples % readback_interval) != 0 or \
+			repetitions * seeds.size() * readback_interval > 32768:
 		return false
 	for seed in seeds:
 		if seed < 1 or seed > 65535:
@@ -104,6 +110,7 @@ func begin_stream(seeds: PackedInt32Array, repetitions: int,
 		_stream_expected_seed_sum = 0
 		for seed in seeds:
 			_stream_expected_seed_sum += seed * repetitions
+		_stream_readback_interval = readback_interval
 		_stream_repetitions = repetitions
 		_stream_warmup = warmup
 		_stream_samples = samples
@@ -123,6 +130,8 @@ func stream_snapshot() -> Dictionary:
 		"warmup": _stream_warmup, "samples": _stream_samples,
 		"resident_batches": _stream_repetitions,
 		"dispatches_per_sample": _stream_repetitions * _stream_seeds.size(),
+		"readback_interval": _stream_readback_interval,
+		"readbacks_expected": total / _stream_readback_interval,
 		"submitted": _stream_next, "completed": _stream_completed,
 		"sentinel_checked": _stream_checked,
 		"first_measured_submit_usec": _stream_first_measured_usec,
@@ -289,14 +298,15 @@ func _on_readback(data: PackedByteArray, slot_index: int, request_id: int,
 		for pixel in [0, count / 2, count - 1]:
 			var index: int = int(pixel)
 			if data.decode_u32(index * 4) != \
-					_stream_expected_seed_sum + _stream_dispatches * index:
+					_stream_readback_interval * (
+						_stream_expected_seed_sum + _stream_dispatches * index):
 				_fail("Autonomous stream GPU result incorrect at request %d pixel %d" %
 					[request_id, index])
 				return
 		var now: int = Time.get_ticks_usec()
 		_mutex.lock()
 		_in_flight -= 1
-		_stream_completed += 1
+		_stream_completed += _stream_readback_interval
 		_stream_checked += 1
 		if request_id == _stream_warmup + _stream_samples - 1:
 			_stream_last_bytes = data
@@ -367,11 +377,11 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 			elif _stream_enabled and _stream_next < \
 					_stream_warmup + _stream_samples:
 				request = {
-					"id": _stream_next,
+					"id": _stream_next + _stream_readback_interval - 1,
 					"seeds": _stream_seeds,
 					"repetitions": _stream_repetitions
 				}
-				_stream_next += 1
+				_stream_next += _stream_readback_interval
 		_mutex.unlock()
 		if request.is_empty():
 			break
@@ -381,12 +391,23 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 			return
 		var slot: Dictionary = _slots[slot_index]
 		var record_start: int = Time.get_ticks_usec()
-		if _stream_enabled and int(request["id"]) == _stream_warmup:
+		if _stream_enabled and int(request["id"]) + 1 - _stream_readback_interval == _stream_warmup:
 			_mutex.lock()
 			_stream_first_measured_usec = record_start
 			_mutex.unlock()
-		var record: Dictionary = slot["workload"].call(
-			"record_series", rd, request["seeds"], request["repetitions"])
+		var record: Dictionary = {}
+		if _stream_enabled and _stream_readback_interval > 1:
+			# Multiple dependency-ordered compute lists per checkpoint.
+			# Only the last list causes a CPU readback.
+			for list_index in range(_stream_readback_interval):
+				record = slot["workload"].call("record_checkpoint_series",
+					rd, request["seeds"], request["repetitions"])
+				if not bool(record.get("ok", false)):
+					_fail("Native checkpoint list rejected: " + str(record))
+					return
+		else:
+			record = slot["workload"].call(
+				"record_series", rd, request["seeds"], request["repetitions"])
 		if not bool(record.get("ok", false)):
 			_fail("Native ring dispatch rejected: " + str(record))
 			return
@@ -396,7 +417,6 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 			_mutex.unlock()
 		slot["busy"] = true
 		slot["id"] = int(request["id"])
-		# Avoid copying diagnostic dictionaries for every streamed batch.
 		if not _stream_enabled:
 			slot["record"] = record
 		_mutex.lock()

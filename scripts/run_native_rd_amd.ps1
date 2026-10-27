@@ -8,6 +8,7 @@ param(
     [int]$Passes = 8,
     [int]$ResidentBatches = 1,
     [int]$StreamSlots = 0,
+    [int]$ReadbackInterval = 1,
     [string]$Output = "native_rd_amd_profile.json",
     [string]$Baseline = ""
 )
@@ -40,6 +41,18 @@ try {
     if ($StreamSlots -ne 0 -and ($StreamSlots -lt 2 -or $StreamSlots -gt 4)) {
         throw "StreamSlots must be 0 (serial) or 2..4 (autonomous)"
     }
+    if ($ReadbackInterval -lt 1 -or $ReadbackInterval -gt 16) {
+        throw "ReadbackInterval must be 1..16"
+    }
+    if ($ReadbackInterval -gt 1 -and $StreamSlots -eq 0) {
+        throw "Checkpoint readbacks require -StreamSlots 2..4"
+    }
+    if ($ReadbackInterval -gt 1 -and
+        ($Warmup -lt $StreamSlots * $ReadbackInterval -or
+         $Warmup % $ReadbackInterval -ne 0 -or
+         $Samples % $ReadbackInterval -ne 0)) {
+        throw "Checkpoint mode requires warmup >= slots * interval, and both warmup and samples divisible by interval"
+    }
     $script = if ($StreamSlots -gt 0) {
         "res://tests/native_rd_stream_profile.gd"
     } else {
@@ -50,7 +63,7 @@ try {
         "--mode", "physical_amd", "--width", "$Width", "--height", "$Height",
         "--warmup", "$Warmup", "--samples", "$Samples", "--passes", "$Passes",
         "--resident_batches", "$ResidentBatches", "--output", "$destination")
-    if ($StreamSlots -gt 0) { $gpuArgs += @("--slots", "$StreamSlots") }
+    if ($StreamSlots -gt 0) { $gpuArgs += @("--slots", "$StreamSlots", "--readback_interval", "$ReadbackInterval") }
     & $godot @gpuArgs
     if ($LASTEXITCODE -ne 0) { throw "Physical AMD native GPU acceptance failed" }
     if ($StreamSlots -gt 0) {

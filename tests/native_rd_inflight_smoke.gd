@@ -207,6 +207,57 @@ func _run() -> void:
 		_fail("Autonomous stream leaked resources: " + str(stream_released))
 		return
 
+	# Checkpoint mode records multiple GPU compute lists per image but
+	# submits one asynchronous readback per checkpoint. The returned pixels
+	# depend on every list (not only on the final list).
+	var checkpointed: CompositorEffect = effect_script.new(WIDTH, HEIGHT, CAPACITY)
+	var checkpoint_effects: Array[CompositorEffect] = [checkpointed]
+	compositor.compositor_effects = checkpoint_effects
+	if bool(checkpointed.call("begin_stream", PackedInt32Array([2, 4]),
+			2, 3, 12, 2)) or \
+			not bool(checkpointed.call("begin_stream", PackedInt32Array([2, 4]),
+			2, 6, 12, 2)):
+		_fail("GPU checkpoints accepted insufficient warmup or rejected a valid stream")
+		return
+	var checkpoint_done: Dictionary = {}
+	for frame in range(600):
+		await process_frame
+		checkpoint_done = checkpointed.call("stream_snapshot")
+		if not String(checkpoint_done.get("error", "")).is_empty() or \
+				checkpoint_done.get("finished", false):
+			break
+	if not checkpoint_done.get("finished", false) or \
+			int(checkpoint_done.get("submitted", -1)) != 18 or \
+			int(checkpoint_done.get("completed", -1)) != 18 or \
+			int(checkpoint_done.get("sentinel_checked", -1)) != 9 or \
+			int(checkpoint_done.get("readback_interval", -1)) != 2 or \
+			int(checkpoint_done.get("high_water_in_flight", -1)) != CAPACITY or \
+			int(checkpoint_done.get("created_slots", -1)) != CAPACITY or \
+			not String(checkpoint_done.get("error", "")).is_empty():
+		_fail("GPU checkpoint cadence or completion is incorrect: " + str(checkpoint_done))
+		return
+	var checkpoint_bytes: PackedByteArray = checkpointed.call("take_stream_final")
+	if checkpoint_bytes.size() != ELEMENTS * 4:
+		_fail("Native GPU checkpoint omitted final readback")
+		return
+	for pixel in range(ELEMENTS):
+		if checkpoint_bytes.decode_u32(pixel * 4) != 24 + 8 * pixel:
+			_fail("Cross-list GPU dependency mismatch at pixel %d" % pixel)
+			return
+	if not bool(checkpointed.call("request_release")):
+		_fail("Checkpointed stream rejected completed resource retirement")
+		return
+	var checkpoint_released: Dictionary = {}
+	for frame in range(210):
+		await process_frame
+		checkpoint_released = checkpointed.call("status")
+		if checkpoint_released.get("released", false) or \
+				not String(checkpoint_released.get("error", "")).is_empty():
+			break
+	if not checkpoint_released.get("released", false) or \
+			int(checkpoint_released.get("released_slots", -1)) != CAPACITY:
+		_fail("Checkpointed stream leaked native GPU resources: " + str(checkpoint_released))
+		return
 	camera.compositor = null
 	print("Native RD in-flight ring passed: ", REQUESTS.size(),
 		" independently verified submissions, ", CAPACITY,

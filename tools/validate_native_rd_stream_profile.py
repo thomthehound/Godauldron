@@ -10,7 +10,7 @@ from pathlib import Path
 def validate(data: dict, *, physical: bool) -> None:
     if (data.get("schema_version") != 1 or
             data.get("capture_type") != "godauldron_native_rd_autonomous_stream" or
-            data.get("execution_mode") != "autonomous_inflight" or
+            data.get("execution_mode") not in ("autonomous_inflight", "autonomous_checkpointed") or
             data.get("backend") != "d3d12" or
             data.get("validated") is not True):
         raise ValueError("Invalid sustained native RD report identity")
@@ -21,15 +21,21 @@ def validate(data: dict, *, physical: bool) -> None:
     width, height = s.get("width"), s.get("height")
     passes, resident = s.get("passes"), s.get("resident_batches")
     slots, warmup, samples = s.get("slots"), s.get("warmup"), s.get("samples")
+    interval = s.get("readback_interval", 1)
     if (any(type(n) is not int for n in
-            (width, height, passes, resident, slots, warmup, samples)) or
+            (width, height, passes, resident, slots, warmup, samples, interval)) or
             not (1 <= width <= 2048 and 1 <= height <= 2048 and
                  width * height <= 1024 * 1024) or
             not (1 <= passes <= 32 and 1 <= resident <= 256 and
                  passes * resident <= 2048) or
-            not (2 <= slots <= 4 and slots <= warmup <= 64 and
-                 2 <= samples <= 1024)):
+            not (2 <= slots <= 4 and slots * interval <= warmup <= 64 and
+                 2 <= samples <= 1024 and 1 <= interval <= 16 and
+                 warmup % interval == 0 and samples % interval == 0 and
+                 passes * resident * interval <= 32768)):
         raise ValueError("Invalid sustained workload bounds")
+    mode = ("autonomous_checkpointed" if interval > 1 else "autonomous_inflight")
+    if data.get("execution_mode") != mode:
+        raise ValueError("Stream report mode contradicts readback cadence")
     adapter = data.get("adapter_provenance", {})
     if adapter.get("device_luid_matched") is not True or adapter.get("backend") != "d3d12":
         raise ValueError("Actual Godot D3D12 device identity not established")
@@ -47,6 +53,10 @@ def validate(data: dict, *, physical: bool) -> None:
             m.get("measured_submissions") != samples or
             m.get("total_submissions_including_warmup") != samples + warmup or
             m.get("dispatches_per_submission") != passes * resident or
+            m.get("readback_interval", 1) != interval or
+            m.get("measured_readbacks", samples) != samples // interval or
+            m.get("total_readbacks_including_warmup", samples + warmup) !=
+                (samples + warmup) // interval or
             m.get("clock") != "Time.get_ticks_usec monotonic host clock" or
             "NOT GPU execution time" not in m.get("scope", "")):
         raise ValueError("Sustained host measurement lacks valid scope or counts")
@@ -63,11 +73,14 @@ def validate(data: dict, *, physical: bool) -> None:
     if (any(type(cpu.get(k)) is not int or cpu[k] < 0 for k in
             ("measured_record_calls_usec", "measured_callback_usec",
              "post_measurement_full_validation_usec")) or
-            cpu.get("sentinel_checked_submissions") != samples + warmup or
+            cpu.get("sentinel_checked_readbacks") !=
+                (samples + warmup) // interval or
             "excludes" not in cpu.get("scope", "")):
         raise ValueError("Appliance overhead is not separately accounted")
     life = data.get("resource_lifecycle", {})
     if (life.get("ring_slots") != slots or
+            life.get("readback_interval", 1) != interval or
+            life.get("readbacks_per_slot_group", 1) != 1 or
             life.get("high_water_in_flight") != slots or
             life.get("created_slots") != slots or
             life.get("released_slots") != slots):

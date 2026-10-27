@@ -21,6 +21,8 @@ void NativeRDWorkload::_bind_methods() {
                          &NativeRDWorkload::record_batch);
     ClassDB::bind_method(D_METHOD("record_series", "rendering_device", "seeds", "repetitions"),
                          &NativeRDWorkload::record_series);
+    ClassDB::bind_method(D_METHOD("record_checkpoint_series", "rendering_device", "seeds", "repetitions"),
+                         &NativeRDWorkload::record_checkpoint_series);
     ClassDB::bind_method(D_METHOD("mark_readback_complete"),
                          &NativeRDWorkload::mark_readback_complete);
     ClassDB::bind_method(D_METHOD("release", "rendering_device"),
@@ -163,9 +165,26 @@ Dictionary NativeRDWorkload::record_batch(RenderingDevice *rd,
 Dictionary NativeRDWorkload::record_series(RenderingDevice *rd,
                                           const PackedInt32Array &seeds,
                                           int64_t repetitions) {
-    if (phase_ != Phase::PREPARED || rd == nullptr || rd != rd_ ||
+    return record_impl(rd, seeds, repetitions, false);
+}
+
+Dictionary NativeRDWorkload::record_checkpoint_series(RenderingDevice *rd,
+                                          const PackedInt32Array &seeds,
+                                          int64_t repetitions) {
+    return record_impl(rd, seeds, repetitions, true);
+}
+
+Dictionary NativeRDWorkload::record_impl(RenderingDevice *rd,
+                                          const PackedInt32Array &seeds,
+                                          int64_t repetitions, bool checkpoint) {
+    if ((phase_ != Phase::PREPARED &&
+         !(checkpoint && checkpoint_active_ && phase_ == Phase::PENDING)) ||
+        rd == nullptr || rd != rd_ ||
         !image_.is_valid() || !pipeline_.is_valid() || !uniform_set_.is_valid()) {
         return reject("workload_not_ready_or_device_changed");
+    }
+    if (!checkpoint && checkpoint_active_) {
+        return reject("checkpoint_requires_readback");
     }
     // Fail closed before recording any commands; no partially published batch.
     if (seeds.size() < 1 || seeds.size() > 32) {
@@ -184,12 +203,19 @@ Dictionary NativeRDWorkload::record_series(RenderingDevice *rd,
     int64_t commands = rd->compute_list_begin();
     rd->compute_list_bind_compute_pipeline(commands, pipeline_);
     rd->compute_list_bind_uniform_set(commands, uniform_set_, 0);
+    // A barrier at the start of a later checkpoint list orders the prior
+    // compute list's storage-image writes before this list reads the image.
+    // Both backends must pass the real GPU correctness/validation tests.
+    if (checkpoint && checkpoint_dispatches_pending_ > 0) {
+        rd->compute_list_add_barrier(commands);
+    }
     // A single list holds the complete GPU-resident series. Every dispatch
     // depends on the previous image write; only the first dispatch resets it.
     for (int64_t batch = 0; batch < repetitions; ++batch) {
         for (int i = 0; i < seeds.size(); ++i) {
-            const int64_t ordinal = batch * seeds.size() + i;
-            if (ordinal > 0) {
+            const int64_t ordinal = (checkpoint ? checkpoint_dispatches_pending_ : 0) +
+                                    batch * seeds.size() + i;
+            if (batch * seeds.size() + i > 0) {
                 rd->compute_list_add_barrier(commands);
             }
             uint32_t parameters[2] = {static_cast<uint32_t>(seeds[i]),
@@ -204,12 +230,19 @@ Dictionary NativeRDWorkload::record_series(RenderingDevice *rd,
     rd->capture_timestamp("native_persistent_batch_end");
     batches_recorded_ += repetitions;
     dispatch_count_ += repetitions * seeds.size();
-    pending_batch_count_ = repetitions;
+    pending_batch_count_ += repetitions;
+    if (checkpoint) {
+        checkpoint_active_ = true;
+        checkpoint_dispatches_pending_ += repetitions * seeds.size();
+        ++checkpoint_lists_pending_;
+    }
     phase_ = Phase::PENDING;
     Dictionary result = diagnostics();
     result["ok"] = true;
     result["recorded_dispatches"] = repetitions * seeds.size();
     result["resident_series_length"] = repetitions;
+    result["checkpoint_lists_pending"] = checkpoint_lists_pending_;
+    result["checkpoint_dispatches_pending"] = checkpoint_dispatches_pending_;
     result["execution"] = "native_cpp_persistent_shader_and_dispatch";
     result["queue_owner"] = "godot_rendering_device";
     result["resource_owner"] = "godot_rendering_device";
@@ -222,6 +255,9 @@ Dictionary NativeRDWorkload::mark_readback_complete() {
     // that this batch completed. Does not guess completion from frame count.
     completion_count_ += pending_batch_count_;
     pending_batch_count_ = 0;
+    checkpoint_dispatches_pending_ = 0;
+    checkpoint_lists_pending_ = 0;
+    checkpoint_active_ = false;
     phase_ = Phase::PREPARED;
     Dictionary result = diagnostics();
     result["ok"] = true;
@@ -273,6 +309,8 @@ Dictionary NativeRDWorkload::diagnostics() const {
     result["dispatch_count"] = dispatch_count_;
     result["completed_batches"] = completion_count_;
     result["pending_batches"] = pending_batch_count_;
+    result["checkpoint_lists_pending"] = checkpoint_lists_pending_;
+    result["checkpoint_dispatches_pending"] = checkpoint_dispatches_pending_;
     result["active_resources"] = phase_ == Phase::PREPARED || phase_ == Phase::PENDING;
     result["backend_contract"] = "godot_rendering_device_backend_neutral";
     result["shader_origin"] = "native_compiled_embedded_spirv";

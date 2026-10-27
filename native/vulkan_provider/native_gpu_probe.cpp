@@ -42,6 +42,8 @@ void NativeGpuProbe3D::_bind_methods() {
                          &NativeGpuProbe3D::godauldron_pipeline_diagnostics);
     ClassDB::bind_method(D_METHOD("godauldron_replace_shader", "spirv"),
                          &NativeGpuProbe3D::godauldron_replace_shader);
+    ClassDB::bind_method(D_METHOD("godauldron_shader_reload_available"),
+                         &NativeGpuProbe3D::godauldron_shader_reload_available);
     ClassDB::bind_method(D_METHOD("record_godot_image_compute", "rendering_device",
                                  "output_image", "seed"),
                          &NativeGpuProbe3D::record_godot_image_compute);
@@ -304,6 +306,11 @@ Dictionary NativeGpuProbe3D::shader_reload_result(bool ok, const char *error) co
 // This method is called only at an explicit unmeasured user/provider action.
 // An unresolved epoch retains executable command buffers referencing the old
 // PSO. Reject rather than waiting or destroying any in-flight GPU resources.
+bool NativeGpuProbe3D::godauldron_shader_reload_available() const {
+    return ready_ && device_ != VK_NULL_HANDLE && pipeline_ != VK_NULL_HANDLE &&
+           !sampling_ && (submitted_samples_ == 0 || resolved_) && error_.empty();
+}
+
 Dictionary NativeGpuProbe3D::godauldron_replace_shader(const PackedByteArray &spirv) {
     ++shader_reload_attempts_;
     const auto started = std::chrono::steady_clock::now();
@@ -317,7 +324,7 @@ Dictionary NativeGpuProbe3D::godauldron_replace_shader(const PackedByteArray &sp
     if (!ready_ || device_ == VK_NULL_HANDLE || pipeline_ == VK_NULL_HANDLE) {
         return rejected("lifecycle", "Native pipeline not initialized");
     }
-    if (sampling_ || (submitted_samples_ > 0 && !resolved_) || !error_.empty()) {
+    if (!godauldron_shader_reload_available()) {
         return rejected("in_flight", "GPU submissions not yet resolved; reload requires an idle provider");
     }
 
@@ -663,6 +670,7 @@ Dictionary NativeGpuProbe3D::godauldron_pipeline_diagnostics() const {
     entry["prepare_total_host_usec"] = prepare_total_host_usec_;
     entry["last_prepare_error"] = String(pipeline_prepare_error_.c_str());
     entry["last_prepare_failure_stage"] = String(pipeline_failure_stage_.c_str());
+    entry["reload_available"] = godauldron_shader_reload_available();
     entry["reload_generation"] = shader_reload_successes_;
     entry["reload_attempts"] = shader_reload_attempts_;
     entry["reload_failures"] = shader_reload_failures_;

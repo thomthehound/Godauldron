@@ -29,6 +29,10 @@ var _rejected_gpu_intervals := 0
 var _reload_bytecode := PackedByteArray()
 var _reload_result: Dictionary = {}
 var _source_reload: Dictionary = {}
+var _shutdown_requested := false
+var _shutdown_scheduled := false
+var _shutdown_complete := false
+
 
 
 
@@ -157,6 +161,70 @@ func take_batch() -> Dictionary:
 		_phase = "consumed"
 	_mutex.unlock()
 	return result
+
+
+# When the owning experiment leaves the scene tree, the compositor may
+# stop receiving render callbacks. Retire through a separate render-thread
+# callable, never by freeing engine RIDs from _exit_tree/main thread.
+func request_shutdown() -> void:
+	_mutex.lock()
+	if _shutdown_requested:
+		_mutex.unlock()
+		return
+	_shutdown_requested = true
+	_mutex.unlock()
+	_schedule_shutdown()
+
+
+func _schedule_shutdown() -> void:
+	_mutex.lock()
+	var schedule: bool = _shutdown_requested and not _shutdown_complete and \
+			not _shutdown_scheduled
+	if schedule:
+		_shutdown_scheduled = true
+	_mutex.unlock()
+	if schedule:
+		RenderingServer.call_on_render_thread(_retire_on_render_thread)
+
+
+func _retire_on_render_thread() -> void:
+	_mutex.lock()
+	_shutdown_scheduled = false
+	var finished: bool = _shutdown_complete
+	_mutex.unlock()
+	if finished:
+		return
+	var rd: RenderingDevice = RenderingServer.get_rendering_device()
+	if rd == null:
+		_fail("No Godot RenderingDevice during compositor retirement")
+		return
+	if _workload != null:
+		var released: Dictionary = _workload.call("release", rd)
+		if not released.get("ok", false):
+			# A recorded GPU batch still owns its pipeline and descriptors.
+			# Its asynchronous readback callback retries after completion.
+			if released.get("error") == "gpu_readback_still_in_flight":
+				return
+			_fail("Native RD shutdown rejected: " + str(released))
+			return
+		_completion = released.duplicate(true)
+		_workload = null
+	if _texture.is_valid():
+		rd.free_rid(_texture)
+		_texture = RID()
+	_mutex.lock()
+	_shutdown_complete = true
+	_phase = "released"
+	_mutex.unlock()
+
+
+func shutdown_snapshot() -> Dictionary:
+	_mutex.lock()
+	var snap := {"requested": _shutdown_requested,
+		"completed": _shutdown_complete, "phase": _phase,
+		"error": _failure}
+	_mutex.unlock()
+	return snap
 
 
 func request_release() -> bool:
@@ -311,13 +379,20 @@ func _on_readback(data: PackedByteArray) -> void:
 	_last_bytes = data
 	_completion = completion.duplicate(true)
 	_phase = "ready"
+	var shutdown: bool = _shutdown_requested
 	_mutex.unlock()
+	if shutdown:
+		_schedule_shutdown()
 
 
 func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	if callback_type != EFFECT_CALLBACK_TYPE_POST_TRANSPARENT:
 		return
 	_mutex.lock()
+	if _shutdown_requested:
+		_mutex.unlock()
+		_schedule_shutdown()
+		return
 	var action: String = _phase
 	var seeds: PackedInt32Array = _requested_seeds.duplicate()
 	var repetitions: int = _requested_repetitions

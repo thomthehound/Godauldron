@@ -14,7 +14,8 @@ class NativeRDWorkload : public godot::RefCounted {
 public:
     // All methods below, except diagnostics(), require the render thread.
     // The RenderingDevice and target RID remain owned by Godot.
-    godot::Dictionary prepare(godot::RenderingDevice *rd, godot::RID output_image);
+    godot::Dictionary prepare(godot::RenderingDevice *rd, godot::RID output_image,
+                              int64_t width, int64_t height);
     godot::Dictionary record_batch(godot::RenderingDevice *rd,
                                    const godot::PackedInt32Array &seeds);
     godot::Dictionary mark_readback_complete();
@@ -33,6 +34,10 @@ private:
     godot::RID pipeline_;
     godot::RID uniform_set_;
     godot::PackedByteArray push_bytes_;
+    int64_t width_ = 0;
+    int64_t height_ = 0;
+    int64_t groups_x_ = 0;
+    int64_t groups_y_ = 0;
     int64_t prepare_count_ = 0;
     int64_t pipeline_creations_ = 0;
     int64_t descriptor_creations_ = 0;

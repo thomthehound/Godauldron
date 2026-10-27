@@ -28,6 +28,10 @@ public:
                                                const godot::PackedInt32Array &seeds,
                                                int64_t repetitions);
     godot::Dictionary mark_readback_complete();
+    // Only accepted after the engine's async readback completion. Retains
+    // previous shader/pipeline/uniform set on any candidate failure.
+    godot::Dictionary replace_spirv(godot::RenderingDevice *rd,
+                                    const godot::PackedByteArray &spirv_bytes);
     godot::Dictionary release(godot::RenderingDevice *rd);
     godot::Dictionary diagnostics() const;
     // Read-only DXGI verification of the actual engine-owned D3D12 adapter.
@@ -71,6 +75,14 @@ private:
     int64_t checkpoint_dispatches_pending_ = 0;
     int64_t checkpoint_lists_pending_ = 0;
     bool checkpoint_active_ = false;
+    int64_t reload_attempts_ = 0;
+    int64_t reload_failures_ = 0;
+    int64_t reload_generation_ = 0;
+    int64_t reload_retirements_ = 0;
+    int64_t reload_host_usec_ = 0;
+    godot::String reload_error_;
+    godot::String reload_failure_stage_;
+    godot::String shader_origin_ = "native_compiled_embedded_spirv";
     godot::Dictionary record_impl(godot::RenderingDevice *rd,
                                   const godot::PackedInt32Array &seeds,
                                   int64_t repetitions, bool checkpoint);

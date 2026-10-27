@@ -54,6 +54,10 @@ func _verify() -> void:
 	if not bool(host.get("_capture_pending")):
 		_fail("Real device timestamp profiler did not start: " + (host.get("_status") as Label).text)
 		return
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")):
+		_fail("Measured benchmark started while GPU timestamp instrumentation was active")
+		return
 	var frames := 0
 	while bool(host.get("_capture_pending")) and frames < 210:
 		frames += 1
@@ -89,6 +93,17 @@ func _verify() -> void:
 		if int(entry.get("device_frame", -1)) < 0:
 			_fail("A frame was reported without an actual device timestamp frame identity")
 			return
+		var points: Dictionary = entry.get("marker_gpu_nanoseconds", {})
+		if points.size() != Probe.STAGES.size():
+			_fail("Resolved device-frame evidence omitted native marker timestamps")
+			return
+		var previous_stamp := -1
+		for name in Probe.STAGES:
+			var stamp: int = int(points.get(name, 0))
+			if stamp <= previous_stamp or stamp <= 0:
+				_fail("Native frame timestamps are unordered or nonpositive")
+				return
+			previous_stamp = stamp
 		var total: float = 0.0
 		for name in Probe.WINDOWS:
 			var usec: float = float(entry.get("windows_usec", {}).get(name, -1.0))

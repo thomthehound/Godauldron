@@ -96,8 +96,25 @@ static func read(scene: Node) -> Dictionary:
 			entry["reload_error"] = item["reload_error"]
 			entry["reload_failure_stage"] = item["reload_failure_stage"]
 		measured.append(entry)
+	var source_reload: Dictionary = {}
+	if result.has("source_reload"):
+		var source: Variant = result["source_reload"]
+		if typeof(source) != TYPE_DICTIONARY or \
+				typeof(source.get("attempts")) != TYPE_INT or \
+				typeof(source.get("failures")) != TYPE_INT or \
+				int(source["attempts"]) < int(source["failures"]) or \
+				int(source["failures"]) < 0 or \
+				typeof(source.get("source")) != TYPE_STRING or \
+				String(source["source"]).length() > 240 or \
+				typeof(source.get("last_error")) != TYPE_STRING or \
+				String(source["last_error"]).length() > 1500 or \
+				source.get("last_stage") not in ["none", "provider", "source",
+					"in_flight", "compile", "shader", "pipeline", "applied"]:
+			return unavailable("invalid_shader_source_reload_evidence")
+		source_reload = (source as Dictionary).duplicate(true)
 	return {"available": true, "provider": provider, "backend": backend,
-		"pipelines": measured, "timing_domain": "host_wall_microseconds",
+		"pipelines": measured, "source_reload": source_reload,
+		"timing_domain": "host_wall_microseconds",
 		"cache_scope": "no cache hit-rate claimed",
 		"collection": "one provider hook invocation; never polled during measured steps"}
 
@@ -134,4 +151,8 @@ static func summary(report: Dictionary) -> String:
 			if not String(entry["reload_error"]).is_empty():
 				line += "; last reload %s: %s" % [
 					String(entry["reload_failure_stage"]), String(entry["reload_error"])]
+	var source: Dictionary = report.get("source_reload", {})
+	if not source.is_empty() and not String(source.get("last_error", "")).is_empty():
+		line += "; GLSL %s: %s" % [
+			String(source.get("last_stage", "unknown")), String(source["last_error"])]
 	return line

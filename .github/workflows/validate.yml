@@ -269,6 +269,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Profiler GPU/host provenance report validation failed" }
           python tools/analyze_native_rd_profile.py native_rd_warp_profile.json --json-output native_rd_warp_analysis.json --csv-output native_rd_warp_batches.csv
           if ($LASTEXITCODE -ne 0) { throw "Profiler hardware/host distribution analysis failed" }
+          & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_hardware_profile.gd -- --mode software --width 13 --height 9 --warmup 1 --samples 2 --passes 3 --resident_batches 4 --output res://native_rd_warp_series.json
+          if ($LASTEXITCODE -ne 0) { throw "Native RD resident-series GPU execution failed" }
+          python tools/validate_native_rd_profile.py native_rd_warp_series.json --mode software
+          if ($LASTEXITCODE -ne 0) { throw "Resident-series lifecycle or dispatch validation failed" }
+          python tools/analyze_native_rd_profile.py native_rd_warp_series.json --json-output native_rd_warp_series.analysis.json
+          if ($LASTEXITCODE -ne 0) { throw "Resident-series performance attribution failed" }
           if (!(Test-Path native_rd_warp_analysis.json) -or !(Test-Path native_rd_warp_batches.csv)) {
             throw "Native RD profiling outputs missing"
           }

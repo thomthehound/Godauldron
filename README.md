@@ -52,6 +52,10 @@ Use the search box above the experiment catalog to filter by name, category, ID 
 
 This saves a **reproducible configuration**, not a simulation checkpoint. Solver internal memory, queued GPU work, imported native binaries, authored lights/exposure, and the current animation timeline are not serialized. See [Session configuration and remaining Cauldron gaps](docs/EXPERIMENT_SESSIONS.md).
 
+## Reusable native GPU workloads
+
+The optional [persistent C++23 compute adapter](docs/NATIVE_PERSISTENT_WORKLOAD.md) prepares one native-authored shader, pipeline and image descriptor set, then records repeatable GPU dispatch batches through Godot's own `RenderingDevice`. Inter-dispatch image barriers, real asynchronous readback completion, resource reuse and render-thread-only retirement are part of the adapter's contract. Software-Vulkan CI checks distinct cumulative GPU results and one-time resource creation; D3D12 and physical-GPU validation remain separate gates.
+
 ## Native Vulkan GPU diagnostic
 
 A separate [same-device Vulkan image resource diagnostic](docs/GODOT_NATIVE_VULKAN_RESOURCE_INTEROP.md) now exercises the native-extension path to a **Godot-owned** VkDevice and VkBuffer: a C++ GDExtension validates borrowed Vulkan image handles on the renderer thread, while Godot's command graph runs a genuine compute shader against that same storage image and verifies asynchronous readback. Godot retains queue/synchronization ownership. This is resource interoperability, **not** native command submission, producer-native compute graph integration, or validated cross-queue sharing.

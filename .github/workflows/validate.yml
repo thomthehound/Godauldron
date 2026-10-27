@@ -191,6 +191,14 @@ jobs:
             echo "Native-authored Godot RD compute violated Vulkan validation"
             exit 1
           fi
+      - name: Verify persistent native shader resources, GPU barriers and completion-safe reuse
+        run: |
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 180s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_rd_persistent_workload_smoke.gd 2>&1 | tee native-persistent-gpu-validation.log
+          if grep -E 'VUID-|Validation Error' native-persistent-gpu-validation.log; then
+            echo "Native workload reuse violated Vulkan validation"
+            exit 1
+          fi
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

@@ -1,4 +1,5 @@
 #include "native_gpu_probe.h"
+#include "native_rd_workload.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/godot.hpp>
@@ -8,6 +9,7 @@ using namespace godot;
 static void initialize_native_provider(ModuleInitializationLevel level) {
     if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         GDREGISTER_CLASS(NativeGpuProbe3D);
+        GDREGISTER_CLASS(NativeRDWorkload);
     }
 }
 

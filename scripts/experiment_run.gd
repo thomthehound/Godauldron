@@ -20,6 +20,7 @@ var last_step_cpu_usec: int = 0
 var last_step_phase: String = ""
 var host_observations: Dictionary = {}
 var sample_step_submissions: Array[Dictionary] = []
+var _capture_step_provenance: bool = false
 var _invalid_reason: String = ""
 
 var _scene: Node = null
@@ -34,6 +35,8 @@ func begin(scene: Node, parameters: Dictionary, warmup_steps: int, sample_steps:
 	assert(sample_steps > 0)
 	assert(fixed_step > 0.0)
 	_scene = scene
+	_capture_step_provenance = scene.has_method("godauldron_resolved_gpu_timeline") and \
+		sample_steps <= ProviderTimeline.MAX_STEPS
 	_parameters = parameters.duplicate(true)
 	requested_warmup_steps = warmup_steps
 	requested_steps = sample_steps
@@ -80,13 +83,14 @@ func advance() -> void:
 	var was_warmup: bool = phase == Phase.WARMUP
 	last_step_phase = "warmup" if was_warmup else "sample"
 	var began: int = Time.get_ticks_usec()
-	var host_frame: int = Engine.get_frames_drawn() if not was_warmup else -1
+	var host_frame: int = Engine.get_frames_drawn() if not was_warmup and \
+		_capture_step_provenance else -1
 	if _scene.has_method("godauldron_step"):
 		_scene.call("godauldron_step", _fixed_step_seconds)
 	var ended: int = Time.get_ticks_usec()
 	var elapsed: int = ended - began
 	last_step_cpu_usec = elapsed
-	if not was_warmup:
+	if not was_warmup and _capture_step_provenance:
 		# Submission-side correlation only: one rendered frame may encompass
 		# several fixed steps, and dispatch need not execute on the GPU here.
 		sample_step_submissions.append({
@@ -163,6 +167,7 @@ func make_report(experiment_id: String) -> Dictionary:
 		"provider_gpu_timing": gpu_timing,
 		"provider_gpu_timeline": gpu_timeline,
 		"sample_step_submission_correlation": {
+			"available": _capture_step_provenance,
 			"source": "host_godauldron_step_callback_and_Engine_frames_drawn",
 			"gpu_completion_relation": "not_verified",
 			"renderer_frame_relation": "host_frame_at_callback_not_resolved_gpu_render_frame",

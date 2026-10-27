@@ -26,6 +26,23 @@ var _release_requested := false
 var _released := false
 var _adapter_evidence: Dictionary = {}
 
+# Autonomous sustained execution avoids host polling and per-result allocation.
+# All counters are published through the same mutex as ring diagnostics.
+var _stream_enabled := false
+var _stream_seeds := PackedInt32Array()
+var _stream_repetitions := 0
+var _stream_warmup := 0
+var _stream_samples := 0
+var _stream_next := 0
+var _stream_completed := 0
+var _stream_first_measured_usec := 0
+var _stream_last_completed_usec := 0
+var _stream_record_cpu_usec := 0
+var _stream_callback_cpu_usec := 0
+var _stream_checked := 0
+var _stream_last_bytes := PackedByteArray()
+var _stream_result_taken := false
+
 
 func _init(width: int = 13, height: int = 9,
 		capacity: int = 3, adapter_mode: String = "software") -> void:
@@ -47,7 +64,7 @@ func submit_series(seeds: PackedInt32Array, repetitions: int = 1) -> int:
 			return -1
 	_mutex.lock()
 	var id := -1
-	if _failure.is_empty() and not _release_requested and not _released and 			_pending.size() + _in_flight < _capacity:
+	if _failure.is_empty() and not _stream_enabled and not _release_requested and not _released and 			_pending.size() + _in_flight < _capacity:
 		id = _next_id
 		_next_id += 1
 		_accepted += 1
@@ -58,6 +75,81 @@ func submit_series(seeds: PackedInt32Array, repetitions: int = 1) -> int:
 
 
 # Results carry ownership-independent byte arrays and their original IDs.
+# The render callback automatically replenishes the ring until this finite
+# workload finishes. Only the final output requires a full CPU pixel scan.
+func begin_stream(seeds: PackedInt32Array, repetitions: int,
+		warmup: int, samples: int) -> bool:
+	if _capacity < 2 or _capacity > 4 or \
+			_width < 1 or _height < 1 or _width > 2048 or _height > 2048 or \
+			_width * _height > MAX_PIXELS or \
+			_adapter_mode not in ["software", "physical_amd"] or \
+			seeds.is_empty() or seeds.size() > 32 or \
+			repetitions < 1 or repetitions > 256 or \
+			repetitions * seeds.size() > 2048 or \
+			warmup < _capacity or warmup > 64 or samples < 2 or samples > 1024:
+		return false
+	for seed in seeds:
+		if seed < 1 or seed > 65535:
+			return false
+	_mutex.lock()
+	var allowed: bool = not _stream_enabled and _accepted == 0 and \
+			_pending.is_empty() and _in_flight == 0 and \
+			_completed.is_empty() and _failure.is_empty() and \
+			not _release_requested and not _released
+	if allowed:
+		_stream_seeds = seeds.duplicate()
+		_stream_repetitions = repetitions
+		_stream_warmup = warmup
+		_stream_samples = samples
+		_stream_enabled = true
+	_mutex.unlock()
+	return allowed
+
+
+func stream_snapshot() -> Dictionary:
+	_mutex.lock()
+	var total: int = _stream_warmup + _stream_samples
+	var finished: bool = _stream_enabled and _stream_completed == total
+	var elapsed: int = (_stream_last_completed_usec - _stream_first_measured_usec
+		if finished else 0)
+	var result := {
+		"enabled": _stream_enabled, "finished": finished,
+		"warmup": _stream_warmup, "samples": _stream_samples,
+		"resident_batches": _stream_repetitions,
+		"dispatches_per_sample": _stream_repetitions * _stream_seeds.size(),
+		"submitted": _stream_next, "completed": _stream_completed,
+		"sentinel_checked": _stream_checked,
+		"first_measured_submit_usec": _stream_first_measured_usec,
+		"last_completion_usec": _stream_last_completed_usec,
+		"measured_elapsed_usec": elapsed,
+		"record_cpu_usec": _stream_record_cpu_usec,
+		"callback_cpu_usec": _stream_callback_cpu_usec,
+		"in_flight": _in_flight,
+		"high_water_in_flight": _high_water,
+		"created_slots": _created_slots,
+		"released_slots": _released_slots,
+		"error": _failure,
+		"adapter_evidence": _adapter_evidence.duplicate(true),
+		"released": _released
+	}
+	_mutex.unlock()
+	return result
+
+
+func take_stream_final() -> PackedByteArray:
+	_mutex.lock()
+	var finished: bool = _stream_enabled and \
+			_stream_completed == _stream_warmup + _stream_samples
+	var result := PackedByteArray()
+	if finished and not _stream_result_taken and \
+			not _stream_last_bytes.is_empty():
+		result = _stream_last_bytes
+		_stream_last_bytes = PackedByteArray()
+		_stream_result_taken = true
+	_mutex.unlock()
+	return result
+
+
 func take_completed() -> Dictionary:
 	_mutex.lock()
 	var result: Dictionary = {"ok": false}
@@ -92,7 +184,9 @@ func status() -> Dictionary:
 # No premature retirement, including when completed bytes have not been taken.
 func request_release() -> bool:
 	_mutex.lock()
-	var allowed: bool = _failure.is_empty() and not _release_requested and 		not _released and _pending.is_empty() and _in_flight == 0 and 		_completed.is_empty() and _accepted == _taken
+	var allowed: bool = _failure.is_empty() and not _release_requested and 		not _released and _pending.is_empty() and _in_flight == 0 and 		_completed.is_empty() and _accepted == _taken and \
+		(not _stream_enabled or (_stream_result_taken and \
+		_stream_completed == _stream_warmup + _stream_samples))
 	if allowed:
 		_release_requested = true
 	_mutex.unlock()

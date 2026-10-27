@@ -179,7 +179,7 @@ class ExtendedNativeGPUProfileContract(unittest.TestCase):
         current["gpu_timing"]["required_samples"] = 12
         current["gpu_timing"]["resolved_samples"] = 12
         current["gpu_timing"]["summary"] = summary(
-            [r["gpu_compute_window_usec"] for r in current["records"][1:])
+            [r["gpu_compute_window_usec"] for r in current["records"][1:]])
         for key, value in (("host_readback_latency", 1500.0),
                            ("host_validation", 50.0),
                            ("host_request_to_validated", 1580.0)):

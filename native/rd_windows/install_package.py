@@ -29,7 +29,7 @@ def install(binary: Path) -> Path:
         shutil.copy2(source, OUT / source.name.removesuffix(".in"))
     shutil.copy2(SHARED_EFFECT, OUT / SHARED_EFFECT.name)
     output = OUT / "bin" / binary.name
-    output.parent.mkdir(parents=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(binary, output)
     return output
 

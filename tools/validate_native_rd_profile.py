@@ -7,6 +7,40 @@ import math
 from pathlib import Path
 
 
+def validate_summary(summary: dict, values: list[float], label: str) -> None:
+    if summary.get("count") != len(values):
+        raise ValueError(f"{label} sample count contradicts the source readings")
+    fields = {
+        "mean_usec": None, "p50_usec": None, "p95_usec": None,
+        "p99_usec": None, "minimum_usec": None, "maximum_usec": None,
+    }
+    if values:
+        ordered = sorted(values)
+
+        def percentile(p: float) -> float:
+            pos = p * (len(ordered) - 1)
+            lo = int(math.floor(pos))
+            hi = min(lo + 1, len(ordered) - 1)
+            return ordered[lo] + (ordered[hi] - ordered[lo]) * (pos - lo)
+
+        fields = {
+            "mean_usec": sum(ordered) / len(ordered),
+            "p50_usec": percentile(0.50),
+            "p95_usec": percentile(0.95),
+            "p99_usec": percentile(0.99),
+            "minimum_usec": ordered[0], "maximum_usec": ordered[-1],
+        }
+    for key, expected in fields.items():
+        actual = summary.get(key)
+        if expected is None:
+            if actual is not None:
+                raise ValueError(f"{label}.{key} must be unavailable")
+        elif (type(actual) not in (int, float) or
+              not math.isfinite(float(actual)) or
+              not math.isclose(float(actual), expected, rel_tol=1e-8, abs_tol=1e-4)):
+            raise ValueError(f"{label}.{key} contradicts measured samples")
+
+
 def validate(data: dict, *, physical: bool) -> None:
     if data.get("schema_version") != 1 or data.get("capture_type") != "godauldron_native_rd_physical_device_compute":
         raise ValueError("Wrong native GPU report schema")
@@ -58,21 +92,18 @@ def validate(data: dict, *, physical: bool) -> None:
              math.isfinite(float(r["gpu_compute_window_usec"])) and r["gpu_compute_window_usec"] > 0]
     if gpu.get("resolved_samples") != len(valid):
         raise ValueError("GPU device timestamp counts contradict sample data")
-    if physical:
-        if gpu.get("available") is not True or len(valid) != samples:
-            raise ValueError("Physical GPU timing is incomplete")
-        summary = gpu.get("summary", {})
-        if summary.get("count") != samples or any(
-                not isinstance(summary.get(k), (int, float)) or
-                not math.isfinite(float(summary[k])) or summary[k] <= 0
-                for k in ("mean_usec", "p50_usec", "p95_usec", "p99_usec")):
-            raise ValueError("No positive device timestamp statistics")
-    elif gpu.get("available") is True and len(valid) != samples:
-        raise ValueError("Software GPU availability contradicts resolved timestamps")
+    if gpu.get("available") is not (len(valid) == samples):
+        raise ValueError("GPU timestamp availability contradicts its recorded samples")
+    validate_summary(gpu.get("summary", {}), [float(r["gpu_compute_window_usec"])
+                     for r in valid], "device_gpu")
+    if physical and len(valid) != samples:
+        raise ValueError("Physical GPU timing is incomplete")
     host = data.get("host_readback_latency", {})
-    if (host.get("summary", {}).get("count") != samples or
-            "NOT GPU compute time" not in host.get("scope", "")):
+    if "NOT GPU compute time" not in host.get("scope", ""):
         raise ValueError("Host readback latency was conflated with device timing")
+    validate_summary(host.get("summary", {}),
+                     [float(r["host_request_to_readback_usec"]) for r in sampled],
+                     "host_readback")
 
 
 def main() -> None:

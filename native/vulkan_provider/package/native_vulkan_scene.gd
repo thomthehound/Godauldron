@@ -158,7 +158,9 @@ func godauldron_pipeline_diagnostics() -> Dictionary:
 	if _native == null:
 		return {"provider": "native-vulkan-queue-probe", "backend": "Vulkan", "pipelines": []}
 	var pipeline_report: Dictionary = _native.call("godauldron_pipeline_diagnostics")
-	pipeline_report["source_reload"] = _source_reload.duplicate(true)
+	var source: Dictionary = _source_reload.duplicate(true)
+	source["selected_language"] = _reload_language
+	pipeline_report["source_reload"] = source
 	return pipeline_report
 
 

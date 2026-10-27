@@ -5,6 +5,7 @@ extends SceneTree
 const Package = preload("res://scripts/native_experiment_package.gd")
 const WIDTH := 13
 const HEIGHT := 9
+const ELEMENTS := WIDTH * HEIGHT
 const CAPACITY := 3
 const REQUESTS := [
 	{"seeds": [2, 4, 6], "repetitions": 1},

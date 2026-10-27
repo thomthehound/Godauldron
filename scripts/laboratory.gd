@@ -476,6 +476,7 @@ func _build_ui() -> void:
 	inspect_buffer.pressed.connect(_inspect_native_buffer)
 	navigation_row.add_child(inspect_buffer)
 	_buffer_window = BufferInspectionWindow.new()
+	_buffer_window.visible = false
 	add_child(_buffer_window)
 	var camera_row := HBoxContainer.new()
 	viewer.add_child(camera_row)

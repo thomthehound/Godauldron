@@ -83,6 +83,8 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/environment_inspection_smoke.gd
       - name: Verify renderer buffer capability gates and numeric preview separation
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/render_buffer_probe_smoke.gd
+      - name: Verify GPU timestamp interval validation and report persistence
+        run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/gpu_stage_probe_smoke.gd
       - name: Verify true float OpenEXR transport and explicit SDR capture rejection
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --script res://tests/hdr_exr_smoke.gd
       - name: Verify saved image comparisons and visual diff UI
@@ -122,6 +124,8 @@ jobs:
         run: timeout --signal=TERM --kill-after=5s 120s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/hdr_forward_graphics_smoke.gd
       - name: Verify actual Forward+ depth, normal and motion-vector readbacks
         run: timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_render_buffers_forward_smoke.gd
+      - name: Verify real compositor stage GPU timestamp intervals
+        run: timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/gpu_stage_forward_graphics_smoke.gd
 
   portrait-visual-capture:
     runs-on: ubuntu-latest

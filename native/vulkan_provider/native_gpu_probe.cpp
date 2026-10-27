@@ -1,7 +1,12 @@
 #include "native_gpu_probe.h"
 #include "compute_spirv.h"
+#include "engine_compute_spirv.h"
 
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/classes/rd_shader_spirv.hpp>
+#include <godot_cpp/classes/rd_uniform.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -26,6 +31,9 @@ void NativeGpuProbe3D::_bind_methods() {
                          &NativeGpuProbe3D::godauldron_resolved_gpu_timeline);
     ClassDB::bind_method(D_METHOD("godauldron_metrics"),
                          &NativeGpuProbe3D::godauldron_metrics);
+    ClassDB::bind_method(D_METHOD("record_godot_image_compute", "rendering_device",
+                                 "output_image", "seed"),
+                         &NativeGpuProbe3D::record_godot_image_compute);
     ClassDB::bind_method(D_METHOD("inspect_godot_vulkan_image", "device",
                                  "physical_device", "image", "requested_bytes"),
                          &NativeGpuProbe3D::inspect_godot_vulkan_image);
@@ -33,6 +41,82 @@ void NativeGpuProbe3D::_bind_methods() {
 
 NativeGpuProbe3D::~NativeGpuProbe3D() {
     cleanup();
+}
+
+// The native provider supplies BOTH shader bytecode and command recording.
+// The engine driver alone translates these commands to Vulkan and owns all
+// queue submissions and synchronization. Must be called on the render thread.
+Dictionary NativeGpuProbe3D::record_godot_image_compute(
+        RenderingDevice *rd, RID output_image, int64_t seed) const {
+    Dictionary result;
+    result["ok"] = false;
+    if (rd == nullptr || !output_image.is_valid() ||
+        seed < 1 || seed > 65535) {
+        result["error"] = "missing_render_device_image_or_invalid_seed";
+        return result;
+    }
+    PackedByteArray shader_bytes;
+    shader_bytes.resize(sizeof(kEngineComputeSpirv));
+    std::memcpy(shader_bytes.ptrw(), kEngineComputeSpirv, sizeof(kEngineComputeSpirv));
+    Ref<RDShaderSPIRV> spirv;
+    spirv.instantiate();
+    spirv->set_stage_bytecode(RenderingDevice::SHADER_STAGE_COMPUTE, shader_bytes);
+    RID shader = rd->shader_create_from_spirv(spirv, "Godauldron Native Image Compute");
+    if (!shader.is_valid()) {
+        result["error"] = "native_spirv_rejected_by_engine_driver";
+        return result;
+    }
+    RID pipeline = rd->compute_pipeline_create(shader);
+    if (!pipeline.is_valid()) {
+        rd->free_rid(shader);
+        result["error"] = "native_compute_pipeline_creation_failed";
+        return result;
+    }
+    Ref<RDUniform> binding;
+    binding.instantiate();
+    binding->set_uniform_type(RenderingDevice::UNIFORM_TYPE_IMAGE);
+    binding->set_binding(0);
+    binding->add_id(output_image);
+    TypedArray<RDUniform> uniforms;
+    uniforms.append(binding);
+    RID set = rd->uniform_set_create(uniforms, shader, 0);
+    if (!set.is_valid()) {
+        rd->free_rid(pipeline);
+        rd->free_rid(shader);
+        result["error"] = "native_image_descriptor_set_creation_failed";
+        return result;
+    }
+    const uint32_t parameter = static_cast<uint32_t>(seed);
+    PackedByteArray push_constants;
+    push_constants.resize(sizeof(parameter));
+    std::memcpy(push_constants.ptrw(), &parameter, sizeof(parameter));
+    rd->capture_timestamp("native_authored_rd_compute_begin");
+    const int64_t commands = rd->compute_list_begin();
+    rd->compute_list_bind_compute_pipeline(commands, pipeline);
+    rd->compute_list_bind_uniform_set(commands, set, 0);
+    rd->compute_list_set_push_constant(commands, push_constants, sizeof(parameter));
+    rd->compute_list_dispatch(commands, 1, 1, 1);
+    rd->compute_list_end();
+    rd->capture_timestamp("native_authored_rd_compute_end");
+
+    // Godot retains ownership of the engine shader, pipeline and descriptors.
+    // Return them to the compositor effect; free only after async readback.
+    Array owned;
+    owned.append(shader);
+    owned.append(pipeline);
+    owned.append(set);
+    result["ok"] = true;
+    result["error"] = "";
+    result["native_execution"] = "native_cpp_recorded_godot_rendering_device_commands";
+    result["shader_source"] = "native_build_embedded_compiled_spirv";
+    result["dispatches"] = 1;
+    result["workgroups"] = 1;
+    result["local_invocations"] = 64;
+    result["seed"] = seed;
+    result["queue_submission_owner"] = "godot_rendering_device";
+    result["resource_owner"] = "godot_global_rendering_device";
+    result["owned_rids"] = owned;
+    return result;
 }
 
 // Read-only Vulkan query of a live Godot-owned VkImage obtained from the

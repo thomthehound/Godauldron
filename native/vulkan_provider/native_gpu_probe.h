@@ -1,7 +1,9 @@
 #pragma once
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/rid.hpp>
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -20,6 +22,13 @@ public:
     void godauldron_step(double dt);
     godot::Dictionary godauldron_resolved_gpu_timeline();
     godot::Dictionary godauldron_metrics() const;
+    // Called only on Godot's rendering thread, inside the compositor callback.
+    // Records native-authored shader and workload into Godot's RenderingDevice.
+    // Godot retains queue submission, resource barriers and memory ownership.
+    // Returns RIDs for the caller to retire AFTER asynchronous GPU readback.
+    godot::Dictionary record_godot_image_compute(godot::RenderingDevice *rd,
+                                                  godot::RID output_image,
+                                                  int64_t seed) const;
     // Called ONLY inside an engine RenderingDevice compositor callback.
     // Read-only Vulkan handle inspection; NEVER submits to Godot's queue.
     godot::Dictionary inspect_godot_vulkan_image(int64_t borrowed_device,

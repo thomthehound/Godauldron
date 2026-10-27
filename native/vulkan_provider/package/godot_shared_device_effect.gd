@@ -9,6 +9,8 @@ const ELEMENTS := EDGE * EDGE
 const BYTE_COUNT := ELEMENTS * 4
 
 var _native: Object
+var _native_dispatch := false
+var _native_report: Dictionary = {}
 var _mutex := Mutex.new()
 var _state := "idle"
 var _failure := ""
@@ -17,10 +19,11 @@ var _data := PackedByteArray()
 var _rids: Array[RID] = []
 
 
-func _init(native: Object) -> void:
+func _init(native: Object, native_dispatch: bool = false) -> void:
 	effect_callback_type = EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
 	enabled = true
 	_native = native
+	_native_dispatch = native_dispatch
 
 
 func request() -> bool:
@@ -36,7 +39,8 @@ func request() -> bool:
 func status() -> Dictionary:
 	_mutex.lock()
 	var result: Dictionary = {"state": _state, "error": _failure,
-		"witness": _witness.duplicate(true)}
+		"witness": _witness.duplicate(true),
+		"native_record": _native_report.duplicate(true)}
 	_mutex.unlock()
 	return result
 
@@ -45,6 +49,7 @@ func take_result() -> Dictionary:
 	_mutex.lock()
 	var result: Dictionary = {"ok": _state == "ready",
 		"error": _failure, "witness": _witness.duplicate(true),
+		"native_record": _native_report.duplicate(true),
 		"bytes": _data}
 	if _state == "ready":
 		_state = "consumed"
@@ -127,6 +132,28 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	_mutex.lock()
 	_witness = witness.duplicate(true)
 	_mutex.unlock()
+	if _native_dispatch:
+		if not _native.has_method("record_godot_image_compute"):
+			_free_resources(rd)
+			_fail("Native provider does not expose engine-managed compute recording")
+			return
+		# The SPIR-V, pipeline, uniforms, push constant and GPU dispatch are
+		# authored and recorded by C++ through this SAME RenderingDevice.
+		var native_result: Dictionary = _native.call(
+			"record_godot_image_compute", rd, texture, 37)
+		if not bool(native_result.get("ok", false)):
+			_free_resources(rd)
+			_fail("Native compute dispatch rejected: " + str(native_result))
+			return
+		for rid: RID in native_result.get("owned_rids", []):
+			_rids.append(rid)
+		# Never serialize GPU resource RIDs into test reports.
+		native_result.erase("owned_rids")
+		_mutex.lock()
+		_native_report = native_result.duplicate(true)
+		_mutex.unlock()
+		_read_image(rd, texture)
+		return
 	var shader: RID = rd.shader_create_from_spirv(COMPUTE.get_spirv())
 	if not shader.is_valid():
 		_free_resources(rd)
@@ -156,7 +183,12 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	rd.compute_list_dispatch(commands, 1, 1, 1)
 	rd.compute_list_end()
 	rd.capture_timestamp("godauldron_shared_device_end")
-	var error: Error = rd.texture_get_data_async(texture, 0, Callable(self, "_on_readback"))
+	_read_image(rd, texture)
+
+
+func _read_image(rd: RenderingDevice, texture: RID) -> void:
+	var error: Error = rd.texture_get_data_async(texture, 0,
+		Callable(self, "_on_readback"))
 	if error != OK:
 		_free_resources(rd)
 		_fail("Godot-device GPU readback rejected (%d)" % int(error))

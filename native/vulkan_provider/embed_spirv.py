@@ -4,7 +4,10 @@ import pathlib
 import struct
 import sys
 
-source, dest = map(pathlib.Path, sys.argv[1:])
+source, dest = map(pathlib.Path, sys.argv[1:3])
+symbol = sys.argv[3] if len(sys.argv) > 3 else "kComputeSpirv"
+if not symbol.isidentifier():
+    raise SystemExit("Invalid C++ SPIR-V array identifier")
 payload = source.read_bytes()
 if len(payload) < 20 or len(payload) % 4:
     raise SystemExit("Invalid SPIR-V byte length")
@@ -13,7 +16,7 @@ if words[0] != 0x07230203:
     raise SystemExit("Invalid SPIR-V magic")
 dest.write_text(
     "#pragma once\n#include <cstdint>\n"
-    "inline constexpr uint32_t kComputeSpirv[] = {\n    "
+    f"inline constexpr uint32_t {symbol}[] = {{\n    "
     + ",\n    ".join(
         ", ".join(f"0x{x:08x}u" for x in words[i:i + 8])
         for i in range(0, len(words), 8)

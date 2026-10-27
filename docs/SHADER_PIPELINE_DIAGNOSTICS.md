@@ -61,7 +61,7 @@ The provider reports actual native `reload_attempts`, accepted `reload_generatio
 
 **Current boundary:** this gate implements explicit on-demand GLSL or DXC HLSL recompilation and actual compute PSO replacement for the **independently owned Vulkan provider**. It does not silently reload filesystem changes, and does not yet reload Godot-owned `RenderingDevice` pipelines or native D3D12 pipelines. Other providers may implement the same scene protocol with their own safe native resource and fence semantics. A future per-backend gate must prove those lifecycles independently.
 
-## Godot-owned RenderingDevice HLSL replacement
+## Godot-owned RenderingDevice GLSL and HLSL replacement
 
 The backend-neutral native `NativeRDWorkload` can replace its compute shader without creating a separate Vulkan or D3D12 queue. The reusable compositor effect exposes `request_glsl_reload(source_path, compiler)`, `request_hlsl_reload(source_path, compiler)` and `request_reload_spirv(bytecode)` for precompiled candidates. Both native Vulkan and Windows RD packages include editable `reload_rd_image.comp` and `reload_rd_image.hlsl`. GLSL is compiled with `glslangValidator -V -S comp --target-env vulkan1.1`, and HLSL with DXC `-spirv -T cs_6_6 -E main -fspv-target-env=vulkan1.1`. Both produce candidate SPIR-V for the exact same native resource ABI and transactional RID replacement. Godot's active RenderingDevice driver owns actual Vulkan or D3D12 pipeline creation. This is **not** DXIL ingestion or an independent D3D12 pipeline.
 

@@ -2935,6 +2935,7 @@ func _finish_campaign(completed: bool) -> void:
 		"Campaign summary persisted" if completed and not path.is_empty() else "Campaign ended or could not persist",
 		{"experiment_id": String(_manifest.get("id", ""))})
 	_campaign = null
+	_refresh_provider_controls()
 	if path.is_empty():
 		# _save_report set the concrete I/O error. Never replace it with success.
 		_status.text = "Campaign summary NOT saved: " + _status.text

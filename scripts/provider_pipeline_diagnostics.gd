@@ -108,6 +108,11 @@ static func read(scene: Node) -> Dictionary:
 				String(source["source"]).length() > 240 or \
 				typeof(source.get("last_error")) != TYPE_STRING or \
 				String(source["last_error"]).length() > 1500 or \
+				(source.has("language") and source["language"] not in ["glsl", "hlsl"]) or \
+				(source.has("active_language") and source["active_language"] not in [
+					"embedded_spirv", "glsl", "hlsl"]) or \
+				(source.has("compiler") and (typeof(source["compiler"]) != TYPE_STRING or \
+					String(source["compiler"]).length() > 240)) or \
 				source.get("last_stage") not in ["none", "provider", "source",
 					"in_flight", "compile", "shader", "pipeline", "applied"]:
 			return unavailable("invalid_shader_source_reload_evidence")
@@ -152,7 +157,12 @@ static func summary(report: Dictionary) -> String:
 				line += "; last reload %s: %s" % [
 					String(entry["reload_failure_stage"]), String(entry["reload_error"])]
 	var source: Dictionary = report.get("source_reload", {})
-	if not source.is_empty() and not String(source.get("last_error", "")).is_empty():
-		line += "; GLSL %s: %s" % [
-			String(source.get("last_stage", "unknown")), String(source["last_error"])]
+	if not source.is_empty():
+		line += "; active source %s, selected %s" % [
+			String(source.get("active_language", "unknown")),
+			String(source.get("language", "unknown"))]
+		if not String(source.get("last_error", "")).is_empty():
+			line += "; %s %s: %s" % [
+				String(source.get("language", "shader")).to_upper(),
+				String(source.get("last_stage", "unknown")), String(source["last_error"])]
 	return line

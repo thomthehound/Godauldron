@@ -16,6 +16,7 @@ var _texture: RID
 var _last_bytes := PackedByteArray()
 var _last_record: Dictionary = {}
 var _completion: Dictionary = {}
+var _adapter_evidence: Dictionary = {}
 var _early_release_rejected := false
 
 
@@ -52,6 +53,7 @@ func take_batch() -> Dictionary:
 	var result: Dictionary = {"ok": ok, "error": _failure,
 		"bytes": _last_bytes, "record": _last_record.duplicate(true),
 		"completion": _completion.duplicate(true),
+		"adapter_evidence": _adapter_evidence.duplicate(true),
 		"rejected_early_release": _early_release_rejected}
 	if ok:
 		_last_bytes = PackedByteArray()
@@ -111,6 +113,22 @@ func _ensure_workload(rd: RenderingDevice) -> bool:
 		_texture = RID()
 		_fail("Native workload could not instantiate")
 		return false
+	if OS.get_name() == "Windows":
+		# Inspect borrowed ID3D12Device and IDXGIAdapter only on this render
+		# thread; the native witness verifies the actual matching device LUID.
+		var logical: int = rd.get_driver_resource(
+			RenderingDevice.DRIVER_RESOURCE_LOGICAL_DEVICE, RID(), 0)
+		var physical: int = rd.get_driver_resource(
+			RenderingDevice.DRIVER_RESOURCE_PHYSICAL_DEVICE, RID(), 0)
+		var evidence: Dictionary = _workload.call(
+			"inspect_d3d12_adapter", logical, physical)
+		if not bool(evidence.get("verified_software", false)):
+			rd.free_rid(_texture)
+			_texture = RID()
+			_workload = null
+			_fail("Actual Godot D3D12 adapter is not proven software: " + str(evidence))
+			return false
+		_adapter_evidence = evidence.duplicate(true)
 	var prepared: Dictionary = _workload.call("prepare", rd, _texture,
 		_width, _height)
 	if not bool(prepared.get("ok", false)):

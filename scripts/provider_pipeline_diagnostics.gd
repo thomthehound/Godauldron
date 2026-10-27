@@ -67,7 +67,7 @@ static func read(scene: Node) -> Dictionary:
 		var stage: Variant = item.get("last_prepare_failure_stage", "")
 		if typeof(failure) != TYPE_STRING or typeof(stage) != TYPE_STRING or \
 				String(failure).length() > MAX_LABEL or \
-				stage not in ["", "preflight", "shader", "pipeline", "descriptor"]:
+				stage not in ["", "initialization", "preflight", "shader", "pipeline", "descriptor"]:
 			return unavailable("invalid_pipeline_failure_evidence")
 		entry["last_prepare_error"] = failure
 		entry["last_prepare_failure_stage"] = stage
@@ -88,7 +88,7 @@ static func summary(report: Dictionary) -> String:
 	var binds := 0
 	var failures := 0
 	var host_usec := 0
-	var failed_stages: Array[String] = []
+	var failed_stages := PackedStringArray()
 	for entry in pipelines:
 		count += int(entry["pipeline_creations"])
 		binds += int(entry["pipeline_binds"])

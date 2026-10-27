@@ -139,8 +139,7 @@ jobs:
           python-version: '3.12'
       - name: Install native Vulkan and shader build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools xvfb
+          bash scripts/ci_install_ubuntu_packages.sh cmake ninja-build build-essential libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools xvfb
           ICD="$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d -iname '*lvp*.json' -print -quit 2>/dev/null)"
           test -n "$ICD"
           echo "VK_DRIVER_FILES=$ICD" >> "$GITHUB_ENV"
@@ -319,8 +318,7 @@ jobs:
           python-version: '3.12'
       - name: Install Vulkan software adapter and display
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mesa-vulkan-drivers xvfb
+          bash scripts/ci_install_ubuntu_packages.sh mesa-vulkan-drivers xvfb
           ICD="$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d -iname '*lvp*.json' -print -quit 2>/dev/null)"
           test -n "$ICD"
           echo "VK_DRIVER_FILES=$ICD" >> "$GITHUB_ENV"
@@ -353,10 +351,8 @@ jobs:
         run: python tools/fetch_preview.py --major 4
       - name: Ensure virtual display and software OpenGL
         run: |
-          if ! command -v xvfb-run >/dev/null || ! dpkg -s libgl1-mesa-dri >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y xvfb libgl1-mesa-dri
-          fi
+          bash scripts/ci_install_ubuntu_packages.sh xvfb libgl1-mesa-dri
+          command -v xvfb-run >/dev/null
       - name: Import assets
         run: timeout --signal=TERM --kill-after=5s 90s .engine/godot --headless --path . --editor --import --quit
       - name: Capture neutral scalp head

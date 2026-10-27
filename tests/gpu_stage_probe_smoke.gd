@@ -27,8 +27,10 @@ func _verify() -> void:
 		"opaque_window": 100.0, "sky_window": 20.0,
 		"post_sky_window": 5.0, "transparent_window": 75.0},
 		"covered_gpu_window_usec": 200.0}
+	var second: Dictionary = sample.duplicate(true)
+	second["device_frame"] = 73
 	var source := {"source": "test_contract_only"}
-	var result: Dictionary = Probe.summarize({"samples": [sample, sample.duplicate(true)],
+	var result: Dictionary = Probe.summarize({"samples": [sample, second],
 		"rejected": 1}, source)
 	if not result["available"] or result["resolved_frames"] != 2 or \
 			result["rejected_frames"] != 1 or \
@@ -42,6 +44,16 @@ func _verify() -> void:
 		"rejected": 0}, source)
 	if filtered["available"] or filtered["resolved_frames"] != 1:
 		_fail("Malformed GPU interval was presented as a valid measurement")
+		return
+	var duplicate: Dictionary = Probe.summarize({"samples": [sample, sample.duplicate(true)],
+		"rejected": 0}, source)
+	if duplicate["resolved_frames"] != 1:
+		_fail("Duplicate device frame was counted twice")
+		return
+	var inconsistent: Dictionary = sample.duplicate(true)
+	inconsistent["covered_gpu_window_usec"] = 800.0
+	if Probe.summarize({"samples": [inconsistent], "rejected": 0}, source)["available"]:
+		_fail("GPU timing windows were accepted despite contradicting marker span")
 		return
 	var root_dir: String = "user://gpu-stage-contract-%d" % OS.get_process_id()
 	var saved: Dictionary = Report.write(root_dir, "one", result)

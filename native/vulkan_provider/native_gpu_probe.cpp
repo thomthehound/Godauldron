@@ -20,6 +20,13 @@
 
 using namespace godot;
 
+namespace {
+int64_t elapsed_pipeline_host_usec(std::chrono::steady_clock::time_point since) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - since).count();
+}
+}
+
 void NativeGpuProbe3D::_bind_methods() {
     ClassDB::bind_method(D_METHOD("godauldron_setup", "parameters"),
                          &NativeGpuProbe3D::godauldron_setup);
@@ -31,6 +38,8 @@ void NativeGpuProbe3D::_bind_methods() {
                          &NativeGpuProbe3D::godauldron_resolved_gpu_timeline);
     ClassDB::bind_method(D_METHOD("godauldron_metrics"),
                          &NativeGpuProbe3D::godauldron_metrics);
+    ClassDB::bind_method(D_METHOD("godauldron_pipeline_diagnostics"),
+                         &NativeGpuProbe3D::godauldron_pipeline_diagnostics);
     ClassDB::bind_method(D_METHOD("record_godot_image_compute", "rendering_device",
                                  "output_image", "seed"),
                          &NativeGpuProbe3D::record_godot_image_compute);
@@ -313,9 +322,14 @@ bool NativeGpuProbe3D::initialize(int capacity) {
     set_info.descriptorPool = descriptors_;
     set_info.descriptorSetCount = 1;
     set_info.pSetLayouts = &descriptor_layout_;
-    if (vkAllocateDescriptorSets(device_, &set_info, &descriptor_) != VK_SUCCESS) {
+    const auto descriptor_begin = std::chrono::steady_clock::now();
+    const VkResult descriptor_result = vkAllocateDescriptorSets(device_, &set_info, &descriptor_);
+    descriptor_create_host_usec_ = elapsed_pipeline_host_usec(descriptor_begin);
+    if (descriptor_result != VK_SUCCESS) {
+        pipeline_failure_stage_ = "descriptor";
         return fail("Cannot allocate Vulkan descriptor set");
     }
+    ++descriptor_creation_count_;
     VkDescriptorBufferInfo buffer_info{gpu_buffer_, 0, kWords * sizeof(uint32_t)};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = descriptor_;
@@ -335,9 +349,14 @@ bool NativeGpuProbe3D::initialize(int capacity) {
     VkShaderModuleCreateInfo shader_info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     shader_info.codeSize = sizeof(kComputeSpirv);
     shader_info.pCode = kComputeSpirv;
-    if (vkCreateShaderModule(device_, &shader_info, nullptr, &module) != VK_SUCCESS) {
+    const auto shader_begin = std::chrono::steady_clock::now();
+    const VkResult shader_result = vkCreateShaderModule(device_, &shader_info, nullptr, &module);
+    shader_create_host_usec_ = elapsed_pipeline_host_usec(shader_begin);
+    if (shader_result != VK_SUCCESS) {
+        pipeline_failure_stage_ = "shader";
         return fail("Cannot create Vulkan compute shader");
     }
+    ++shader_creation_count_;
     VkPipelineShaderStageCreateInfo stage{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
     stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     stage.module = module;
@@ -345,12 +364,16 @@ bool NativeGpuProbe3D::initialize(int capacity) {
     VkComputePipelineCreateInfo pipeline_info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     pipeline_info.stage = stage;
     pipeline_info.layout = pipeline_layout_;
+    const auto pipeline_begin = std::chrono::steady_clock::now();
     const VkResult pipeline_result =
         vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_);
+    pipeline_create_host_usec_ = elapsed_pipeline_host_usec(pipeline_begin);
     vkDestroyShaderModule(device_, module, nullptr);
     if (pipeline_result != VK_SUCCESS) {
+        pipeline_failure_stage_ = "pipeline";
         return fail("Cannot create native Vulkan compute pipeline");
     }
+    ++pipeline_creation_count_;
     VkQueryPoolCreateInfo query_info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
     query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
     query_info.queryCount = static_cast<uint32_t>(capacity) * 3;
@@ -483,8 +506,19 @@ bool NativeGpuProbe3D::submit_step() {
 void NativeGpuProbe3D::godauldron_setup(const Dictionary &) {
     cleanup();
     error_.clear();
+    pipeline_failure_stage_.clear();
+    pipeline_prepare_attempts_ = 1;
+    pipeline_prepare_failures_ = 0;
+    shader_creation_count_ = 0;
+    pipeline_creation_count_ = 0;
+    descriptor_creation_count_ = 0;
+    shader_create_host_usec_ = 0;
+    pipeline_create_host_usec_ = 0;
+    descriptor_create_host_usec_ = 0;
     if (!initialize(kMaxSamples)) {
         const auto explanation = error_;
+        ++pipeline_prepare_failures_;
+        if (pipeline_failure_stage_.empty()) pipeline_failure_stage_ = "preflight";
         cleanup();
         error_ = explanation;
     }
@@ -497,6 +531,35 @@ void NativeGpuProbe3D::godauldron_begin_sample() {
 void NativeGpuProbe3D::godauldron_step(double) {
     if (!ready_ || !sampling_ || !error_.empty()) return;
     submit_step(); // Device submission, no fence wait inside measured step callback.
+}
+
+Dictionary NativeGpuProbe3D::godauldron_pipeline_diagnostics() const {
+    Dictionary entry;
+    entry["name"] = "native_vulkan_compute";
+    entry["shader_origin"] = "native_compiled_embedded_spirv";
+    entry["phase"] = ready_ ? "prepared" : (pipeline_prepare_failures_ ? "failed" : "new");
+    entry["prepare_attempts"] = pipeline_prepare_attempts_;
+    entry["prepare_failures"] = pipeline_prepare_failures_;
+    entry["shader_creations"] = shader_creation_count_;
+    entry["pipeline_creations"] = pipeline_creation_count_;
+    entry["descriptor_creations"] = descriptor_creation_count_;
+    entry["pipeline_binds"] = static_cast<int64_t>(submitted_samples_);
+    entry["shader_create_host_usec"] = shader_create_host_usec_;
+    entry["pipeline_create_host_usec"] = pipeline_create_host_usec_;
+    entry["descriptor_create_host_usec"] = descriptor_create_host_usec_;
+    entry["prepare_total_host_usec"] = shader_create_host_usec_ +
+        pipeline_create_host_usec_ + descriptor_create_host_usec_;
+    entry["last_prepare_error"] = String(error_.c_str());
+    entry["last_prepare_failure_stage"] = String(pipeline_failure_stage_.c_str());
+    entry["cache_hit_observation"] = "not_reported";
+    entry["timing_source"] = "steady_host_wall_microseconds";
+    Array entries;
+    entries.append(entry);
+    Dictionary report;
+    report["provider"] = "native-vulkan-queue-probe";
+    report["backend"] = "Vulkan";
+    report["pipelines"] = entries;
+    return report;
 }
 
 Dictionary NativeGpuProbe3D::godauldron_metrics() const {

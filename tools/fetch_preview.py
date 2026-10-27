@@ -79,10 +79,20 @@ def main():
         shutil.copyfileobj(response, output)
     with zipfile.ZipFile(archive) as package:
         entry = select_executable(package.namelist(), args.platform)
-        target = args.output / ("godot.exe" if args.platform == "win64.exe" else "godot")
-        with package.open(entry) as source, target.open("wb") as output:
-            shutil.copyfileobj(source, output)
-        target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        if args.platform == "win64.exe":
+            # The console binary is a wrapper which launches its companion
+            # GUI-subsystem executable by stripping "_console" from its name.
+            main_entry = entry.removesuffix("_console.exe") + ".exe"
+            if main_entry not in package.namelist():
+                raise RuntimeError(f"Windows console companion is missing: {main_entry}")
+            targets = [(entry, args.output / "godot_console.exe"),
+                       (main_entry, args.output / "godot.exe")]
+        else:
+            targets = [(entry, args.output / "godot")]
+        for member, target in targets:
+            with package.open(member) as source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     archive.unlink()
     print(f"Using Godot {tag}")
 

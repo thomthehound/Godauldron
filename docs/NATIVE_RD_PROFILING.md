@@ -2,6 +2,19 @@
 
 The physical AMD acceptance path executes a Godot-owned native C++23 compute workload on D3D12. It verifies the actual DXGI adapter against the live D3D12 device, checks every output pixel, and requires resolved GPU timestamps for all measured batches. These measurements are distinct from the laboratory's frame, rendering, and independent-provider profiles.
 
+## Sustained execution with minimized test-appliance overhead
+
+To test **sustained dispatch throughput** without submitting and validating each sample from the host frame loop, use the same runner in autonomous mode:
+
+```powershell
+.\scripts\run_native_rd_amd.ps1 -StreamSlots 3 -Warmup 10 -Samples 100 -Passes 8 -ResidentBatches 4 -Output native_rd_amd_stream.json
+```
+
+The compositor itself automatically replenishes its 3 independently owned GPU resource slots as asynchronous readbacks complete. Warmup fills the slots before measured submissions. Each readback receives three fixed-position GPU-output sanity checks; **only the final image receives full per-pixel CPU verification**, after measurement is complete. The report separates native record-call CPU time, readback callback/sentinel CPU time and deferred final-validation CPU time. No per-batch host producer, full-size CPU pixel scan or JSON reporting runs in the measured hot loop.
+
+This throughput report is deliberately a **separate format** from the timestamped serial baseline. It measures completed dispatches over a monotonic host interval between the first measured command-recording request and the last measured completed readback. It includes Godot frame scheduling, transfer and other host effects, and **does not claim isolated GPU execution time, GPU occupancy or parallel hardware-queue execution**. The isolated GPU timestamp-window benchmark remains available with `-StreamSlots 0` (the default). Keep frame costs and actual device timestamp windows distinct when comparing results. The autonomous mode supports 2–4 slots, at most 1,024 measured submissions, and requires at least one warmup submission per slot.
+
+
 ## Run and exports
 
 From a Windows PowerShell session in the repository:

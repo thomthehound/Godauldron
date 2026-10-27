@@ -223,6 +223,33 @@ func _run() -> void:
 			expected_shader_creations += 1
 			expected_descriptor_creations += 1
 			if batch_index == 0:
+				# A valid compiled HLSL shader with an incompatible push
+				# constant layout must fail before Godot creates native RIDs.
+				var changed_source: String = FileAccess.get_file_as_string(hlsl_source_path)
+				var incompatible_source: String = changed_source.replace(
+					"uint pass_index;", "uint pass_index; uint extra;")
+				if incompatible_source == changed_source:
+					_fail("Could not prepare real HLSL interface rejection")
+					return
+				var wrong_path: String = "user://native_rd_wrong_push.hlsl"
+				var file: FileAccess = FileAccess.open(wrong_path, FileAccess.WRITE)
+				if file == null:
+					_fail("Could not stage real incompatible HLSL source")
+					return
+				file.store_string(incompatible_source)
+				file.close()
+				var wrong_request: Dictionary = effect.call("request_hlsl_reload", wrong_path)
+				if not wrong_request.get("ok", false):
+					_fail("Incompatible HLSL source must compile before ABI rejection: " +
+						str(wrong_request))
+					return
+				var wrong_done: Dictionary = await _await_phase(effect, "consumed")
+				var wrong: Dictionary = effect.call("reload_snapshot")
+				if wrong_done.get("phase") != "consumed" or wrong.get("ok", true) or \
+						wrong.get("error") != "rd_pipeline_reload_incompatible_image_or_push_constant_abi" or \
+						int(wrong.get("reload_generation", -1)) != 1:
+					_fail("Incompatible push constant HLSL replaced live PSO: " + str(wrong))
+					return
 				# Native failure must not retire the accepted HLSL PSO or
 				# prevent executing the next real compute batch.
 				var corrupt := PackedByteArray()

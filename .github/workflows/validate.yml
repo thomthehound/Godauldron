@@ -267,6 +267,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native RD GPU profiler software-runtime acceptance failed" }
           python tools/validate_native_rd_profile.py native_rd_warp_profile.json --mode software
           if ($LASTEXITCODE -ne 0) { throw "Profiler GPU/host provenance report validation failed" }
+          python tools/analyze_native_rd_profile.py native_rd_warp_profile.json --json-output native_rd_warp_analysis.json --csv-output native_rd_warp_batches.csv
+          if ($LASTEXITCODE -ne 0) { throw "Profiler hardware/host distribution analysis failed" }
+          if (!(Test-Path native_rd_warp_analysis.json) -or !(Test-Path native_rd_warp_batches.csv)) {
+            throw "Native RD profiling outputs missing"
+          }
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

@@ -207,6 +207,42 @@ class ExtendedNativeGPUProfileContract(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate(broken, physical=True)
 
+
+    def test_resident_series_accepts_100_and_256_samples(self) -> None:
+        for count in (100, 256):
+            report = extended_fixture()
+            report["schema_version"] = 3
+            report["settings"].update(samples=count, resident_batches=4)
+            report.update(execution_mode="resident_series",
+                          native_batches_per_sample=4, readbacks_per_sample=1)
+            report["workload_geometry"].update(
+                storage_image_barriers_per_batch=11,
+                pixel_dispatches_per_batch=1404)
+            template = report["records"][1]
+            records = []
+            for i in range(count + 1):
+                record = copy.deepcopy(template)
+                start = 1000000 + 10000 * i
+                record.update(batch_index=i, warmup=i == 0,
+                              dispatches=12, resident_batches=4,
+                              device_frame=2 * i + 1, gpu_start_ns=start,
+                              gpu_end_ns=start + 2500)
+                records.append(record)
+            report["records"] = records
+            report["gpu_timing"].update(required_samples=count,
+                                         resolved_samples=count)
+            for section in ("gpu_timing", "host_readback_latency",
+                            "host_validation", "host_request_to_validated"):
+                report[section]["summary"]["count"] = count
+            for state in report["resource_lifecycle"].values():
+                state.update(completed_batches=4 * (count + 1),
+                             dispatch_count=12 * (count + 1), pending_batches=0)
+            validate(report, physical=True)
+            self.assertEqual(analyze(report)["gpu_compute_window"]["samples"], count)
+            report["settings"]["samples"] = 257
+            with self.assertRaisesRegex(ValueError, "Unbounded workload"):
+                validate(report, physical=True)
+
     def test_geometry_timestamps_and_lifetime_cannot_be_fabricated(self) -> None:
         for modify in (
             lambda r: r["workload_geometry"].update(workgroups_x=99),

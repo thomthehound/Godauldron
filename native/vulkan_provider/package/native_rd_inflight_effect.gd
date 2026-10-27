@@ -204,7 +204,10 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	_mutex.unlock()
 	if has_failure:
 		return
-	if not retiring and _pending.is_empty():
+	_mutex.lock()
+	var has_pending: bool = not _pending.is_empty()
+	_mutex.unlock()
+	if not retiring and not has_pending:
 		return
 	var rd: RenderingDevice = RenderingServer.get_rendering_device()
 	if rd == null:

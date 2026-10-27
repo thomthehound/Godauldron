@@ -139,6 +139,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Restore cached native Vulkan Ubuntu packages
+        uses: actions/cache@v4
+        with:
+          path: .ci-apt-archives
+          key: ubuntu24-native-vulkan-apt-v1-${{ hashFiles('scripts/ci_install_ubuntu_packages.sh') }}
+          restore-keys: ubuntu24-native-vulkan-apt-
       - name: Install native Vulkan and shader build dependencies
         run: |
           bash scripts/ci_install_ubuntu_packages.sh cmake ninja-build build-essential libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools xvfb
@@ -318,6 +324,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Restore cached Forward+ Ubuntu packages
+        uses: actions/cache@v4
+        with:
+          path: .ci-apt-archives
+          key: ubuntu24-forward-hdr-apt-v1-${{ hashFiles('scripts/ci_install_ubuntu_packages.sh') }}
+          restore-keys: ubuntu24-forward-hdr-apt-
       - name: Install Vulkan software adapter and display
         run: |
           bash scripts/ci_install_ubuntu_packages.sh mesa-vulkan-drivers xvfb

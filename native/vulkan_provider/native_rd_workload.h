@@ -76,5 +76,6 @@ private:
                                   int64_t repetitions, bool checkpoint);
 
     static godot::Dictionary reject(const char *reason);
-    godot::Dictionary prepare_failure(const char *stage, const char *reason);
+    godot::Dictionary prepare_failure(const char *stage, const char *reason,
+                                      int64_t elapsed_usec);
 };

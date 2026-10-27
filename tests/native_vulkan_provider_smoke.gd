@@ -58,7 +58,12 @@ func _verify() -> void:
 			int(pipe.get("descriptor_creations", -1)) != 1 or \
 			int(pipe.get("pipeline_binds", -1)) != SAMPLING_STEPS or \
 			pipe.get("cache_hit_observation") != "not_reported" or \
-			int(pipe.get("prepare_total_host_usec", -1)) < 0:
+			pipe.get("last_prepare_error") != "" or \
+			pipe.get("last_prepare_failure_stage") != "" or \
+			int(pipe.get("prepare_total_host_usec", -1)) < \
+					int(pipe.get("shader_create_host_usec", 0)) + \
+					int(pipe.get("pipeline_create_host_usec", 0)) + \
+					int(pipe.get("descriptor_create_host_usec", 0)):
 		_fail("Native Vulkan pipeline creation/reuse evidence is inconsistent: " + str(pipe))
 		return
 	var report: Dictionary = run.make_report("org.godauldron.native-vulkan-device-probe")

@@ -55,17 +55,19 @@ static func read(scene: Node) -> Dictionary:
 			if typeof(item.get(key)) != TYPE_INT or int(item[key]) < 0:
 				return unavailable("invalid_pipeline_measurement_" + key)
 			entry[key] = item[key]
+		# Descriptor sets can be allocated before the shader/pipeline (native
+		# Vulkan), after them (Godot RenderingDevice), or multiple per pipeline.
+		# They do not imply a successful pipeline creation.
 		if entry["prepare_failures"] > entry["prepare_attempts"] or \
 				entry["shader_creations"] > entry["prepare_attempts"] or \
 				entry["pipeline_creations"] > entry["shader_creations"] or \
-				entry["descriptor_creations"] > entry["pipeline_creations"] or \
 				(entry["pipeline_binds"] > 0 and entry["pipeline_creations"] == 0):
 			return unavailable("inconsistent_pipeline_lifecycle")
 		var failure: Variant = item.get("last_prepare_error", "")
 		var stage: Variant = item.get("last_prepare_failure_stage", "")
 		if typeof(failure) != TYPE_STRING or typeof(stage) != TYPE_STRING or \
 				String(failure).length() > MAX_LABEL or \
-				stage not in ["", "preflight", "shader", "pipeline", "descriptor"]:
+				stage not in ["", "initialization", "preflight", "shader", "pipeline", "descriptor"]:
 			return unavailable("invalid_pipeline_failure_evidence")
 		entry["last_prepare_error"] = failure
 		entry["last_prepare_failure_stage"] = stage
@@ -86,10 +88,18 @@ static func summary(report: Dictionary) -> String:
 	var binds := 0
 	var failures := 0
 	var host_usec := 0
+	var failed_stages := PackedStringArray()
 	for entry in pipelines:
 		count += int(entry["pipeline_creations"])
 		binds += int(entry["pipeline_binds"])
 		failures += int(entry["prepare_failures"])
 		host_usec += int(entry["prepare_total_host_usec"])
-	return "Provider pipelines: %d reported; %d created / %d bound / %d failed prepares; %.3f ms setup host wall; cache hits unobservable" % [
+		if int(entry["prepare_failures"]) > 0:
+			failed_stages.append("%s: %s (%s)" % [
+				String(entry["name"]), String(entry["last_prepare_failure_stage"]),
+				String(entry["last_prepare_error"])])
+	var line := "Provider pipelines: %d reported; %d created / %d bound / %d failed prepares; %.3f ms setup host wall; cache hits unobservable" % [
 		pipelines.size(), count, binds, failures, float(host_usec) / 1000.0]
+	if not failed_stages.is_empty():
+		line += "; failed stages: " + "; ".join(failed_stages)
+	return line

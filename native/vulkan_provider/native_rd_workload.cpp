@@ -109,7 +109,9 @@ Dictionary NativeRDWorkload::reject(const char *reason) {
     return out;
 }
 
-Dictionary NativeRDWorkload::prepare_failure(const char *stage, const char *reason) {
+Dictionary NativeRDWorkload::prepare_failure(const char *stage, const char *reason,
+                                              int64_t elapsed_usec) {
+    prepare_total_host_usec_ = elapsed_usec;
     ++prepare_failures_;
     last_prepare_failure_stage_ = stage;
     last_prepare_error_ = reason;
@@ -127,7 +129,7 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     if (rd == nullptr || !output_image.is_valid() ||
         width < 1 || height < 1 || width > 2048 || height > 2048 ||
         width * height > 1024 * 1024) {
-        return prepare_failure("preflight", "missing_device_or_target");
+        return prepare_failure("preflight", "missing_device_or_target", elapsed_host_usec(began));
     }
     PackedByteArray shader_bytes;
     shader_bytes.resize(sizeof(kPersistentComputeSpirv));
@@ -140,7 +142,7 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     RID shader = rd->shader_create_from_spirv(spirv, "Godauldron Persistent Native RD");
     shader_create_host_usec_ = elapsed_host_usec(shader_start);
     if (!shader.is_valid()) {
-        return prepare_failure("shader", "provider_shader_creation_failed");
+        return prepare_failure("shader", "provider_shader_creation_failed", elapsed_host_usec(began));
     }
     ++shader_creations_;
 
@@ -149,8 +151,9 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     pipeline_create_host_usec_ = elapsed_host_usec(pipeline_start);
     if (!pipeline.is_valid()) {
         rd->free_rid(shader);
-        return prepare_failure("pipeline", "provider_pipeline_creation_failed");
+        return prepare_failure("pipeline", "provider_pipeline_creation_failed", elapsed_host_usec(began));
     }
+    ++pipeline_creations_;
 
     Ref<RDUniform> binding;
     binding.instantiate();
@@ -165,8 +168,9 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     if (!uniform_set.is_valid()) {
         rd->free_rid(pipeline);
         rd->free_rid(shader);
-        return prepare_failure("descriptor", "provider_descriptor_creation_failed");
+        return prepare_failure("descriptor", "provider_descriptor_creation_failed", elapsed_host_usec(began));
     }
+    ++descriptor_creations_;
 
     shader_ = shader;
     pipeline_ = pipeline;
@@ -180,8 +184,6 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     push_bytes_.resize(sizeof(uint32_t) * 2);
     phase_ = Phase::PREPARED;
     ++prepare_count_;
-    ++pipeline_creations_;
-    ++descriptor_creations_;
     prepare_total_host_usec_ = elapsed_host_usec(began);
     last_prepare_error_ = "";
     last_prepare_failure_stage_ = "";

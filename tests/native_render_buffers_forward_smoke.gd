@@ -154,6 +154,11 @@ func _verify() -> void:
 	if camera.compositor != null or world.compositor != original:
 		_fail("Moving-object readback leaked temporary compositor ownership")
 		return
+	host.call("_start_run")
+	if bool(host.call("_has_active_run")) or \
+			not (host.get("_status") as Label).text.contains("Close native buffer inspection"):
+		_fail("An active GPU-buffer inspection was allowed to contaminate measurement")
+		return
 	if Probe.capability("gl_compatibility", viewport, camera, "depth")["available"] or \
 			Probe.capability("mobile", viewport, camera, "normal_roughness")["available"]:
 		_fail("Unsupported native renderer/source capability was advertised")

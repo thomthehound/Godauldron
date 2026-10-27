@@ -12,6 +12,7 @@ var _settings := {
 	"warmup": 3,
 	"samples": 12,
 	"passes": 8,
+	"resident_batches": 1,
 	"output": "user://native_rd_hardware_profile.json"
 }
 
@@ -34,7 +35,7 @@ func _parse_args() -> bool:
 		var value: String = args[i + 1]
 		if not args[i].begins_with("--") or not _settings.has(key):
 			return false
-		if key in ["width", "height", "warmup", "samples", "passes"]:
+		if key in ["width", "height", "warmup", "samples", "passes", "resident_batches"]:
 			if not value.is_valid_int():
 				return false
 			_settings[key] = int(value)
@@ -48,6 +49,8 @@ func _parse_args() -> bool:
 		int(_settings["samples"]) >= 2 and int(_settings["samples"]) <= 256 and \
 		int(_settings["warmup"]) >= 1 and int(_settings["warmup"]) <= 32 and \
 		int(_settings["passes"]) >= 1 and int(_settings["passes"]) <= 32 and \
+		int(_settings["resident_batches"]) >= 1 and int(_settings["resident_batches"]) <= 256 and \
+		int(_settings["resident_batches"]) * int(_settings["passes"]) <= 2048 and \
 		not String(_settings["output"]).is_empty()
 
 
@@ -62,7 +65,7 @@ func _await_state(effect: CompositorEffect, desired: String) -> Dictionary:
 
 func _run() -> void:
 	if not _parse_args():
-		_fail("Options: --mode physical_amd|software --width N --height N --warmup N --samples N --passes N --output path")
+		_fail("Options: --mode physical_amd|software --width N --height N --warmup N --samples N --passes N --resident_batches N --output path")
 		return
 	if OS.get_name() != "Windows" or \
 			RenderingServer.get_current_rendering_method() != "forward_plus" or \
@@ -102,6 +105,8 @@ func _run() -> void:
 	var width: int = _settings["width"]
 	var height: int = _settings["height"]
 	var passes: int = _settings["passes"]
+	var resident_batches: int = _settings["resident_batches"]
+	var resident_dispatches: int = passes * resident_batches
 	var effect: CompositorEffect = effect_script.new(
 		width, height, _settings["mode"], true)
 	var compositor := Compositor.new()
@@ -112,14 +117,14 @@ func _run() -> void:
 	var seeds := PackedInt32Array()
 	for i in range(passes):
 		seeds.append(i + 1)
-	var expected_seed_sum: int = (passes * (passes + 1)) >> 1
+	var expected_seed_sum: int = resident_batches * ((passes * (passes + 1)) >> 1)
 	var count: int = int(_settings["warmup"]) + int(_settings["samples"])
 	var records: Array[Dictionary] = []
 	var provenance: Dictionary = {}
 	var last_completed: Dictionary = {}
 	for batch_index in range(count):
 		var start_usec := Time.get_ticks_usec()
-		if not bool(effect.call("request_batch", seeds)):
+		if not bool(effect.call("request_series", seeds, resident_batches)):
 			_fail("Native workload refused batch %d" % batch_index)
 			return
 		var resolved: Dictionary = await _await_state(effect, "ready")
@@ -134,12 +139,15 @@ func _run() -> void:
 				completed.get("phase") != "prepared" or \
 				int(completed.get("pipeline_creations", 0)) != 1 or \
 				int(completed.get("descriptor_creations", 0)) != 1 or \
-				int(completed.get("completed_batches", 0)) != batch_index + 1:
+				int(completed.get("completed_batches", 0)) != (batch_index + 1) * resident_batches or \
+				int(completed.get("dispatch_count", 0)) != (batch_index + 1) * resident_dispatches or \
+				int(completed.get("pending_batches", -1)) != 0 or \
+				int(result.get("record", {}).get("resident_series_length", 0)) != resident_batches:
 			_fail("GPU batch completion/resource proof failed at %d: %s" % [batch_index, result])
 			return
 		var validation_start_usec := Time.get_ticks_usec()
 		for pixel in range(width * height):
-			if data.decode_u32(pixel * 4) != expected_seed_sum + passes * pixel:
+			if data.decode_u32(pixel * 4) != expected_seed_sum + resident_dispatches * pixel:
 				_fail("GPU output mismatch at batch %d pixel %d" % [batch_index, pixel])
 				return
 		if batch_index == 0:
@@ -158,7 +166,8 @@ func _run() -> void:
 			"host_validation_usec": validated_usec - validation_start_usec,
 			"host_request_to_validated_usec": validated_usec - start_usec,
 			"correct_pixels": width * height,
-			"dispatches": passes})
+			"dispatches": resident_dispatches,
+			"resident_batches": resident_batches})
 	# Keep the compositor alive while Godot's timestamp query ring resolves.
 	# The readback callback may precede timestamp availability by several frames.
 	for i in range(180):
@@ -210,7 +219,7 @@ func _run() -> void:
 			[gpu_usec.size(), required])
 		return
 	var report := {
-		"schema_version": 2,
+		"schema_version": 3 if resident_batches > 1 else 2,
 		"capture_type": "godauldron_native_rd_physical_device_compute",
 		"backend": "d3d12",
 		"device": RenderingServer.get_video_adapter_name(),
@@ -218,14 +227,17 @@ func _run() -> void:
 		"device_driver_info": Array(OS.get_video_adapter_driver_info()),
 		"adapter_provenance": provenance,
 		"settings": _settings.duplicate(true),
+		"execution_mode": "resident_series" if resident_batches > 1 else "serial_readback",
+		"readbacks_per_sample": 1,
+		"native_batches_per_sample": resident_batches,
 		"workload_geometry": {
 			"image_pixels": width * height,
 			"output_bytes": width * height * 4,
 			"workgroups_x": (width + 7) / 8,
 			"workgroups_y": (height + 7) / 8,
 			"workgroups_per_dispatch": ((width + 7) / 8) * ((height + 7) / 8),
-			"storage_image_barriers_per_batch": passes - 1,
-			"pixel_dispatches_per_batch": width * height * passes
+			"storage_image_barriers_per_batch": resident_dispatches - 1,
+			"pixel_dispatches_per_batch": width * height * resident_dispatches
 		},
 		"shader_source": "native/vulkan_provider/persistent_image.comp",
 		"shader": "native_build_embedded_spirv_translated_by_godot",

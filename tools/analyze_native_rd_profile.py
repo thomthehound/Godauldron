@@ -123,7 +123,9 @@ def analyze(report: dict) -> dict:
     samples = [r for r in report["records"] if not r["warmup"]]
     timed = [r for r in samples if r.get("gpu_compute_window_usec") is not None]
     gpu_values = [float(r["gpu_compute_window_usec"]) for r in timed]
-    pixel_dispatches = settings["width"] * settings["height"] * settings["passes"]
+    resident = settings.get("resident_batches", 1)
+    sample_dispatches = settings["passes"] * resident
+    pixel_dispatches = settings["width"] * settings["height"] * sample_dispatches
     indices = [r["batch_index"] for r in timed]
     gpu = distribution(gpu_values, indices)
     # Normalized counts are rates over the marker window, not bandwidth,
@@ -132,7 +134,7 @@ def analyze(report: dict) -> dict:
         rate_distribution([pixel_dispatches * 1_000_000.0 / t for t in gpu_values], indices)
         if gpu_values else {"available": False, "samples": 0})
     gpu["dispatches_per_second"] = (
-        rate_distribution([settings["passes"] * 1_000_000.0 / t for t in gpu_values], indices)
+        rate_distribution([sample_dispatches * 1_000_000.0 / t for t in gpu_values], indices)
         if gpu_values else {"available": False, "samples": 0})
     gpu["rate_scope"] = (
         "nominal pixel-dispatch and dispatch rates over the Godot RD timestamp window; "
@@ -146,12 +148,15 @@ def analyze(report: dict) -> dict:
         "workload": {
             "width": settings["width"], "height": settings["height"],
             "pixels": settings["width"] * settings["height"],
-            "passes": settings["passes"], "pixel_dispatches_per_batch": pixel_dispatches,
+            "passes": settings["passes"], "resident_batches": resident,
+            "dispatches_per_sample": sample_dispatches,
+            "execution_mode": report.get("execution_mode", "serial_readback"),
+            "pixel_dispatches_per_batch": pixel_dispatches,
             "warmup_batches": settings["warmup"], "measured_batches": settings["samples"],
         },
         "gpu_compute_window": gpu,
         "gpu_batch_cadence": marker_cadence(
-            timed, settings["passes"], pixel_dispatches)
+            timed, sample_dispatches, pixel_dispatches)
             if len(timed) == len(samples) else {
                 "available": False, "reason": "incomplete_measured_device_markers"},
         "host_request_to_readback": distribution(
@@ -183,6 +188,8 @@ def compare(report: dict, baseline: dict) -> dict:
     for key in ("mode", "width", "height", "passes"):
         if report["settings"].get(key) != baseline["settings"].get(key):
             raise ValueError(f"Incompatible native GPU workload: {key}")
+    if report["settings"].get("resident_batches", 1) != baseline["settings"].get("resident_batches", 1):
+        raise ValueError("Incompatible native GPU readback cadence: resident_batches")
     for key in ("vendor_id", "device_id", "device_luid_matched",
                 "verified_physical_amd", "verified_software"):
         if report["adapter_provenance"].get(key) != baseline["adapter_provenance"].get(key):

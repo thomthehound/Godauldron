@@ -10,6 +10,14 @@ From a Windows PowerShell session in the repository:
 .\scripts\run_native_rd_amd.ps1 -Warmup 10 -Samples 100 -Passes 8 -Output native_rd_amd_profile_long.json
 ```
 
+A GPU-resident series can be selected explicitly:
+
+```powershell
+.\scripts\run_native_rd_amd.ps1 -Warmup 10 -Samples 100 -Passes 8 -ResidentBatches 4 -Output native_rd_resident.json
+```
+
+This records four dependent native batches (32 GPU dispatches) per sample within one Godot compute list and reads back once after all of them. The final pixel values depend on every dispatch, including across resident batch boundaries; a missing dispatch or missing barrier fails correctness validation. A series has its own device marker window and is not interchangeable with the serial one-readback-per-batch baseline. Allowed resident batches are 1–256, with at most 2048 total dispatches per series. The default remains one batch per readback.
+
 The script rebuilds and installs the native RD extension, executes the device workload and validates its evidence. On success, it writes the primary JSON record, a sibling `.analysis.json` summary, and a `.csv` with every batch including warmup rows. Sample counts range from 2 to 256, warmup from 1 to 32, and dispatches per batch from 1 to 32; the native image is limited to 1,048,576 pixels. The default configuration remains 512×512, three warmups, twelve samples and eight passes.
 
 Analyze a previous schema-1 report or a current schema-2 report independently:
@@ -35,6 +43,8 @@ Positive change percentages mean slower GPU dispatch windows. A regression limit
 - **Normalized rates:** Dispatches or pixel-dispatches per second calculated from the measured *GPU marker window*, not hardware bandwidth, actual shader instruction rate, occupancy or completed-frame throughput. A pixel-dispatch is one nominal image pixel processed by one shader dispatch, including bounds-guarded workgroups.
 - **Measured device-marker cadence:** When all samples expose valid same-device GPU marker bounds, the analyzer reports consecutive batch start gaps, observed device-frame gaps, elapsed first-to-last batch time, and actual dispatch/pixel-dispatch rates across that interval. These rates **include inter-batch pacing**, unlike GPU-window-normalized rates. The marker-window fraction describes only coverage by measured native work; it is not a GPU occupancy or utilization estimate.
 - **Dispersion:** Mean, p50/p95/p99, population deviation, median absolute deviation, coefficient of variation, p95/p50 ratio, first/second-half medians and both low- and high-tail batch indices. The descriptive Tukey fences (Q1 − 1.5×IQR, Q3 + 1.5×IQR) are applied when there are at least eight observations, retaining original batch indices. Neither tail automatically indicates a hardware fault or an explanation for the variation.
+
+Schema-3 reports explicitly identify the resident-series execution mode, single readback per sample, and logical batch/dispatch counts. The analyzer attributes compute-window throughput to all dispatches in each series. Baseline comparisons reject mismatched series lengths rather than mistaking the changed readback cadence for a GPU performance regression.
 
 The measured summaries exclude warmup batches; the CSV retains them for inspection. Missing software-device GPU timestamps are reported as unavailable, never inferred from host latency. Physical-device acceptance rejects any missing measured timestamp. Schema-2 records also retain timestamp start/end values, workload dispatch geometry, and one-time shader/pipeline/descriptor lifetime evidence across the full run and after release.
 

@@ -42,7 +42,7 @@ def validate_summary(summary: dict, values: list[float], label: str) -> None:
 
 
 def validate(data: dict, *, physical: bool) -> None:
-    if data.get("schema_version") not in (1, 2) or data.get("capture_type") != "godauldron_native_rd_physical_device_compute":
+    if data.get("schema_version") not in (1, 2, 3) or data.get("capture_type") != "godauldron_native_rd_physical_device_compute":
         raise ValueError("Wrong native GPU report schema")
     if data.get("backend") != "d3d12" or not data.get("validated", False):
         raise ValueError("Report is not a successful D3D12 native workload run")
@@ -54,11 +54,26 @@ def validate(data: dict, *, physical: bool) -> None:
     samples = settings.get("samples", 0)
     warmup = settings.get("warmup", 0)
     passes = settings.get("passes", 0)
+    resident = settings.get("resident_batches", 1)
+    if (type(resident) is not int or resident < 1 or
+            resident > 256 or resident * passes > 2048 or
+            (data["schema_version"] < 3 and resident != 1)):
+        raise ValueError("Invalid GPU resident-series configuration")
+    if data["schema_version"] == 3:
+        if (resident <= 1 or data.get("execution_mode") != "resident_series" or
+                data.get("native_batches_per_sample") != resident or
+                data.get("readbacks_per_sample") != 1):
+            raise ValueError("GPU resident-series execution evidence missing")
+    elif data["schema_version"] == 2 and (
+            data.get("execution_mode", "serial_readback") != "serial_readback" or
+            data.get("native_batches_per_sample", 1) != 1 or
+            data.get("readbacks_per_sample", 1) != 1):
+        raise ValueError("Serial GPU profiler execution evidence inconsistent")
     if not all(type(x) is int and x > 0 for x in [width, height, samples, warmup, passes]):
         raise ValueError("Invalid workload dimensions/sample counts")
     if width * height > 1024 * 1024 or samples > (256 if data["schema_version"] == 2 else 64) or warmup > 32 or passes > 32:
         raise ValueError("Unbounded workload in report")
-    if data["schema_version"] == 2:
+    if data["schema_version"] >= 2:
         geometry = data.get("workload_geometry", {})
         expected_geometry = {
             "image_pixels": width * height,
@@ -66,8 +81,8 @@ def validate(data: dict, *, physical: bool) -> None:
             "workgroups_x": (width + 7) // 8,
             "workgroups_y": (height + 7) // 8,
             "workgroups_per_dispatch": ((width + 7) // 8) * ((height + 7) // 8),
-            "storage_image_barriers_per_batch": passes - 1,
-            "pixel_dispatches_per_batch": width * height * passes,
+            "storage_image_barriers_per_batch": passes * resident - 1,
+            "pixel_dispatches_per_batch": width * height * passes * resident,
         }
         if any(type(geometry.get(key)) is not int or geometry[key] != value
                for key, value in expected_geometry.items()):
@@ -92,11 +107,12 @@ def validate(data: dict, *, physical: bool) -> None:
         if (record.get("batch_index") != i or
                 record.get("warmup") is not (i < warmup) or
                 record.get("correct_pixels") != width * height or
-                record.get("dispatches") != passes or
+                record.get("dispatches") != passes * resident or
+                (data["schema_version"] == 3 and record.get("resident_batches") != resident) or
                 type(record.get("host_request_to_readback_usec")) is not int or
                 record["host_request_to_readback_usec"] <= 0):
             raise ValueError(f"Failed native GPU work/readback sample {i}")
-        if data["schema_version"] == 2:
+        if data["schema_version"] >= 2:
             validation_usec = record.get("host_validation_usec")
             validated_usec = record.get("host_request_to_validated_usec")
             readback_usec = record["host_request_to_readback_usec"]
@@ -140,7 +156,7 @@ def validate(data: dict, *, physical: bool) -> None:
     validate_summary(host.get("summary", {}),
                      [float(r["host_request_to_readback_usec"]) for r in sampled],
                      "host_readback")
-    if data["schema_version"] == 2:
+    if data["schema_version"] >= 2:
         for name, key in (("host_validation", "host_validation_usec"),
                           ("host_request_to_validated", "host_request_to_validated_usec")):
             measurement = data.get(name, {})
@@ -153,13 +169,14 @@ def validate(data: dict, *, physical: bool) -> None:
         lifecycle = data.get("resource_lifecycle", {})
         completed = lifecycle.get("after_last_readback", {})
         released = lifecycle.get("after_release", {})
-        expected_counts = {"completed_batches": samples + warmup,
-                           "dispatch_count": (samples + warmup) * passes,
+        expected_counts = {"completed_batches": (samples + warmup) * resident,
+                           "dispatch_count": (samples + warmup) * resident * passes,
                            "pipeline_creations": 1,
                            "descriptor_creations": 1, "prepare_count": 1}
         for phase, snapshot in (("prepared", completed), ("released", released)):
             if (snapshot.get("phase") != phase or
                     snapshot.get("active_resources") is not (phase == "prepared") or
+                    (data["schema_version"] == 3 and snapshot.get("pending_batches") != 0) or
                     any(type(snapshot.get(key)) is not int or snapshot[key] != value
                         for key, value in expected_counts.items())):
                 raise ValueError("Persistent native RD resource lifecycle evidence is inconsistent")

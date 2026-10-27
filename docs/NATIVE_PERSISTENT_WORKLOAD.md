@@ -14,6 +14,12 @@ After recording, the adapter is **pending**. No further batch and no release is 
 
 `diagnostics()` reports the adapter's lifecycle state, cumulative dispatch/batch/completion counts and total shader, pipeline and descriptor creations. It contains no raw GPU handles or device pointers and no fabricated GPU timings. The adapter does not allocate new shader or pipeline resources during an individual dispatch.
 
+## GPU-resident series
+
+`record_series(rd, seeds, repetitions)` records 1–256 consecutive logical batches as a single Godot compute list, limited to 2048 dispatches. It retains the same shader, pipeline, uniform set and output image. Each dispatch except the first has an explicit image barrier; the push-constant dispatch ordinal is never reset between resident batches, so the final image is the sum of *all* seeds and spatial contributions. One asynchronous texture readback completes the whole series. During that readback, further submissions and release remain rejected; the completion callback advances the native logical batch count only after all work has actually completed. The serial `record_batch` path delegates to one repetition.
+
+This is a **single GPU-resident dispatch series per readback**, not an independent queue, parallel overlapping submissions, or per-dispatch timestamp attribution. The final result is checked against all series dispatches, rather than pretending unobserved intermediate readbacks were validated individually.
+
 ## Tested workload
 
 The shader `native/vulkan_provider/persistent_image.comp` is built to SPIR-V and embedded in the C++23 binary. It stores `seed + spatial_index` at each pixel on the first dispatch. Subsequent dispatches read the prior value, add their own seed and pixel index, and store it back. This exercises actual storage-image dependency barriers rather than repeatedly overwriting an image with a constant.

@@ -168,6 +168,45 @@ class ExtendedNativeGPUProfileContract(unittest.TestCase):
     def test_legacy_report_has_no_invented_device_cadence(self) -> None:
         self.assertFalse(analyze(fixture(True))["gpu_batch_cadence"]["available"])
 
+
+    def test_resident_series_requires_full_dispatch_and_completion_evidence(self) -> None:
+        report = extended_fixture()
+        report["schema_version"] = 3
+        report["settings"]["resident_batches"] = 4
+        report["execution_mode"] = "resident_series"
+        report["native_batches_per_sample"] = 4
+        report["readbacks_per_sample"] = 1
+        report["workload_geometry"]["storage_image_barriers_per_batch"] = 11
+        report["workload_geometry"]["pixel_dispatches_per_batch"] = 1404
+        for record in report["records"]:
+            record["dispatches"] = 12
+            record["resident_batches"] = 4
+        for state in report["resource_lifecycle"].values():
+            state["completed_batches"] = 12
+            state["dispatch_count"] = 36
+            state["pending_batches"] = 0
+        validate(report, physical=True)
+        analysis = analyze(report)
+        self.assertEqual(analysis["workload"]["dispatches_per_sample"], 12)
+        self.assertEqual(analysis["workload"]["resident_batches"], 4)
+        self.assertEqual(analysis["gpu_compute_window"]["dispatches_per_second"]["p50_per_second"],
+                         12 * 1_000_000 / 2.5)
+        with self.assertRaisesRegex(ValueError, "resident_batches"):
+            compare(report, extended_fixture())
+
+        for mutate in (
+            lambda r: r["records"][1].update(dispatches=3),
+            lambda r: r["resource_lifecycle"]["after_release"].update(completed_batches=3),
+            lambda r: r["resource_lifecycle"]["after_last_readback"].update(pending_batches=4),
+            lambda r: r["workload_geometry"].update(storage_image_barriers_per_batch=2),
+            lambda r: r.update(readbacks_per_sample=4),
+        ):
+            with self.subTest(mutate=mutate):
+                broken = copy.deepcopy(report)
+                mutate(broken)
+                with self.assertRaises(ValueError):
+                    validate(broken, physical=True)
+
     def test_geometry_timestamps_and_lifetime_cannot_be_fabricated(self) -> None:
         for modify in (
             lambda r: r["workload_geometry"].update(workgroups_x=99),

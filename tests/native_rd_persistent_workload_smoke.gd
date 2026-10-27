@@ -176,12 +176,16 @@ func _run() -> void:
 			int(completion.get("completed_batches", -1)) != BATCHES.size():
 		_fail("Persistent native workload leaked RD resources or dropped work")
 		return
-	# A second independent adapter instance can prepare, submit, read back,
-	# and retire on the same Godot device without retaining the first's RIDs.
+	# A fresh adapter executes three dependency-ordered resident batches
+	# before one final readback. The final pixels depend on every dispatch.
 	var second: CompositorEffect = script.new(8, 8)
 	var second_effects: Array[CompositorEffect] = [second]
 	compositor.compositor_effects = second_effects
-	if not bool(second.call("request_batch", PackedInt32Array([3, 5]))):
+	if bool(second.call("request_series", PackedInt32Array([3, 5]), 1025)) or \
+			bool(second.call("request_series", PackedInt32Array([3, 5]), 0)):
+		_fail("Resident-series bounds failed before resource allocation")
+		return
+	if not bool(second.call("request_series", PackedInt32Array([3, 5]), 3)):
 		_fail("Second persistent adapter session refused initialization")
 		return
 	var second_state: Dictionary = await _await_phase(second, "ready")
@@ -192,12 +196,17 @@ func _run() -> void:
 	var second_bytes: PackedByteArray = second_result.get("bytes", PackedByteArray())
 	var second_completion: Dictionary = second_result.get("completion", {})
 	if not second_result.get("ok", false) or second_bytes.size() != 256 or \
+			int(second_result.get("record", {}).get("resident_series_length", -1)) != 3 or \
+			int(second_result.get("record", {}).get("recorded_dispatches", -1)) != 6 or \
 			int(second_completion.get("pipeline_creations", -1)) != 1 or \
-			int(second_completion.get("dispatch_count", -1)) != 2:
+			int(second_completion.get("descriptor_creations", -1)) != 1 or \
+			int(second_completion.get("pending_batches", -1)) != 0 or \
+			int(second_completion.get("completed_batches", -1)) != 3 or \
+			int(second_completion.get("dispatch_count", -1)) != 6:
 		_fail("New adapter did not own a fresh independent pipeline")
 		return
 	for pixel in range(64):
-		if second_bytes.decode_u32(pixel * 4) != 8 + pixel * 2:
+		if second_bytes.decode_u32(pixel * 4) != 24 + pixel * 6:
 			_fail("Second native workload returned incorrect GPU data")
 			return
 	if not bool(second.call("request_release")):
@@ -205,7 +214,8 @@ func _run() -> void:
 		return
 	var second_retired: Dictionary = await _await_phase(second, "released")
 	if second_retired.get("phase") != "released" or \
-			second_retired.get("completion", {}).get("active_resources") != false:
+			second_retired.get("completion", {}).get("active_resources") != false or \
+			int(second_retired.get("completion", {}).get("completed_batches", -1)) != 3:
 		_fail("Second native adapter did not release its Godot GPU resources")
 		return
 	camera.compositor = null

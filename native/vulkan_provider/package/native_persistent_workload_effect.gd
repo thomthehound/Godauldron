@@ -1,6 +1,6 @@
 extends CompositorEffect
 ## Native-authored reusable shader/pipeline/descriptor set, Godot-owned GPU image.
-## One batch at a time, with actual Godot async GPU completion for reuse.
+## One readback at a time; a resident series can contain multiple GPU batches.
 ## All RenderingDevice calls occur only within render callbacks.
 
 const MAX_PIXELS := 1024 * 1024
@@ -11,6 +11,7 @@ var _mutex := Mutex.new()
 var _phase := "idle"
 var _failure := ""
 var _requested_seeds := PackedInt32Array()
+var _requested_repetitions := 1
 var _workload: RefCounted
 var _texture: RID
 var _last_bytes := PackedByteArray()
@@ -40,7 +41,13 @@ func _init(width: int = 8, height: int = 8,
 
 
 func request_batch(seeds: PackedInt32Array) -> bool:
+	return request_series(seeds, 1)
+
+
+func request_series(seeds: PackedInt32Array, repetitions: int) -> bool:
 	if _adapter_mode not in ["software", "physical_amd"]:
+		return false
+	if repetitions < 1 or repetitions > 256 or repetitions * seeds.size() > 2048:
 		return false
 	# Reject malformed workloads before the compositor allocates GPU resources.
 	# The native adapter independently enforces the same bound on its API.
@@ -55,6 +62,7 @@ func request_batch(seeds: PackedInt32Array) -> bool:
 	var allowed: bool = _phase in ["idle", "consumed"]
 	if allowed:
 		_requested_seeds = seeds.duplicate()
+		_requested_repetitions = repetitions
 		_phase = "armed"
 		_failure = ""
 	_mutex.unlock()
@@ -237,6 +245,7 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	_mutex.lock()
 	var action: String = _phase
 	var seeds: PackedInt32Array = _requested_seeds.duplicate()
+	var repetitions: int = _requested_repetitions
 	if action == "armed":
 		_phase = "in_flight"
 	_mutex.unlock()
@@ -269,7 +278,7 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 		return
 	if _profiling:
 		rd.capture_timestamp(_profile_prefix + "%d/begin" % _batch_sequence)
-	var record: Dictionary = _workload.call("record_batch", rd, seeds)
+	var record: Dictionary = _workload.call("record_series", rd, seeds, repetitions)
 	if bool(record.get("ok", false)) and _profiling:
 		rd.capture_timestamp(_profile_prefix + "%d/end" % _batch_sequence)
 		_batch_sequence += 1

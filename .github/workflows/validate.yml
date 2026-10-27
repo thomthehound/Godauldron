@@ -161,13 +161,8 @@ jobs:
           LIB="$(find .native-build -type f -name 'libgodauldron_native_vulkan_provider.so' -print -quit)"
           test -n "$LIB"
           python native/vulkan_provider/install_package.py "$LIB"
-      - name: Export compiled provider shader for Direct3D 12 acceptance
-        uses: actions/upload-artifact@v4
-        with:
-          name: godauldron-persistent-native-spirv
-          path: .native-build/generated/persistent_compute_spirv.h
-          if-no-files-found: error
-          retention-days: 7
+      - name: Verify pinned native shader is identical to compiled GLSL
+        run: python native/vulkan_provider/pinned_spirv.py verify native/vulkan_provider/embedded/persistent_image.spv.b64 .native-build/generated/persistent_image.spv
       - name: Validate installed native package
         run: |
           python tools/validate_manifests.py
@@ -209,7 +204,8 @@ jobs:
 
   windows-d3d12-native-rd:
     runs-on: windows-latest
-    needs: native-vulkan-device
+    # Independent of Ubuntu package installation. The checked-in SPIR-V
+    # is byte-compared against freshly compiled GLSL by native-vulkan-device.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -220,11 +216,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python tools/fetch_preview.py --major 4 --platform win64.exe
-      - name: Restore the exact Linux-compiled native SPIR-V module
-        uses: actions/download-artifact@v4
-        with:
-          name: godauldron-persistent-native-spirv
-          path: .native-rd-windows-build/generated
       - name: Configure and compile C++23 native RD-only extension
         shell: pwsh
         run: |

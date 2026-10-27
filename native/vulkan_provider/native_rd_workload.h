@@ -18,6 +18,9 @@ public:
                               int64_t width, int64_t height);
     godot::Dictionary record_batch(godot::RenderingDevice *rd,
                                    const godot::PackedInt32Array &seeds);
+    godot::Dictionary record_series(godot::RenderingDevice *rd,
+                                    const godot::PackedInt32Array &seeds,
+                                    int64_t repetitions);
     godot::Dictionary mark_readback_complete();
     godot::Dictionary release(godot::RenderingDevice *rd);
     godot::Dictionary diagnostics() const;
@@ -48,6 +51,7 @@ private:
     int64_t batches_recorded_ = 0;
     int64_t dispatch_count_ = 0;
     int64_t completion_count_ = 0;
+    int64_t pending_batch_count_ = 0;
 
     static godot::Dictionary reject(const char *reason);
 };

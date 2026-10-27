@@ -134,8 +134,11 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 			texture = buffers.get_depth_texture()
 			buffer_name = "render_buffers/depth (resolved)"
 		"normal_roughness":
-			texture = buffers.get_texture("forward_clustered", "normal_roughness")
 			buffer_name = "forward_clustered/normal_roughness"
+			if not buffers.has_texture("forward_clustered", "normal_roughness"):
+				_fail("Renderer did not produce the requested normal/roughness prepass buffer")
+				return
+			texture = buffers.get_texture("forward_clustered", "normal_roughness")
 		"velocity":
 			texture = buffers.get_velocity_texture()
 			buffer_name = "render_buffers/velocity"

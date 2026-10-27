@@ -1,0 +1,16 @@
+#version 450
+// Native provider authored compute workload, injected through Godot's RD.
+// The provider owns this shader source and the embedded compiled SPIR-V;
+// Godot owns the VkImage, Vulkan device and all queue submission.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 0, r32ui) writeonly uniform uimage2D result_image;
+layout(push_constant) uniform Parameters {
+    uint seed;
+} parameters;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(result_image);
+    if (any(greaterThanEqual(p, size))) return;
+    uint index = uint(p.y) * uint(size.x) + uint(p.x);
+    imageStore(result_image, p, uvec4(parameters.seed + index, 0u, 0u, 0u));
+}

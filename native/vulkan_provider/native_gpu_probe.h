@@ -22,6 +22,7 @@ public:
     void godauldron_step(double dt);
     godot::Dictionary godauldron_resolved_gpu_timeline();
     godot::Dictionary godauldron_metrics() const;
+    godot::Dictionary godauldron_pipeline_diagnostics() const;
     // Called only on Godot's rendering thread, inside the compositor callback.
     // Records native-authored shader and workload into Godot's RenderingDevice.
     // Godot retains queue submission, resource barriers and memory ownership.
@@ -71,6 +72,15 @@ private:
     bool sampling_ = false;
     bool ready_ = false;
     bool resolved_ = false;
+    int64_t pipeline_prepare_attempts_ = 0;
+    int64_t pipeline_prepare_failures_ = 0;
+    int64_t shader_creation_count_ = 0;
+    int64_t pipeline_creation_count_ = 0;
+    int64_t descriptor_creation_count_ = 0;
+    int64_t shader_create_host_usec_ = 0;
+    int64_t pipeline_create_host_usec_ = 0;
+    int64_t descriptor_create_host_usec_ = 0;
+    std::string pipeline_failure_stage_;
 
     static constexpr uint32_t kWords = 4096;
     static constexpr uint32_t kMaxSamples = 256;

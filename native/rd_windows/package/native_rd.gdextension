@@ -1,8 +1,0 @@
-[configuration]
-entry_symbol = "godauldron_native_rd_init"
-compatibility_minimum = "4.7"
-reloadable = false
-
-[libraries]
-windows.debug.x86_64 = "res://experiments/native-rd-windows/bin/godauldron_native_rd_workload.dll"
-windows.release.x86_64 = "res://experiments/native-rd-windows/bin/godauldron_native_rd_workload.dll"

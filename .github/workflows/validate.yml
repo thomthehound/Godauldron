@@ -155,6 +155,24 @@ jobs:
           ICD="$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d -iname '*lvp*.json' -print -quit 2>/dev/null)"
           test -n "$ICD"
           echo "VK_DRIVER_FILES=$ICD" >> "$GITHUB_ENV"
+      - name: Restore pinned DXC for HLSL/SPIR-V acceptance
+        uses: actions/cache@v4
+        with:
+          path: .ci-dxc
+          key: native-dxc-linux-x64-v1.9.2609
+      - name: Install DXC shader compiler for HLSL native reload
+        run: |
+          if ! test -x .ci-dxc/bin/dxc; then
+            mkdir -p .ci-dxc
+            curl --fail --location --show-error --silent --retry 3 --connect-timeout 15 --max-time 180 \
+              https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/linux_dxc_2026_09_28.x86_x64.tar.gz \
+              --output /tmp/godauldron-dxc-linux.tar.gz
+            tar -xzf /tmp/godauldron-dxc-linux.tar.gz -C .ci-dxc
+          fi
+          test -x .ci-dxc/bin/dxc
+          echo "$PWD/.ci-dxc/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$PWD/.ci-dxc/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          .ci-dxc/bin/dxc -help > /dev/null
       - name: Download Godot 4
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -188,7 +206,7 @@ jobs:
           fi
       - name: Verify real native Vulkan compute/copy, GPU queries and fence completion alongside Forward+
         run: timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_provider_smoke.gd
-      - name: Verify compiled GLSL native pipeline hot reload and fence-safe rollback
+      - name: Verify GLSL and DXC HLSL native pipeline hot reload and fence-safe rollback
         run: |
           set -o pipefail
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 180s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_shader_hot_reload_smoke.gd 2>&1 | tee native-shader-reload-validation.log

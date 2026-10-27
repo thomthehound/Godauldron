@@ -10,6 +10,7 @@ For an evidence-based comparison with AMD FidelityFX Cauldron, including deliber
 
 - Interactive Godot host with experiment discovery, a parameter inspector, and scene-owned-camera inspection controls (orbit, pan, zoom, frame, reset).
 - Namespace-based manifest v1 with scalar integer, floating-point and boolean options.
+- [Provider-owned runtime controls](docs/PROVIDER_RUNTIME_CONTROLS.md) discovered from the active experiment: typed values, applicability, live/provider-rebuild/restart semantics, and setup/finalization provenance without hidden per-frame polling.
 - UI-independent experiment execution with optional warmup, isolated measured steps, per-run setup, cancellation and result reporting.
 - Versioned campaign presets with sequential parameter sweeps, per-run reports, and a comparison table showing dispersion and optional engineering guard limits.
 - Optional world grid, axis indicators, and experiment bounds overlays, disabled by default.

@@ -148,8 +148,8 @@ func _run() -> void:
 	var second_result: Dictionary = second.call("take_batch")
 	var second_bytes: PackedByteArray = second_result.get("bytes", PackedByteArray())
 	var second_completion: Dictionary = second_result.get("completion", {})
-	if not second_result.get("ok", false) or second_bytes.size() != 256 or \\
-			int(second_completion.get("pipeline_creations", -1)) != 1 or \\
+	if not second_result.get("ok", false) or second_bytes.size() != 256 or \
+			int(second_completion.get("pipeline_creations", -1)) != 1 or \
 			int(second_completion.get("dispatch_count", -1)) != 2:
 		_fail("New adapter did not own a fresh independent pipeline")
 		return
@@ -161,7 +161,7 @@ func _run() -> void:
 		_fail("Second adapter could not request release")
 		return
 	var second_retired: Dictionary = await _await_phase(second, "released")
-	if second_retired.get("phase") != "released" or \\
+	if second_retired.get("phase") != "released" or \
 			second_retired.get("completion", {}).get("active_resources") != false:
 		_fail("Second native adapter did not release its Godot GPU resources")
 		return

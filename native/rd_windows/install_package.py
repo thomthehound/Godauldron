@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import shutil
 
@@ -14,14 +15,21 @@ SHARED_EFFECT = ROOT / "native" / "vulkan_provider" / "package" / "native_persis
 def install(binary: Path) -> Path:
     if not binary.is_file() or binary.name.lower() != "godauldron_native_rd_workload.dll":
         raise ValueError(f"Expected compiled RD-only GDExtension DLL: {binary}")
+    if not SHARED_EFFECT.is_file():
+        raise FileNotFoundError(SHARED_EFFECT)
     if OUT.exists():
-        raise ValueError(f"Package already installed: {OUT}")
-    OUT.mkdir(parents=True)
+        existing = OUT / "manifest.json"
+        if (not existing.is_file() or
+                json.loads(existing.read_text(encoding="utf-8")).get("id") !=
+                "org.godauldron.native-rd-d3d12"):
+            raise ValueError(f"Refusing to overwrite a different package: {OUT}")
+    else:
+        OUT.mkdir(parents=True)
     for source in PACKAGE.iterdir():
         shutil.copy2(source, OUT / source.name.removesuffix(".in"))
     shutil.copy2(SHARED_EFFECT, OUT / SHARED_EFFECT.name)
     output = OUT / "bin" / binary.name
-    output.parent.mkdir(parents=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(binary, output)
     return output
 

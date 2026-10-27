@@ -1,5 +1,5 @@
 extends CompositorEffect
-## Native-authored reusable shader/pipeline/descriptor set, Godot-owned VkImage.
+## Native-authored reusable shader/pipeline/descriptor set, Godot-owned GPU image.
 ## One batch at a time, with actual Godot async GPU completion for reuse.
 ## All RenderingDevice calls occur only within render callbacks.
 
@@ -18,16 +18,30 @@ var _last_record: Dictionary = {}
 var _completion: Dictionary = {}
 var _adapter_evidence: Dictionary = {}
 var _early_release_rejected := false
+var _adapter_mode := "software"
+var _profiling := false
+var _profile_prefix := ""
+var _batch_sequence := 0
+var _last_resolved_frame := -1
+var _gpu_intervals: Dictionary = {}
+var _rejected_gpu_intervals := 0
 
 
-func _init(width: int = 8, height: int = 8) -> void:
+func _init(width: int = 8, height: int = 8,
+		adapter_mode: String = "software", profiling: bool = false) -> void:
 	_width = width
 	_height = height
+	_adapter_mode = adapter_mode
+	_profiling = profiling
+	_profile_prefix = "godauldron_native_rd_%d_%d/" % [
+		OS.get_process_id(), Time.get_ticks_usec()]
 	effect_callback_type = EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
 	enabled = true
 
 
 func request_batch(seeds: PackedInt32Array) -> bool:
+	if _adapter_mode not in ["software", "physical_amd"]:
+		return false
 	# Reject malformed workloads before the compositor allocates GPU resources.
 	# The native adapter independently enforces the same bound on its API.
 	if seeds.is_empty() or seeds.size() > 32 or \
@@ -80,6 +94,67 @@ func status() -> Dictionary:
 	return snapshot
 
 
+# Device timestamp results are read only after Godot has resolved its
+# frame query ring. Markers bracket the RD compute-list recording interval,
+# NOT the readback, scene rendering, or an independent native queue.
+func profile_snapshot() -> Dictionary:
+	_mutex.lock()
+	var snapshot: Dictionary = {
+		"gpu_intervals": _gpu_intervals.duplicate(true),
+		"rejected_gpu_intervals": _rejected_gpu_intervals,
+		"last_resolved_device_frame": _last_resolved_frame,
+		"source": "RenderingDevice.capture_timestamp",
+		"gpu_unit": "microseconds",
+		"scope": "Godot RD native compute dispatch list plus marker boundaries",
+		"not_readback_or_frame_time": true
+	}
+	_mutex.unlock()
+	return snapshot
+
+
+func _harvest_gpu_timestamps(rd: RenderingDevice) -> void:
+	var count: int = rd.get_captured_timestamps_count()
+	if count <= 0:
+		return
+	var frame: int = rd.get_captured_timestamps_frame()
+	if frame < 0 or frame == _last_resolved_frame:
+		return
+	_last_resolved_frame = frame
+	var groups: Dictionary = {}
+	for i in range(count):
+		var name: String = rd.get_captured_timestamp_name(i)
+		if not name.begins_with(_profile_prefix):
+			continue
+		var fields: PackedStringArray = name.trim_prefix(_profile_prefix).split("/")
+		if fields.size() != 2 or not fields[0].is_valid_int() or \
+				fields[1] not in ["begin", "end"]:
+			_rejected_gpu_intervals += 1
+			continue
+		var number := int(fields[0])
+		if number < 0 or number >= _batch_sequence:
+			_rejected_gpu_intervals += 1
+			continue
+		if not groups.has(number):
+			groups[number] = {}
+		var markers: Dictionary = groups[number]
+		if markers.has(fields[1]):
+			_rejected_gpu_intervals += 1
+			continue
+		markers[fields[1]] = rd.get_captured_timestamp_gpu_time(i)
+	for number in groups:
+		var markers: Dictionary = groups[number]
+		var start: int = int(markers.get("begin", 0))
+		var finish: int = int(markers.get("end", 0))
+		if start <= 0 or finish <= start or _gpu_intervals.has(number):
+			_rejected_gpu_intervals += 1
+			continue
+		var delta: float = float(finish - start) / 1000.0
+		_mutex.lock()
+		_gpu_intervals[number] = {"gpu_usec": delta, "device_frame": frame,
+			"start_gpu_ns": start, "end_gpu_ns": finish}
+		_mutex.unlock()
+
+
 func _fail(reason: String) -> void:
 	_mutex.lock()
 	_failure = reason
@@ -122,11 +197,15 @@ func _ensure_workload(rd: RenderingDevice) -> bool:
 			RenderingDevice.DRIVER_RESOURCE_PHYSICAL_DEVICE, RID(), 0)
 		var evidence: Dictionary = _workload.call(
 			"inspect_d3d12_adapter", logical, physical)
-		if not bool(evidence.get("verified_software", false)):
+		var verified: bool = (
+			_adapter_mode == "software" and evidence.get("verified_software", false)) or (
+			_adapter_mode == "physical_amd" and evidence.get("verified_physical_amd", false))
+		if not verified:
 			rd.free_rid(_texture)
 			_texture = RID()
 			_workload = null
-			_fail("Actual Godot D3D12 adapter is not proven software: " + str(evidence))
+			_fail("Actual Godot D3D12 adapter does not meet " + _adapter_mode +
+				" provenance gate: " + str(evidence))
 			return false
 		_adapter_evidence = evidence.duplicate(true)
 	var prepared: Dictionary = _workload.call("prepare", rd, _texture,
@@ -161,11 +240,15 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	if action == "armed":
 		_phase = "in_flight"
 	_mutex.unlock()
-	if action not in ["armed", "release_requested"]:
+	if action not in ["armed", "release_requested"] and not _profiling:
 		return
 	var rd: RenderingDevice = RenderingServer.get_rendering_device()
 	if rd == null:
 		_fail("No Godot global RenderingDevice")
+		return
+	if _profiling:
+		_harvest_gpu_timestamps(rd)
+	if action not in ["armed", "release_requested"]:
 		return
 	if action == "release_requested":
 		var report: Dictionary = {}
@@ -184,7 +267,12 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 		return
 	if not _ensure_workload(rd):
 		return
+	if _profiling:
+		rd.capture_timestamp(_profile_prefix + "%d/begin" % _batch_sequence)
 	var record: Dictionary = _workload.call("record_batch", rd, seeds)
+	if bool(record.get("ok", false)) and _profiling:
+		rd.capture_timestamp(_profile_prefix + "%d/end" % _batch_sequence)
+		_batch_sequence += 1
 	if not bool(record.get("ok", false)):
 		# No commands were submitted: a rejected batch leaves the adapter
 		# PREPARED. Retire those resources immediately on this render thread.

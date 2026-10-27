@@ -36,6 +36,7 @@ Dictionary NativeRDWorkload::inspect_d3d12_adapter(
         int64_t device_handle, int64_t adapter_handle) const {
     Dictionary result;
     result["verified_software"] = false;
+    result["verified_physical_amd"] = false;
 #ifdef _WIN32
     if (device_handle == 0 || adapter_handle == 0) {
         result["error"] = "missing_borrowed_d3d12_device_or_adapter";
@@ -78,6 +79,9 @@ Dictionary NativeRDWorkload::inspect_d3d12_adapter(
     result["device_luid_matched"] = same_device;
     result["verified_software"] = same_device &&
                                  (software_flag || microsoft_basic_render);
+    result["verified_physical_amd"] = same_device && !software_flag &&
+                                     desc.VendorId == 0x1002 && desc.DeviceId != 0 &&
+                                     !microsoft_basic_render;
     result["error"] = same_device ? "" : "godot_device_adapter_luid_mismatch";
 #else
     result["error"] = "d3d12_adapter_query_only_available_on_windows";

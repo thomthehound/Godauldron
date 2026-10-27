@@ -238,6 +238,10 @@ jobs:
           if (-not $binary) { throw "C++23 native RD-only GDExtension was not built" }
           python native/rd_windows/install_package.py $binary.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Upgrading an installed native package must also refresh its
+          # compositor script, rather than leaving an old API behind.
+          python native/rd_windows/install_package.py $binary.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Import Godot project with RD-only native Windows package
         run: .\.engine\godot_console.exe --headless --path . --editor --import --quit
       - name: Verify real D3D12 WARP compute, barriers, persistent resources and completion
@@ -245,6 +249,13 @@ jobs:
         run: |
           & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_persistent_workload_smoke.gd
           if ($LASTEXITCODE -ne 0) { throw "D3D12 WARP native compute test failed; never count a fallback renderer as coverage" }
+      - name: Verify on-device profiler collects WARP GPU execution and distinct timing domains
+        shell: pwsh
+        run: |
+          & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_hardware_profile.gd -- --mode software --width 13 --height 9 --warmup 1 --samples 2 --passes 3 --output res://native_rd_warp_profile.json
+          if ($LASTEXITCODE -ne 0) { throw "Native RD GPU profiler software-runtime acceptance failed" }
+          python tools/validate_native_rd_profile.py native_rd_warp_profile.json --mode software
+          if ($LASTEXITCODE -ne 0) { throw "Profiler GPU/host provenance report validation failed" }
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

@@ -176,21 +176,33 @@ static func summarize(snapshot_data: Dictionary, source_metadata: Dictionary) ->
 	for name in WINDOWS + ["covered_gpu_window"]:
 		numbers[name] = [] as Array[float]
 	var frames: Array[Dictionary] = []
+	var seen_frames := {}
 	for record in records:
-		if typeof(record) != TYPE_DICTIONARY:
+		if typeof(record) != TYPE_DICTIONARY or \
+				typeof(record.get("device_frame")) != TYPE_INT or \
+				int(record["device_frame"]) < 0 or \
+				seen_frames.has(record["device_frame"]):
 			continue
-		var timings: Dictionary = record.get("windows_usec", {})
+		if typeof(record.get("windows_usec")) != TYPE_DICTIONARY:
+			continue
+		var timings: Dictionary = record["windows_usec"]
 		var valid := true
+		var expected_total := 0.0
 		for name in WINDOWS:
 			if typeof(timings.get(name)) not in [TYPE_INT, TYPE_FLOAT] or \
 					not is_finite(float(timings[name])) or float(timings[name]) <= 0.0:
 				valid = false
-		if not valid:
+				break
+			expected_total += float(timings[name])
+		var covered: Variant = record.get("covered_gpu_window_usec")
+		if not valid or typeof(covered) not in [TYPE_INT, TYPE_FLOAT] or \
+				not is_finite(float(covered)) or \
+				absf(float(covered) - expected_total) > 0.02:
 			continue
+		seen_frames[record["device_frame"]] = true
 		for name in WINDOWS:
 			(numbers[name] as Array[float]).append(float(timings[name]))
-		(numbers["covered_gpu_window"] as Array[float]).append(
-			float(record.get("covered_gpu_window_usec", 0.0)))
+		(numbers["covered_gpu_window"] as Array[float]).append(float(covered))
 		frames.append(record.duplicate(true))
 	if frames.is_empty():
 		return data

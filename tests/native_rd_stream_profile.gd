@@ -146,7 +146,7 @@ func _run() -> void:
 		return
 	var data: PackedByteArray = effect.call("take_stream_final")
 	var validation_start: int = Time.get_ticks_usec()
-	var expected_sum: int = resident * ((passes * (passes + 1)) / 2)
+	var expected_sum: int = resident * ((passes * (passes + 1)) >> 1)
 	if data.size() != width * height * 4:
 		_fail("Final stream image has incorrect size")
 		return

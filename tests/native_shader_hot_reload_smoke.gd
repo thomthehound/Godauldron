@@ -211,6 +211,26 @@ func _verify() -> void:
 		_fail("DXC HLSL pipeline failed GPU output/fence verification: " + str(third_epoch))
 		return
 
+	# DXC can compile shaders that violate the existing Vulkan descriptor
+	# ABI. A new storage image at the same binding must still be rejected
+	# without retiring the working HLSL storage-buffer pipeline.
+	var hlsl_image: FileAccess = FileAccess.open("user://native_hlsl_image.hlsl",
+		FileAccess.WRITE)
+	if hlsl_image == null:
+		_fail("Could not stage HLSL descriptor incompatibility")
+		return
+	hlsl_image.store_string("[[vk::binding(0,0)]] RWTexture2D<uint> image : register(u0,space0);\n" +
+		"[numthreads(64,1,1)] void main(uint3 id : SV_DispatchThreadID) {\n" +
+		"uint previous; InterlockedAdd(image[uint2(id.x,0)],1u,previous); }\n")
+	hlsl_image.close()
+	var hlsl_bad_abi: Dictionary = scene.call("godauldron_reload_shader_from_source",
+		"user://native_hlsl_image.hlsl")
+	if hlsl_bad_abi.get("ok", true) or hlsl_bad_abi.get("stage") != "shader" or \
+			int(hlsl_bad_abi.get("generation", -1)) != 3:
+		_fail("HLSL shader with storage image bypassed native descriptor ABI: " +
+			str(hlsl_bad_abi))
+		return
+
 	# HLSL syntax failures must preserve the active HLSL pipeline.
 	var hlsl_failure: FileAccess = FileAccess.open("user://native_shader_bad.hlsl",
 		FileAccess.WRITE)

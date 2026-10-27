@@ -110,6 +110,10 @@ func _run() -> void:
 	if not FileAccess.file_exists(hlsl_source_path):
 		_fail("Real HLSL source not present in installed RD package")
 		return
+	var glsl_source_path := "res://experiments/native-vulkan-provider/reload_rd_image.comp"
+	if not windows_d3d12 and not FileAccess.file_exists(glsl_source_path):
+		_fail("Real GLSL source not present in installed RD package")
+		return
 	for batch_index in range(BATCHES.size()):
 		var seeds := PackedInt32Array(BATCHES[batch_index])
 		if not bool(effect.call("request_batch", seeds)):
@@ -202,9 +206,12 @@ func _run() -> void:
 		if batch_index in [0, 1]:
 			# Candidate creation is explicitly off the measured/GPU path,
 			# only once Godot has finished the readback for the last batch.
-			var request: Dictionary = effect.call("request_hlsl_reload", hlsl_source_path)
-			if not request.get("ok", false):
-				_fail("DXC HLSL source compilation failed on %s: %s" %
+			var use_glsl: bool = not windows_d3d12 and batch_index == 0
+			var request: Dictionary = (effect.call("request_glsl_reload", glsl_source_path)
+				if use_glsl else effect.call("request_hlsl_reload", hlsl_source_path))
+			if not request.get("ok", false) or \
+					request.get("language") != ("glsl" if use_glsl else "hlsl"):
+				_fail("Real RD shader compilation failed on %s: %s" %
 					[expected_driver, str(request)])
 				return
 			if bool(effect.call("request_release")) or \
@@ -223,6 +230,35 @@ func _run() -> void:
 			expected_shader_creations += 1
 			expected_descriptor_creations += 1
 			if batch_index == 0:
+				# A second source language uses the identical native ABI and
+				# rollback boundary. A different image binding compiles but
+				# must leave the working GLSL pipeline unchanged.
+				if not windows_d3d12:
+					var glsl_source: String = FileAccess.get_file_as_string(glsl_source_path)
+					var wrong_glsl: String = glsl_source.replace("binding = 0", "binding = 1")
+					if wrong_glsl == glsl_source:
+						_fail("Could not prepare real incompatible GLSL source")
+						return
+					var glsl_path := "user://native_rd_wrong_image.comp"
+					var glsl_file: FileAccess = FileAccess.open(glsl_path, FileAccess.WRITE)
+					if glsl_file == null:
+						_fail("Could not stage GLSL ABI rejection")
+						return
+					glsl_file.store_string(wrong_glsl)
+					glsl_file.close()
+					var glsl_request: Dictionary = effect.call("request_glsl_reload", glsl_path)
+					if not glsl_request.get("ok", false):
+						_fail("Incompatible GLSL must compile before ABI rejection: " +
+							str(glsl_request))
+						return
+					var glsl_done: Dictionary = await _await_phase(effect, "consumed")
+					var glsl_result: Dictionary = effect.call("reload_snapshot")
+					if glsl_done.get("phase") != "consumed" or glsl_result.get("ok", true) or \
+							glsl_result.get("error") != "rd_pipeline_reload_incompatible_image_or_push_constant_abi" or \
+							int(glsl_result.get("reload_generation", -1)) != 1:
+						_fail("Incompatible GLSL replaced the working RD pipeline: " +
+							str(glsl_result))
+						return
 				# A valid compiled HLSL shader with an incompatible push
 				# constant layout must fail before Godot creates native RIDs.
 				var changed_source: String = FileAccess.get_file_as_string(hlsl_source_path)

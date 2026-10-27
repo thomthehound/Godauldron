@@ -18,7 +18,7 @@ def install(binary: Path) -> Path:
         raise ValueError(f"Package already installed: {OUT}")
     OUT.mkdir(parents=True)
     for source in PACKAGE.iterdir():
-        shutil.copy2(source, OUT / source.name)
+        shutil.copy2(source, OUT / source.name.removesuffix(".in"))
     shutil.copy2(SHARED_EFFECT, OUT / SHARED_EFFECT.name)
     output = OUT / "bin" / binary.name
     output.parent.mkdir(parents=True)

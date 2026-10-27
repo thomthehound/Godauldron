@@ -283,6 +283,20 @@ bool NativeGpuProbe3D::submit_step() {
         return fail("Cannot begin native command buffer");
     }
     vkCmdResetQueryPool(work.commands, timestamps_, base, 3);
+    // Consecutive submissions reuse the same storage; explicitly order prior
+    // compute/copy accesses before this step's atomic read-modify-write.
+    VkBufferMemoryBarrier before_compute{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+    before_compute.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+    before_compute.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    before_compute.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    before_compute.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    before_compute.buffer = gpu_buffer_;
+    before_compute.offset = 0;
+    before_compute.size = VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(work.commands,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         1, &before_compute, 0, nullptr);
     vkCmdWriteTimestamp(work.commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestamps_, base);
     vkCmdBindPipeline(work.commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
     vkCmdBindDescriptorSets(work.commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout_,

@@ -3,7 +3,9 @@ extends SceneTree
 ## inter-dispatch barriers on Godot's Forward+ RenderingDevice.
 
 const Package = preload("res://scripts/native_experiment_package.gd")
-const ELEMENTS := 64
+const WIDTH := 13
+const HEIGHT := 9
+const ELEMENTS := WIDTH * HEIGHT
 const BATCHES := [
 	[2, 4, 6],
 	[11],
@@ -64,7 +66,7 @@ func _run() -> void:
 	if script == null:
 		_fail("Installed native workload compositor effect missing")
 		return
-	var effect: CompositorEffect = script.new()
+	var effect: CompositorEffect = script.new(WIDTH, HEIGHT)
 	var compositor := Compositor.new()
 	var effects: Array[CompositorEffect] = [effect]
 	compositor.compositor_effects = effects
@@ -96,6 +98,10 @@ func _run() -> void:
 				recorded.get("queue_owner") != "godot_rendering_device" or \
 				int(recorded.get("recorded_dispatches", -1)) != seeds.size() or \
 				int(completed.get("pipeline_creations", 0)) != 1 or \
+				int(completed.get("image_width", -1)) != WIDTH or \
+				int(completed.get("image_height", -1)) != HEIGHT or \
+				int(completed.get("workgroups_x", -1)) != 2 or \
+				int(completed.get("workgroups_y", -1)) != 2 or \
 				int(completed.get("descriptor_creations", 0)) != 1 or \
 				int(completed.get("prepare_count", 0)) != 1 or \
 				int(completed.get("completed_batches", 0)) != batch_index + 1 or \
@@ -127,8 +133,40 @@ func _run() -> void:
 			int(completion.get("completed_batches", -1)) != BATCHES.size():
 		_fail("Persistent native workload leaked RD resources or dropped work")
 		return
+	# A second independent adapter instance can prepare, submit, read back,
+	# and retire on the same Godot device without retaining the first's RIDs.
+	var second: CompositorEffect = script.new(8, 8)
+	var second_effects: Array[CompositorEffect] = [second]
+	compositor.compositor_effects = second_effects
+	if not bool(second.call("request_batch", PackedInt32Array([3, 5]))):
+		_fail("Second persistent adapter session refused initialization")
+		return
+	var second_state: Dictionary = await _await_phase(second, "ready")
+	if second_state.get("phase") != "ready":
+		_fail("Second native workload did not complete: " + str(second_state))
+		return
+	var second_result: Dictionary = second.call("take_batch")
+	var second_bytes: PackedByteArray = second_result.get("bytes", PackedByteArray())
+	var second_completion: Dictionary = second_result.get("completion", {})
+	if not second_result.get("ok", false) or second_bytes.size() != 256 or \\
+			int(second_completion.get("pipeline_creations", -1)) != 1 or \\
+			int(second_completion.get("dispatch_count", -1)) != 2:
+		_fail("New adapter did not own a fresh independent pipeline")
+		return
+	for pixel in range(64):
+		if second_bytes.decode_u32(pixel * 4) != 8 + pixel * 2:
+			_fail("Second native workload returned incorrect GPU data")
+			return
+	if not bool(second.call("request_release")):
+		_fail("Second adapter could not request release")
+		return
+	var second_retired: Dictionary = await _await_phase(second, "released")
+	if second_retired.get("phase") != "released" or \\
+			second_retired.get("completion", {}).get("active_resources") != false:
+		_fail("Second native adapter did not release its Godot GPU resources")
+		return
 	camera.compositor = null
 	print("Persistent native workload validated: ", BATCHES.size(),
 		" completed batches, ", total_dispatches,
-		" native GPU dispatches, one shader/pipeline/descriptor, engine-owned GPU completion")
+		" native dispatches, odd-size image, GPU barriers, per-session resource reuse and retirement")
 	quit(0)

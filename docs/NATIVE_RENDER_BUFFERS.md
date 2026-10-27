@@ -10,6 +10,8 @@ The **Inspect buffer** control reads Godot's own 3D renderer textures. It is a o
 | Normal + roughness | `get_texture("forward_clustered", "normal_roughness")` | Signed decoded normal XYZ and decoded roughness alpha, RGBA32F | Forward+ only |
 | Motion vectors | `get_velocity_texture(false)` | Raw signed renderer RG motion-vector components, RGBA32F | Forward+ / Mobile when the engine produces a velocity buffer |
 
+Forward+ generates the normal/roughness prepass only when its actual render-pass requirements enable it. On current Godot, compositor demand without a valid scene Environment may not allocate this buffer. Godauldron reports that source as unavailable instead of creating or changing an Environment behind the experiment's back.
+
 The source texture must be a shader-sampleable 2D texture with dimensions exactly matching the internal 3D render resolution. Stereo/multiview and render dimensions above the bounded readback limit are explicitly rejected. Missing sources fail; the host does not derive values from the presented color viewport, rerender geometry or substitute made-up motion.
 
 The normal conversion follows the Forward+ packed-normal/roughness convention: encoded XYZ maps from [0,1] to [-1,1] and is normalized; encoded alpha values above 0.5 are mirrored before dividing by 127/255. The resulting signed normal is not directly display-referred RGB. Its coordinate frame is the renderer's prepass normal representation, not an invariant across unrelated native providers.

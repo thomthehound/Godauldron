@@ -44,7 +44,7 @@ func _run() -> void:
 		_fail("No active rendering device for native workload")
 		return
 	var device_name: String = rd.get_device_name()
-	var device_type: int = rd.get_device_type()
+	var device_type: int = RenderingServer.get_video_adapter_type()
 	print("Native RD validation backend=", expected_driver,
 		" device=", device_name, " type=", device_type)
 	if windows_d3d12 and device_type != RenderingDevice.DEVICE_TYPE_CPU:

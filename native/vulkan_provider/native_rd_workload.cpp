@@ -11,7 +11,7 @@
 using namespace godot;
 
 void NativeRDWorkload::_bind_methods() {
-    ClassDB::bind_method(D_METHOD("prepare", "rendering_device", "output_image"),
+    ClassDB::bind_method(D_METHOD("prepare", "rendering_device", "output_image", "width", "height"),
                          &NativeRDWorkload::prepare);
     ClassDB::bind_method(D_METHOD("record_batch", "rendering_device", "seeds"),
                          &NativeRDWorkload::record_batch);
@@ -29,9 +29,12 @@ Dictionary NativeRDWorkload::reject(const char *reason) {
     return out;
 }
 
-Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image) {
+Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
+                                     int64_t width, int64_t height) {
     if (phase_ != Phase::NEW) return reject("workload_already_prepared_or_released");
-    if (rd == nullptr || !output_image.is_valid()) {
+    if (rd == nullptr || !output_image.is_valid() ||
+        width < 1 || height < 1 || width > 2048 || height > 2048 ||
+        width * height > 1024 * 1024) {
         return reject("missing_device_or_target");
     }
     PackedByteArray shader_bytes;
@@ -69,6 +72,10 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image) {
     uniform_set_ = uniform_set;
     image_ = output_image;
     rd_ = rd;
+    width_ = width;
+    height_ = height;
+    groups_x_ = (width + 7) / 8;
+    groups_y_ = (height + 7) / 8;
     push_bytes_.resize(sizeof(uint32_t) * 2);
     phase_ = Phase::PREPARED;
     ++prepare_count_;
@@ -108,7 +115,7 @@ Dictionary NativeRDWorkload::record_batch(RenderingDevice *rd,
         std::memcpy(push_bytes_.ptrw(), parameters, sizeof(parameters));
         rd->compute_list_set_push_constant(commands, push_bytes_,
                                            sizeof(parameters));
-        rd->compute_list_dispatch(commands, 1, 1, 1);
+        rd->compute_list_dispatch(commands, groups_x_, groups_y_, 1);
     }
     rd->compute_list_end();
     rd->capture_timestamp("native_persistent_batch_end");
@@ -182,5 +189,9 @@ Dictionary NativeRDWorkload::diagnostics() const {
     result["active_resources"] = phase_ == Phase::PREPARED || phase_ == Phase::PENDING;
     result["backend_contract"] = "godot_rendering_device_backend_neutral";
     result["shader_origin"] = "native_compiled_embedded_spirv";
+    result["image_width"] = width_;
+    result["image_height"] = height_;
+    result["workgroups_x"] = groups_x_;
+    result["workgroups_y"] = groups_y_;
     return result;
 }

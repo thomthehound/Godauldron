@@ -168,6 +168,14 @@ jobs:
           fi
       - name: Verify real native Vulkan compute/copy, GPU queries and fence completion alongside Forward+
         run: timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_provider_smoke.gd
+      - name: Verify native GDExtension on the actual Godot VkDevice and GPU storage buffer
+        run: |
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_shared_device_smoke.gd 2>&1 | tee native-godot-shared-device-validation.log
+          if grep -E 'VUID-|Validation Error' native-godot-shared-device-validation.log; then
+            echo "Native shared-device work violated Vulkan validation"
+            exit 1
+          fi
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

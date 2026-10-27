@@ -71,7 +71,7 @@ def validate(data: dict, *, physical: bool) -> None:
         raise ValueError("Serial GPU profiler execution evidence inconsistent")
     if not all(type(x) is int and x > 0 for x in [width, height, samples, warmup, passes]):
         raise ValueError("Invalid workload dimensions/sample counts")
-    if width * height > 1024 * 1024 or samples > (256 if data["schema_version"] == 2 else 64) or warmup > 32 or passes > 32:
+    if width * height > 1024 * 1024 or samples > (256 if data["schema_version"] >= 2 else 64) or warmup > 32 or passes > 32:
         raise ValueError("Unbounded workload in report")
     if data["schema_version"] >= 2:
         geometry = data.get("workload_geometry", {})

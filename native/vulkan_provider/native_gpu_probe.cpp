@@ -17,6 +17,8 @@
 #include <cstring>
 #include <limits>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace godot;
 
@@ -250,14 +252,30 @@ bool NativeGpuProbe3D::create_compute_pipeline(
         failure_reason = "Compute shader is not SPIR-V";
         return false;
     }
-    // The provider's existing VkPipelineLayout and one storage-buffer set
-    // remain authoritative. Never publish a candidate with a different
-    // descriptor binding or workgroup shape as if it were ABI compatible.
-    bool local_size_valid = false;
-    bool compute_entry = false;
+    // The layout has exactly ONE storage-buffer descriptor (set 0,
+    // binding 0) and NO push constants. SPIR-V decorations alone do not
+    // establish descriptor type or count: follow the OpVariable pointer to
+    // its underlying decorated struct. Reject arrays, images and uniform
+    // buffers before invoking a Vulkan pipeline-creation API.
+    struct PointerType {
+        uint32_t storage = 0;
+        uint32_t pointee = 0;
+    };
+    struct Variable {
+        uint32_t type = 0;
+        uint32_t storage = 0;
+    };
+    std::unordered_map<uint32_t, PointerType> pointers;
+    std::unordered_map<uint32_t, Variable> variables;
+    std::unordered_set<uint32_t> structs;
+    std::unordered_set<uint32_t> block_structs;
+    std::unordered_set<uint32_t> buffer_block_structs;
+    uint32_t descriptor_id = 0;
     bool descriptor_set = false;
     bool descriptor_binding = false;
-    uint32_t descriptor_id = 0;
+    bool local_size_valid = false;
+    uint32_t compute_entries = 0;
+    bool push_constants = false;
     for (size_t offset = 5; offset < words.size();) {
         const uint32_t instruction = words[offset];
         const uint32_t count = instruction >> 16;
@@ -267,17 +285,29 @@ bool NativeGpuProbe3D::create_compute_pipeline(
             failure_reason = "Malformed SPIR-V instruction stream";
             return false;
         }
-        if (opcode == 15 && count >= 4 && words[offset + 1] == 5) {
-            compute_entry = true; // OpEntryPoint GLCompute
-        } else if (opcode == 16 && count >= 6 && words[offset + 2] == 17 &&
-                   words[offset + 3] == 64 && words[offset + 4] == 1 &&
-                   words[offset + 5] == 1) {
-            local_size_valid = true; // OpExecutionMode LocalSize
-        } else if (opcode == 71 && count >= 4) {
+        if (opcode == 15 && count >= 4) { // OpEntryPoint
+            if (words[offset + 1] != 5) {
+                failure_stage = "shader";
+                failure_reason = "Candidate has a non-compute entry point";
+                return false;
+            }
+            ++compute_entries;
+        } else if (opcode == 16 && count >= 3 && words[offset + 2] == 17) {
+            // OpExecutionMode LocalSize: the native dispatch records kWords/64.
+            if (count != 6 || words[offset + 3] != 64 ||
+                words[offset + 4] != 1 || words[offset + 5] != 1) {
+                failure_stage = "shader";
+                failure_reason = "Candidate changes native 64x1x1 workgroup size";
+                return false;
+            }
+            local_size_valid = true;
+        } else if (opcode == 71 && count >= 3) { // OpDecorate
             const uint32_t target = words[offset + 1];
             const uint32_t decoration = words[offset + 2];
+            if (decoration == 2) block_structs.insert(target);
+            if (decoration == 3) buffer_block_structs.insert(target);
             if (decoration == 34 || decoration == 33) {
-                if (words[offset + 3] != 0 ||
+                if (count != 4 || words[offset + 3] != 0 ||
                     (descriptor_id != 0 && descriptor_id != target)) {
                     failure_stage = "shader";
                     failure_reason = "Candidate descriptor set/binding differs from native pipeline ABI";
@@ -287,14 +317,54 @@ bool NativeGpuProbe3D::create_compute_pipeline(
                 if (decoration == 34) descriptor_set = true;
                 if (decoration == 33) descriptor_binding = true;
             }
+        } else if (opcode == 30 && count >= 2) { // OpTypeStruct
+            structs.insert(words[offset + 1]);
+        } else if (opcode == 32 && count == 4) { // OpTypePointer
+            pointers[words[offset + 1]] = {words[offset + 2], words[offset + 3]};
+        } else if (opcode == 59 && count >= 4) { // OpVariable
+            const uint32_t storage = words[offset + 3];
+            variables[words[offset + 2]] = {words[offset + 1], storage};
+            if (storage == 9) push_constants = true;
         }
         offset += count;
     }
-    if (!compute_entry || !local_size_valid || !descriptor_set ||
-        !descriptor_binding) {
+    if (compute_entries != 1 || !local_size_valid || !descriptor_set ||
+        !descriptor_binding || push_constants) {
         failure_stage = "shader";
-        failure_reason = "Candidate SPIR-V lacks native compute entry, local size or buffer binding";
+        failure_reason = "Candidate changes compute entry, local size, descriptor or push-constant ABI";
         return false;
+    }
+    const auto var = variables.find(descriptor_id);
+    if (var == variables.end()) {
+        failure_stage = "shader";
+        failure_reason = "Candidate descriptor decorations do not identify a variable";
+        return false;
+    }
+    const auto ptr = pointers.find(var->second.type);
+    if (ptr == pointers.end() || ptr->second.storage != var->second.storage ||
+        !structs.contains(ptr->second.pointee)) {
+        // OpTypeArray or OpTypeRuntimeArray here means descriptor count != 1.
+        failure_stage = "shader";
+        failure_reason = "Candidate storage buffer descriptor type or array count changed";
+        return false;
+    }
+    const uint32_t storage = var->second.storage;
+    const uint32_t struct_id = ptr->second.pointee;
+    const bool valid_storage_buffer =
+        (storage == 12 && block_structs.contains(struct_id)) ||
+        (storage == 2 && buffer_block_structs.contains(struct_id));
+    if (!valid_storage_buffer) {
+        failure_stage = "shader";
+        failure_reason = "Candidate descriptor is not the expected single storage buffer";
+        return false;
+    }
+    for (const auto &[id, variable] : variables) {
+        if (id != descriptor_id &&
+            (variable.storage == 0 || variable.storage == 2 || variable.storage == 12)) {
+            failure_stage = "shader";
+            failure_reason = "Candidate adds a resource not declared in the native pipeline layout";
+            return false;
+        }
     }
     VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     info.codeSize = static_cast<size_t>(bytecode.size());

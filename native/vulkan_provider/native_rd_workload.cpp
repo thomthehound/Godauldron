@@ -8,12 +8,107 @@
 
 #include <chrono>
 #include <cstring>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace {
 using HostClock = std::chrono::steady_clock;
 int64_t elapsed_host_usec(HostClock::time_point since) {
     return std::chrono::duration_cast<std::chrono::microseconds>(
         HostClock::now() - since).count();
+}
+// The persistent RD shader owns one r32ui 2D storage image at set 0,
+// binding 0, one 8x8x1 compute entry and an 8-byte push-constant block.
+// Validate the *types* behind descriptor decorations, not just their numbers.
+// Godot still validates/compiles the candidate via RenderingDevice.
+bool has_rd_image_abi(const godot::PackedByteArray &bytecode) {
+    if (bytecode.size() < 20 || bytecode.size() > 1024 * 1024 ||
+        bytecode.size() % 4 != 0) return false;
+    std::vector<uint32_t> w(static_cast<size_t>(bytecode.size()) / 4);
+    std::memcpy(w.data(), bytecode.ptr(), static_cast<size_t>(bytecode.size()));
+    if (w[0] != 0x07230203u || w[1] < 0x00010000u ||
+        w[1] > 0x00010300u) return false;
+    struct Pointer { uint32_t storage; uint32_t target; };
+    struct Var { uint32_t type; uint32_t storage; };
+    struct Image { uint32_t dim; uint32_t arrayed; uint32_t ms;
+                   uint32_t sampled; uint32_t format; };
+    std::unordered_map<uint32_t, Pointer> pointers;
+    std::unordered_map<uint32_t, Var> vars;
+    std::unordered_map<uint32_t, Image> images;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> structures;
+    std::unordered_set<uint32_t> uint32_types;
+    std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint32_t>> offsets;
+    std::unordered_map<uint32_t, uint32_t> sets, bindings;
+    bool local_size = false;
+    uint32_t entry_count = 0;
+    for (size_t i = 5; i < w.size();) {
+        const uint32_t count = w[i] >> 16;
+        const uint32_t op = w[i] & 0xffffu;
+        if (!count || i + count > w.size()) return false;
+        if (op == 15 && count >= 4) { // OpEntryPoint
+            if (w[i + 1] != 5) return false;
+            ++entry_count;
+        } else if (op == 16 && count >= 3 && w[i + 2] == 17) {
+            if (count != 6 || w[i + 3] != 8 || w[i + 4] != 8 ||
+                w[i + 5] != 1) return false;
+            local_size = true;
+        } else if (op == 71 && count == 4) { // OpDecorate
+            if (w[i + 2] == 34) sets[w[i + 1]] = w[i + 3];
+            if (w[i + 2] == 33) bindings[w[i + 1]] = w[i + 3];
+        } else if (op == 72 && count == 5 && w[i + 3] == 35) {
+            // OpMemberDecorate Offset
+            offsets[w[i + 1]][w[i + 2]] = w[i + 4];
+        } else if (op == 21 && count == 4 && w[i + 2] == 32 &&
+                   w[i + 3] == 0) {
+            uint32_types.insert(w[i + 1]);
+        } else if (op == 25 && count >= 9) { // OpTypeImage
+            images[w[i + 1]] = {w[i + 3], w[i + 5], w[i + 6],
+                                w[i + 7], w[i + 8]};
+        } else if (op == 30 && count >= 2) { // OpTypeStruct
+            structures[w[i + 1]] = std::vector<uint32_t>(
+                w.begin() + i + 2, w.begin() + i + count);
+        } else if (op == 32 && count == 4) { // OpTypePointer
+            pointers[w[i + 1]] = {w[i + 2], w[i + 3]};
+        } else if (op == 59 && count >= 4) { // OpVariable
+            vars[w[i + 2]] = {w[i + 1], w[i + 3]};
+        }
+        i += count;
+    }
+    if (entry_count != 1 || !local_size) return false;
+    uint32_t images_found = 0, push_found = 0;
+    for (const auto &[id, var] : vars) {
+        if (var.storage != 0 && var.storage != 2 &&
+            var.storage != 9 && var.storage != 12) continue;
+        const auto ptr = pointers.find(var.type);
+        if (ptr == pointers.end() || ptr->second.storage != var.storage)
+            return false;
+        if (var.storage == 0) {
+            ++images_found;
+            if (sets.find(id) == sets.end() || bindings.find(id) == bindings.end() ||
+                sets.at(id) != 0 || bindings.at(id) != 0) return false;
+            const auto img = images.find(ptr->second.target);
+            if (img == images.end() || img->second.dim != 1 ||
+                img->second.arrayed != 0 || img->second.ms != 0 ||
+                img->second.sampled != 2 || img->second.format != 33)
+                return false;
+        } else if (var.storage == 9) {
+            ++push_found;
+            const auto type = structures.find(ptr->second.target);
+            const auto layout = offsets.find(ptr->second.target);
+            if (type == structures.end() || type->second.size() != 2 ||
+                !uint32_types.contains(type->second[0]) ||
+                !uint32_types.contains(type->second[1]) ||
+                layout == offsets.end() || layout->second.size() != 2 ||
+                layout->second.find(0) == layout->second.end() ||
+                layout->second.find(1) == layout->second.end() ||
+                layout->second.at(0) != 0 || layout->second.at(1) != 4)
+                return false;
+        } else {
+            return false; // Other uniform/storage resources not in this PSO.
+        }
+    }
+    return images_found == 1 && push_found == 1;
 }
 } // namespace
 #ifdef _WIN32
@@ -34,6 +129,8 @@ void NativeRDWorkload::_bind_methods() {
                          &NativeRDWorkload::record_checkpoint_series);
     ClassDB::bind_method(D_METHOD("mark_readback_complete"),
                          &NativeRDWorkload::mark_readback_complete);
+    ClassDB::bind_method(D_METHOD("replace_spirv", "rendering_device", "bytecode"),
+                         &NativeRDWorkload::replace_spirv);
     ClassDB::bind_method(D_METHOD("release", "rendering_device"),
                          &NativeRDWorkload::release);
     ClassDB::bind_method(D_METHOD("diagnostics"), &NativeRDWorkload::diagnostics);
@@ -304,6 +401,101 @@ Dictionary NativeRDWorkload::mark_readback_complete() {
     return result;
 }
 
+Dictionary NativeRDWorkload::replace_spirv(
+        RenderingDevice *rd, const PackedByteArray &bytecode) {
+    ++reload_attempts_;
+    const auto started = HostClock::now();
+    const auto failure = [&](const char *stage, const char *reason) {
+        ++reload_failures_;
+        reload_failure_stage_ = stage;
+        reload_error_ = reason;
+        reload_host_usec_ = elapsed_host_usec(started);
+        Dictionary out = diagnostics();
+        out["ok"] = false;
+        out["error"] = reason;
+        return out;
+    };
+    if (phase_ != Phase::PREPARED || rd == nullptr || rd != rd_ ||
+        checkpoint_active_ || pending_batch_count_ != 0) {
+        return failure("in_flight", "rd_pipeline_reload_requires_completed_readback");
+    }
+    if (!image_.is_valid() || !uniform_set_.is_valid() ||
+        !shader_.is_valid() || !pipeline_.is_valid()) {
+        return failure("lifecycle", "rd_pipeline_reload_missing_live_resources");
+    }
+    if (bytecode.size() < 20 || bytecode.size() > 1024 * 1024 ||
+        bytecode.size() % sizeof(uint32_t) != 0 ||
+        bytecode.decode_u32(0) != 0x07230203u ||
+        bytecode.decode_u32(4) < 0x00010000u ||
+        bytecode.decode_u32(4) > 0x00010300u) {
+        return failure("shader", "rd_pipeline_reload_invalid_vulkan11_spirv");
+    }
+    if (!has_rd_image_abi(bytecode)) {
+        return failure("shader", "rd_pipeline_reload_incompatible_image_or_push_constant_abi");
+    }
+    Ref<RDShaderSPIRV> shader_code;
+    shader_code.instantiate();
+    shader_code->set_stage_bytecode(RenderingDevice::SHADER_STAGE_COMPUTE, bytecode);
+    const auto shader_start = HostClock::now();
+    RID candidate_shader = rd->shader_create_from_spirv(
+        shader_code, "Godauldron Reloaded Native RD");
+    const int64_t shader_usec = elapsed_host_usec(shader_start);
+    if (!candidate_shader.is_valid()) {
+        return failure("shader", "rd_pipeline_reload_shader_creation_failed");
+    }
+    ++shader_creations_;
+    const auto pipeline_start = HostClock::now();
+    RID candidate_pipeline = rd->compute_pipeline_create(candidate_shader);
+    const int64_t pipeline_usec = elapsed_host_usec(pipeline_start);
+    if (!candidate_pipeline.is_valid()) {
+        rd->free_rid(candidate_shader);
+        return failure("pipeline", "rd_pipeline_reload_pipeline_creation_failed");
+    }
+    ++pipeline_creations_;
+    Ref<RDUniform> binding;
+    binding.instantiate();
+    binding->set_uniform_type(RenderingDevice::UNIFORM_TYPE_IMAGE);
+    binding->set_binding(0);
+    binding->add_id(image_);
+    TypedArray<RDUniform> uniforms;
+    uniforms.append(binding);
+    const auto descriptor_start = HostClock::now();
+    RID candidate_set = rd->uniform_set_create(uniforms, candidate_shader, 0);
+    const int64_t descriptor_usec = elapsed_host_usec(descriptor_start);
+    if (!candidate_set.is_valid()) {
+        rd->free_rid(candidate_pipeline);
+        rd->free_rid(candidate_shader);
+        return failure("descriptor", "rd_pipeline_reload_descriptor_creation_failed");
+    }
+    ++descriptor_creations_;
+
+    // Completed readback is the engine-owned GPU completion boundary; no
+    // additional submission may overlap this method on the render thread.
+    // Publish all three compatible resources atomically, then release the
+    // superseded engine-owned RIDs in descriptor/pipeline/shader order.
+    RID old_set = uniform_set_;
+    RID old_pipeline = pipeline_;
+    RID old_shader = shader_;
+    uniform_set_ = candidate_set;
+    pipeline_ = candidate_pipeline;
+    shader_ = candidate_shader;
+    rd->free_rid(old_set);
+    rd->free_rid(old_pipeline);
+    rd->free_rid(old_shader);
+    ++reload_generation_;
+    ++reload_retirements_;
+    shader_origin_ = "provider_reloaded_spirv";
+    reload_error_ = "";
+    reload_failure_stage_ = "";
+    reload_host_usec_ = elapsed_host_usec(started);
+    Dictionary out = diagnostics();
+    out["ok"] = true;
+    out["reload_shader_create_host_usec"] = shader_usec;
+    out["reload_pipeline_create_host_usec"] = pipeline_usec;
+    out["reload_descriptor_create_host_usec"] = descriptor_usec;
+    return out;
+}
+
 Dictionary NativeRDWorkload::release(RenderingDevice *rd) {
     if (phase_ == Phase::RELEASED) {
         Dictionary result = diagnostics();
@@ -366,7 +558,16 @@ Dictionary NativeRDWorkload::diagnostics() const {
     result["checkpoint_dispatches_pending"] = checkpoint_dispatches_pending_;
     result["active_resources"] = phase_ == Phase::PREPARED || phase_ == Phase::PENDING;
     result["backend_contract"] = "godot_rendering_device_backend_neutral";
-    result["shader_origin"] = "native_compiled_embedded_spirv";
+    result["shader_origin"] = shader_origin_;
+    result["reload_attempts"] = reload_attempts_;
+    result["reload_failures"] = reload_failures_;
+    result["reload_generation"] = reload_generation_;
+    result["reload_retired_pipelines"] = reload_retirements_;
+    result["reload_host_usec"] = reload_host_usec_;
+    result["reload_error"] = reload_error_;
+    result["reload_failure_stage"] = reload_failure_stage_;
+    result["reload_available"] = phase_ == Phase::PREPARED &&
+                                  !checkpoint_active_ && pending_batch_count_ == 0;
     result["image_width"] = width_;
     result["image_height"] = height_;
     result["workgroups_x"] = groups_x_;

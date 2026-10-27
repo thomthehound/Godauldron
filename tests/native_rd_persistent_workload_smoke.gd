@@ -3,6 +3,7 @@ extends SceneTree
 ## inter-dispatch barriers on Godot's Forward+ RenderingDevice.
 
 const Package = preload("res://scripts/native_experiment_package.gd")
+const PipelineDiagnostics = preload("res://scripts/provider_pipeline_diagnostics.gd")
 const WIDTH := 13
 const HEIGHT := 9
 const ELEMENTS := WIDTH * HEIGHT
@@ -99,6 +100,16 @@ func _run() -> void:
 	compositor.compositor_effects = effects
 	camera.compositor = compositor
 	var total_dispatches := 0
+	var expected_pipeline_creations := 1
+	var expected_shader_creations := 1
+	var expected_descriptor_creations := 1
+	var hlsl_source_path: String = (
+		"res://experiments/native-rd-windows/reload_rd_image.hlsl" if windows_d3d12
+		else "res://experiments/native-vulkan-provider/reload_rd_image.hlsl"
+	)
+	if not FileAccess.file_exists(hlsl_source_path):
+		_fail("Real HLSL source not present in installed RD package")
+		return
 	for batch_index in range(BATCHES.size()):
 		var seeds := PackedInt32Array(BATCHES[batch_index])
 		if not bool(effect.call("request_batch", seeds)):
@@ -109,6 +120,11 @@ func _run() -> void:
 		if bool(effect.call("request_batch", seeds)) or \
 				bool(effect.call("request_release")):
 			_fail("Concurrent native workload lifecycle request was accepted")
+			return
+		var blocked: Dictionary = effect.call("request_hlsl_reload", hlsl_source_path)
+		if blocked.get("ok", true) or \
+				blocked.get("error") != "native_rd_pipeline_not_idle":
+			_fail("Native HLSL reload was admitted while compute could be in flight")
 			return
 		var state: Dictionary = await _await_phase(effect, "ready")
 		if state.get("phase") != "ready":
@@ -139,7 +155,7 @@ func _run() -> void:
 		# undocumented driver pipeline-cache hits.
 		if int(completed.get("prepare_attempts", -1)) != 1 or \
 				int(completed.get("prepare_failures", -1)) != 0 or \
-				int(completed.get("shader_creations", -1)) != 1 or \
+				int(completed.get("shader_creations", -1)) != expected_shader_creations or \
 				int(completed.get("pipeline_binds", -1)) != batch_index + 1 or \
 				completed.get("cache_hit_observation") != "not_exposed_by_rendering_device" or \
 				completed.get("timing_source") != "steady_host_wall_microseconds" or \
@@ -162,12 +178,12 @@ func _run() -> void:
 				recorded.get("execution") != "native_cpp_persistent_shader_and_dispatch" or \
 				recorded.get("queue_owner") != "godot_rendering_device" or \
 				int(recorded.get("recorded_dispatches", -1)) != seeds.size() or \
-				int(completed.get("pipeline_creations", 0)) != 1 or \
+				int(completed.get("pipeline_creations", 0)) != expected_pipeline_creations or \
 				int(completed.get("image_width", -1)) != WIDTH or \
 				int(completed.get("image_height", -1)) != HEIGHT or \
 				int(completed.get("workgroups_x", -1)) != 2 or \
 				int(completed.get("workgroups_y", -1)) != 2 or \
-				int(completed.get("descriptor_creations", 0)) != 1 or \
+				int(completed.get("descriptor_creations", 0)) != expected_descriptor_creations or \
 				int(completed.get("prepare_count", 0)) != 1 or \
 				int(completed.get("completed_batches", 0)) != batch_index + 1 or \
 				int(completed.get("dispatch_count", 0)) != total_dispatches or \
@@ -183,6 +199,75 @@ func _run() -> void:
 				_fail("Incorrect native GPU compute barrier/write for batch %d pixel %d: expected %d, saw %d" %
 					[batch_index, pixel, expected, bytes.decode_u32(pixel * 4)])
 				return
+		if batch_index in [0, 1]:
+			# Candidate creation is explicitly off the measured/GPU path,
+			# only once Godot has finished the readback for the last batch.
+			var request: Dictionary = effect.call("request_hlsl_reload", hlsl_source_path)
+			if not request.get("ok", false):
+				_fail("DXC HLSL source compilation failed on %s: %s" %
+					[expected_driver, str(request)])
+				return
+			if bool(effect.call("request_release")) or \
+					bool(effect.call("request_batch", PackedInt32Array([1]))):
+				_fail("HLSL replacement overlapped new GPU submission or retirement")
+				return
+			var replaced: Dictionary = await _await_phase(effect, "consumed")
+			var reload: Dictionary = effect.call("reload_snapshot")
+			if replaced.get("phase") != "consumed" or not reload.get("ok", false) or \
+					int(reload.get("reload_generation", -1)) != batch_index + 1 or \
+					int(reload.get("reload_retired_pipelines", -1)) != batch_index + 1 or \
+					reload.get("shader_origin") != "provider_reloaded_spirv":
+				_fail("RD shader candidate was not fully swapped/retired: " + str(reload))
+				return
+			expected_pipeline_creations += 1
+			expected_shader_creations += 1
+			expected_descriptor_creations += 1
+			if batch_index == 0:
+				# A valid compiled HLSL shader with an incompatible push
+				# constant layout must fail before Godot creates native RIDs.
+				var changed_source: String = FileAccess.get_file_as_string(hlsl_source_path)
+				var incompatible_source: String = changed_source.replace(
+					"uint pass_index;", "uint pass_index; uint extra;")
+				if incompatible_source == changed_source:
+					_fail("Could not prepare real HLSL interface rejection")
+					return
+				var wrong_path: String = "user://native_rd_wrong_push.hlsl"
+				var file: FileAccess = FileAccess.open(wrong_path, FileAccess.WRITE)
+				if file == null:
+					_fail("Could not stage real incompatible HLSL source")
+					return
+				file.store_string(incompatible_source)
+				file.close()
+				var wrong_request: Dictionary = effect.call("request_hlsl_reload", wrong_path)
+				if not wrong_request.get("ok", false):
+					_fail("Incompatible HLSL source must compile before ABI rejection: " +
+						str(wrong_request))
+					return
+				var wrong_done: Dictionary = await _await_phase(effect, "consumed")
+				var wrong: Dictionary = effect.call("reload_snapshot")
+				if wrong_done.get("phase") != "consumed" or wrong.get("ok", true) or \
+						wrong.get("error") != "rd_pipeline_reload_incompatible_image_or_push_constant_abi" or \
+						int(wrong.get("reload_generation", -1)) != 1:
+					_fail("Incompatible push constant HLSL replaced live PSO: " + str(wrong))
+					return
+				# Native failure must not retire the accepted HLSL PSO or
+				# prevent executing the next real compute batch.
+				var corrupt := PackedByteArray()
+				corrupt.resize(20)
+				corrupt.encode_u32(0, 0x07230203)
+				corrupt.encode_u32(4, 0x00010500)
+				if not effect.call("request_reload_spirv", corrupt):
+					_fail("Malformed candidate could not enter native rejection path")
+					return
+				var invalid_done: Dictionary = await _await_phase(effect, "consumed")
+				var invalid: Dictionary = effect.call("reload_snapshot")
+				if invalid_done.get("phase") != "consumed" or \
+						invalid.get("ok", true) or \
+						invalid.get("error") != "rd_pipeline_reload_invalid_vulkan11_spirv" or \
+						int(invalid.get("reload_generation", -1)) != 1 or \
+						int(invalid.get("reload_retired_pipelines", -1)) != 1:
+					_fail("Failed candidate replaced the working RD pipeline: " + str(invalid))
+					return
 	if not bool(effect.call("request_release")):
 		_fail("Native workload retirement rejected after last completed readback")
 		return
@@ -193,7 +278,7 @@ func _run() -> void:
 	var completion: Dictionary = retired.get("completion", {})
 	if completion.get("phase") != "released" or \
 			completion.get("active_resources") != false or \
-			int(completion.get("pipeline_creations", -1)) != 1 or \
+			int(completion.get("pipeline_creations", -1)) != expected_pipeline_creations or \
 			int(completion.get("dispatch_count", -1)) != total_dispatches or \
 			int(completion.get("completed_batches", -1)) != BATCHES.size():
 		_fail("Persistent native workload leaked RD resources or dropped work")
@@ -243,6 +328,40 @@ func _run() -> void:
 		_fail("Second native adapter did not release its Godot GPU resources")
 		return
 	camera.compositor = null
+	if windows_d3d12:
+		# The actual laboratory scene must expose the same effect-owned
+		# HLSL pipeline replacement, not a second host-built DX12 PSO.
+		var queued: Dictionary = stage.call("godauldron_reload_shader")
+		if not queued.get("ok", false) or not queued.get("queued", false):
+			_fail("RD provider scene could not request explicit DXC shader reload: " + str(queued))
+			return
+		var scene_report: Dictionary = {}
+		for frame in range(210):
+			await process_frame
+			scene_report = stage.call("godauldron_pipeline_diagnostics")
+			var entries: Array = scene_report.get("pipelines", [])
+			if not entries.is_empty() and int(entries[0].get("reload_generation", 0)) == 1:
+				break
+		var inspected: Dictionary = PipelineDiagnostics.read(stage)
+		if not inspected.get("available", false) or \
+				inspected["pipelines"].size() != 1 or \
+				int(inspected["pipelines"][0].get("reload_generation", 0)) != 1 or \
+				inspected.get("source_reload", {}).get("active_language") != "hlsl":
+			_fail("Host-visible RD provider HLSL pipeline/diagnostic integration failed: " + str(inspected))
+			return
+		var owned: CompositorEffect = stage.get("_reload_effect")
+		viewport.remove_child(stage)
+		stage.queue_free()
+		var shutdown: Dictionary = {}
+		for frame in range(210):
+			await process_frame
+			shutdown = owned.call("shutdown_snapshot")
+			if shutdown.get("completed", false):
+				break
+		if not shutdown.get("completed", false) or shutdown.get("phase") != "released":
+			_fail("Scene removal leaked native RD shader/pipeline/descriptor/image: " +
+				str(shutdown))
+			return
 	print("Persistent native workload validated: ", BATCHES.size(),
 		" completed batches, ", total_dispatches,
 		" native dispatches, driver=", expected_driver,

@@ -207,18 +207,31 @@ def export_csv(path: Path, report: dict) -> None:
     fields = ("batch_index", "warmup", "dispatches", "correct_pixels",
               "gpu_compute_window_usec", "gpu_start_ns", "gpu_end_ns", "device_frame",
               "host_request_to_readback_usec", "host_validation_usec",
-              "host_request_to_validated_usec", "pixel_dispatches_per_second")
+              "host_request_to_validated_usec", "pixel_dispatches_per_second",
+              "gpu_start_gap_usec", "device_frame_delta")
     pixels = report["settings"]["width"] * report["settings"]["height"]
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
+        previous = None
         for record in report["records"]:
             row = {key: record.get(key) for key in fields}
+            if previous is not None and (
+                    type(previous.get("gpu_start_ns")) is int and
+                    type(record.get("gpu_start_ns")) is int and
+                    type(previous.get("device_frame")) is int and
+                    type(record.get("device_frame")) is int):
+                delta_ns = record["gpu_start_ns"] - previous["gpu_start_ns"]
+                delta_frames = record["device_frame"] - previous["device_frame"]
+                if delta_ns > 0 and delta_frames >= 0:
+                    row["gpu_start_gap_usec"] = delta_ns / 1000.0
+                    row["device_frame_delta"] = delta_frames
             elapsed = record.get("gpu_compute_window_usec")
             row["pixel_dispatches_per_second"] = (
                 pixels * record["dispatches"] * 1_000_000.0 / float(elapsed)
                 if elapsed is not None else None)
             writer.writerow(row)
+            previous = record
 
 
 def main() -> None:

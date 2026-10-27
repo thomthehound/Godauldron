@@ -204,6 +204,14 @@ jobs:
             echo "Vulkan validation found invalid native GPU commands"
             exit 1
           fi
+      - name: Verify DXC HLSL pipeline reload through native Godot RenderingDevice Vulkan
+        run: |
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 180s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_rd_persistent_workload_smoke.gd 2>&1 | tee native-rd-hlsl-validation.log
+          if grep -E 'VUID-|Validation Error' native-rd-hlsl-validation.log; then
+            echo "Godot RD shader replacement violates native Vulkan validation"
+            exit 1
+          fi
       - name: Verify real native Vulkan compute/copy, GPU queries and fence completion alongside Forward+
         run: timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_provider_smoke.gd
       - name: Verify GLSL and DXC HLSL native pipeline hot reload and fence-safe rollback
@@ -257,6 +265,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Cache pinned DXC for RD HLSL acceptance
+        uses: actions/cache@v4
+        with:
+          path: .ci-dxc
+          key: windows-x64-dxc-v1.9.2609
+      - name: Install DXC with SPIR-V support
+        shell: pwsh
+        run: |
+          $dxc = Join-Path (Get-Location) ".ci-dxc/bin/x64/dxc.exe"
+          if (-not (Test-Path $dxc)) {
+            New-Item -ItemType Directory -Force .ci-dxc | Out-Null
+            Invoke-WebRequest "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip" -OutFile "$env:RUNNER_TEMP/dxc.zip"
+            Expand-Archive -Path "$env:RUNNER_TEMP/dxc.zip" -DestinationPath .ci-dxc -Force
+          }
+          if (-not (Test-Path $dxc)) { throw "Pinned SPIR-V-enabled DXC executable unavailable" }
+          $dir = Split-Path $dxc -Parent
+          $dir >> $env:GITHUB_PATH
+          & $dxc -help | Select-Object -First 1
       - name: Download Godot 4 for Windows (console and GUI binaries)
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -300,7 +326,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Import Godot project with RD-only native Windows package
         run: .\.engine\godot_console.exe --headless --path . --editor --import --quit
-      - name: Verify real D3D12 WARP compute, barriers, persistent resources and completion
+      - name: Verify D3D12 HLSL hot reload, real GPU execution, barriers and safe pipeline retirement
         shell: pwsh
         run: |
           & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_persistent_workload_smoke.gd

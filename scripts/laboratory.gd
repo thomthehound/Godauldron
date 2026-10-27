@@ -105,6 +105,9 @@ var _pixel_toggle: CheckButton
 var _pixel_panel: HBoxContainer
 var _pixel_texture: TextureRect
 var _pixel_info: Label
+var _pixel_tile_picker: OptionButton
+var _pixel_zoom_spin: SpinBox
+var _pixel_pin: CheckButton
 var _last_pixel_sample: Dictionary = {}
 var _list: ItemList
 var _catalog_search: LineEdit
@@ -520,10 +523,40 @@ func _build_ui() -> void:
 	delete_view.text = "Delete view"
 	delete_view.pressed.connect(_delete_inspection_view)
 	bookmark_row.add_child(delete_view)
+	var pixel_tools := HBoxContainer.new()
+	viewer.add_child(pixel_tools)
 	_pixel_toggle = CheckButton.new()
 	_pixel_toggle.text = "Inspect pixel"
-	_pixel_toggle.tooltip_text = "One-shot viewport readback on next left-click, outside measured runs"
-	bookmark_row.add_child(_pixel_toggle)
+	_pixel_toggle.tooltip_text = "Click once to inspect an actual rendered pixel; GPU readback is forbidden during measured runs"
+	pixel_tools.add_child(_pixel_toggle)
+	var region_label := Label.new()
+	region_label.text = "Neighborhood"
+	pixel_tools.add_child(region_label)
+	_pixel_tile_picker = OptionButton.new()
+	for side in PixelInspector.TILE_CHOICES:
+		_pixel_tile_picker.add_item("%d × %d" % [side, side])
+		_pixel_tile_picker.set_item_metadata(_pixel_tile_picker.item_count - 1, side)
+	_pixel_tile_picker.select(1)
+	_pixel_tile_picker.tooltip_text = "Region captured on the next click; metrics exclude duplicated border texels"
+	pixel_tools.add_child(_pixel_tile_picker)
+	var zoom_label := Label.new()
+	zoom_label.text = "Zoom"
+	pixel_tools.add_child(zoom_label)
+	_pixel_zoom_spin = SpinBox.new()
+	_pixel_zoom_spin.min_value = 4
+	_pixel_zoom_spin.max_value = 12
+	_pixel_zoom_spin.step = 2
+	_pixel_zoom_spin.value = 12
+	_pixel_zoom_spin.custom_minimum_size = Vector2(72, 0)
+	_pixel_zoom_spin.tooltip_text = "Resize the existing magnifier without another GPU readback"
+	_pixel_zoom_spin.value_changed.connect(_resize_pixel_tile)
+	pixel_tools.add_child(_pixel_zoom_spin)
+	_pixel_pin = CheckButton.new()
+	_pixel_pin.text = "Pin sample"
+	_pixel_pin.disabled = true
+	_pixel_pin.tooltip_text = "Freeze this captured pixel and its provenance; unpin before clicking another"
+	_pixel_pin.toggled.connect(_pin_pixel_sample)
+	pixel_tools.add_child(_pixel_pin)
 	var track_row := HBoxContainer.new()
 	viewer.add_child(track_row)
 	var track_label := Label.new()
@@ -1902,7 +1935,10 @@ func _select_experiment(index: int) -> void:
 		_viewport.debug_draw = Viewport.DEBUG_DRAW_DISABLED
 	_diagnostic_picker.select(0)
 	_pixel_panel.visible = false
+	_pixel_texture.texture = null
 	_last_pixel_sample.clear()
+	_pixel_pin.set_pressed_no_signal(false)
+	_pixel_pin.disabled = true
 	_pixel_toggle.button_pressed = false
 	_track_enabled.set_pressed_no_signal(false)
 	_active_track.clear()
@@ -2388,6 +2424,9 @@ func _delete_inspection_view() -> void:
 
 
 func _inspect_rendered_pixel(local_point: Vector2) -> void:
+	if _pixel_pin.button_pressed:
+		_status.text = "Pixel sample is pinned; unpin before selecting another frame"
+		return
 	if _active_scene == null or _has_active_run() or _capture_pending:
 		_status.text = "Pixel inspection requires an idle or unmeasured playback scene"
 		return
@@ -2409,7 +2448,9 @@ func _inspect_rendered_pixel(local_point: Vector2) -> void:
 		_status.text = "Pixel inspection failed: no viewport texture"
 		return
 	var rendered: Image = texture.get_image()
-	var result: Dictionary = PixelInspector.sample(rendered, local_point, viewport_size)
+	var selected_size: int = int(_pixel_tile_picker.get_item_metadata(_pixel_tile_picker.selected))
+	var result: Dictionary = PixelInspector.sample(rendered, local_point, viewport_size,
+		selected_size)
 	_capture_pending = false
 	if not bool(result.get("ok", false)):
 		_status.text = "Pixel inspection failed: " + String(result.get("error", "unknown"))
@@ -2422,14 +2463,55 @@ func _inspect_rendered_pixel(local_point: Vector2) -> void:
 		"render_diagnostic": _diagnostic_provenance(),
 		"pixel": [position.x, position.y],
 		"rgba8": rgba.duplicate(),
-		"render_size": [rendered.get_width(), rendered.get_height()]
+		"render_size": [rendered.get_width(), rendered.get_height()],
+		"tile_size": int(result["tile_size"]),
+		"sampled_pixels": int(result["sampled_pixels"]),
+		"clamped_border_texels": int(result["clamped_border_texels"]),
+		"rgb_min": result["rgb_min"].duplicate(),
+		"rgb_max": result["rgb_max"].duplicate(),
+		"rgb_mean": result["rgb_mean"].duplicate(),
+		"encoded_luma_mean": result["encoded_luma_mean"],
+		"encoded_luma_min": result["encoded_luma_min"],
+		"encoded_luma_max": result["encoded_luma_max"],
+		"pinned": false
 	}
 	_pixel_texture.texture = ImageTexture.create_from_image(result["tile"])
-	_pixel_info.text = "Rendered pixel %d, %d / %d × %d\nRGBA8: %d, %d, %d, %d\n13 × 13 texels · nearest-neighbor magnification\nDisplayed output color, not linear HDR radiance or GPU timing" % [
+	_resize_pixel_tile(_pixel_zoom_spin.value)
+	var mean_rgb: Array = result["rgb_mean"]
+	_pixel_info.text = "Pixel %d, %d / %d × %d | RGBA8 %d, %d, %d, %d\n" % [
 		position.x, position.y, rendered.get_width(), rendered.get_height(),
 		rgba[0], rgba[1], rgba[2], rgba[3]
 	]
+	_pixel_info.text += "%d×%d neighborhood | %d in-bounds pixels, %d clamped display texels\n" % [
+		selected_size, selected_size, int(result["sampled_pixels"]),
+		int(result["clamped_border_texels"])
+	]
+	_pixel_info.text += "RGB8 min/mean/max: %s / (%.1f, %.1f, %.1f) / %s\n" % [
+		str(result["rgb_min"]), mean_rgb[0], mean_rgb[1], mean_rgb[2],
+		str(result["rgb_max"])
+	]
+	_pixel_info.text += "Encoded Y′ mean %.1f (range %.1f–%.1f) | final SDR, not linear HDR" % [
+		float(result["encoded_luma_mean"]), float(result["encoded_luma_min"]),
+		float(result["encoded_luma_max"])
+	]
+	_pixel_pin.set_pressed_no_signal(false)
+	_pixel_pin.disabled = false
 	_pixel_panel.visible = true
+
+
+func _resize_pixel_tile(_zoom: float) -> void:
+	if _pixel_texture == null or _pixel_zoom_spin == null:
+		return
+	var tile_size: int = int(_last_pixel_sample.get("tile_size", PixelInspector.TILE_SIZE))
+	var side: int = mini(tile_size * int(_pixel_zoom_spin.value), 264)
+	_pixel_texture.custom_minimum_size = Vector2(side, side)
+
+
+func _pin_pixel_sample(pinned: bool) -> void:
+	if _last_pixel_sample.is_empty():
+		_pixel_pin.set_pressed_no_signal(false)
+		return
+	_last_pixel_sample["pinned"] = pinned
 
 
 func _update_inspection_bounds() -> void:

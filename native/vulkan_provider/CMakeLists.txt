@@ -20,9 +20,18 @@ set(GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GENERATED_DIR}")
 
 if(GODAULDRON_RD_ONLY)
-  if(NOT EXISTS "${GENERATED_DIR}/persistent_compute_spirv.h")
-    message(FATAL_ERROR "RD-only build needs compiled persistent_compute_spirv.h from the Linux shader build")
-  endif()
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pinned_spirv.py"
+      decode "${CMAKE_CURRENT_SOURCE_DIR}/embedded/persistent_image.spv.b64"
+      "${GENERATED_DIR}/persistent_image.spv"
+    RESULT_VARIABLE RD_SPIRV_DECODE_RESULT
+    COMMAND_ERROR_IS_FATAL ANY)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/embed_spirv.py"
+      "${GENERATED_DIR}/persistent_image.spv" "${GENERATED_DIR}/persistent_compute_spirv.h"
+      "kPersistentComputeSpirv"
+    RESULT_VARIABLE RD_SPIRV_EMBED_RESULT
+    COMMAND_ERROR_IS_FATAL ANY)
   add_library(godauldron_native_rd_workload SHARED
     native_rd_workload.cpp native_rd_workload.h register_rd_types.cpp
     "${GENERATED_DIR}/persistent_compute_spirv.h")

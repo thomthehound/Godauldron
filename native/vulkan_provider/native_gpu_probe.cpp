@@ -250,6 +250,52 @@ bool NativeGpuProbe3D::create_compute_pipeline(
         failure_reason = "Compute shader is not SPIR-V";
         return false;
     }
+    // The provider's existing VkPipelineLayout and one storage-buffer set
+    // remain authoritative. Never publish a candidate with a different
+    // descriptor binding or workgroup shape as if it were ABI compatible.
+    bool local_size_valid = false;
+    bool compute_entry = false;
+    bool descriptor_set = false;
+    bool descriptor_binding = false;
+    uint32_t descriptor_id = 0;
+    for (size_t offset = 5; offset < words.size();) {
+        const uint32_t instruction = words[offset];
+        const uint32_t count = instruction >> 16;
+        const uint32_t opcode = instruction & 0xffffu;
+        if (count == 0 || offset + count > words.size()) {
+            failure_stage = "shader";
+            failure_reason = "Malformed SPIR-V instruction stream";
+            return false;
+        }
+        if (opcode == 15 && count >= 4 && words[offset + 1] == 5) {
+            compute_entry = true; // OpEntryPoint GLCompute
+        } else if (opcode == 16 && count >= 6 && words[offset + 2] == 17 &&
+                   words[offset + 3] == 64 && words[offset + 4] == 1 &&
+                   words[offset + 5] == 1) {
+            local_size_valid = true; // OpExecutionMode LocalSize
+        } else if (opcode == 71 && count >= 4) {
+            const uint32_t target = words[offset + 1];
+            const uint32_t decoration = words[offset + 2];
+            if (decoration == 34 || decoration == 33) {
+                if (words[offset + 3] != 0 ||
+                    (descriptor_id != 0 && descriptor_id != target)) {
+                    failure_stage = "shader";
+                    failure_reason = "Candidate descriptor set/binding differs from native pipeline ABI";
+                    return false;
+                }
+                descriptor_id = target;
+                if (decoration == 34) descriptor_set = true;
+                if (decoration == 33) descriptor_binding = true;
+            }
+        }
+        offset += count;
+    }
+    if (!compute_entry || !local_size_valid || !descriptor_set ||
+        !descriptor_binding) {
+        failure_stage = "shader";
+        failure_reason = "Candidate SPIR-V lacks native compute entry, local size or buffer binding";
+        return false;
+    }
     VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     info.codeSize = static_cast<size_t>(bytecode.size());
     info.pCode = words.data();
@@ -331,7 +377,14 @@ Dictionary NativeGpuProbe3D::godauldron_replace_shader(const PackedByteArray &sp
     VkPipeline candidate = VK_NULL_HANDLE;
     std::string stage;
     std::string reason;
-    if (!create_compute_pipeline(spirv, candidate, stage, reason)) {
+    // Setup API durations must continue to describe initial preparation;
+    // the reload has its own total host-wall measurement and counters.
+    const int64_t setup_shader_usec = shader_create_host_usec_;
+    const int64_t setup_pipeline_usec = pipeline_create_host_usec_;
+    const bool candidate_valid = create_compute_pipeline(spirv, candidate, stage, reason);
+    shader_create_host_usec_ = setup_shader_usec;
+    pipeline_create_host_usec_ = setup_pipeline_usec;
+    if (!candidate_valid) {
         return rejected(stage.c_str(), reason.c_str());
     }
 

@@ -24,6 +24,8 @@ const HdrExrCapture = preload("res://scripts/hdr_exr_capture.gd")
 const FrameSequence = preload("res://scripts/frame_sequence.gd")
 const Observability = preload("res://scripts/performance_observability.gd")
 const EngineViewportTelemetry = preload("res://scripts/engine_viewport_telemetry.gd")
+const GPUStageProbe = preload("res://scripts/gpu_stage_probe.gd")
+const GPUStageProfileReport = preload("res://scripts/gpu_stage_profile_report.gd")
 const PerformancePlot = preload("res://scripts/performance_plot.gd")
 const VisualComparisonWindow = preload("res://scripts/visual_comparison_window.gd")
 const NativeExperimentPackage = preload("res://scripts/native_experiment_package.gd")
@@ -119,6 +121,10 @@ var _status: Label
 var _telemetry: Label
 var _observability = Observability.new()
 var _engine_render = EngineViewportTelemetry.new()
+var _gpu_stage_probe = GPUStageProbe.new()
+var _gpu_stage_label: Label
+var _gpu_profile_root: String = "user://gpu_profiles"
+var _gpu_profile_count: int = 0
 var _runtime_environment: Dictionary = {}
 var _engine_render_label: Label
 var _environment_label: Label
@@ -167,6 +173,7 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	_hdr_capture.release()
 	_buffer_probe.release()
+	_gpu_stage_probe.release()
 	_grade_controller.release()
 	_engine_render.deactivate(_viewport)
 
@@ -658,6 +665,18 @@ func _build_ui() -> void:
 	_engine_render_label.text = "Godot viewport render CPU/GPU: waiting for rendered frames"
 	_engine_render_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	performance_text.add_child(_engine_render_label)
+	var gpu_profile_row := HBoxContainer.new()
+	performance_text.add_child(gpu_profile_row)
+	var gpu_profile_button := Button.new()
+	gpu_profile_button.text = "Profile GPU stages"
+	gpu_profile_button.tooltip_text = "Unmeasured 12-frame device-timestamp capture of Forward+ compositor stage intervals"
+	gpu_profile_button.pressed.connect(_profile_gpu_stages)
+	gpu_profile_row.add_child(gpu_profile_button)
+	_gpu_stage_label = Label.new()
+	_gpu_stage_label.text = "GPU stage intervals: not captured"
+	_gpu_stage_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_gpu_stage_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gpu_profile_row.add_child(_gpu_stage_label)
 	_environment_label = Label.new()
 	_environment_label.text = "Renderer/hardware: unavailable"
 	_environment_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1251,6 +1270,95 @@ func _inspect_native_buffer() -> void:
 		_status.text = "GPU buffer inspection unavailable: " + String(result.get("error", "Cannot visualize float samples"))
 
 
+func _profile_gpu_stages() -> void:
+	if _capture_pending or _active_scene == null or _has_active_run() or _campaign != null:
+		_status.text = "Stop capture/benchmark/campaign before GPU stage profiling"
+		return
+	if _comparison_window != null and (_comparison_window.visible or bool(_comparison_window.call("analysis_busy"))):
+		_status.text = "Close image analysis before GPU stage profiling"
+		return
+	if _buffer_window != null and _buffer_window.visible:
+		_status.text = "Close native buffer inspection before GPU stage profiling"
+		return
+	if _diagnostic_key != "lit" or _viewport.debug_draw != Viewport.DEBUG_DRAW_DISABLED:
+		_status.text = "Switch Render view to Lit before GPU stage profiling"
+		return
+	var scene: Node = _active_scene
+	var camera: Camera3D = _viewport.get_camera_3d()
+	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
+		_status.text = "GPU stage profiling requires a scene-owned 3D camera"
+		return
+	_playback.pause()
+	_playback_accumulator = 0.0
+	_update_playback_ui()
+	var capture_step: int = _playback.step_index
+	if _track_enabled != null and _track_enabled.button_pressed and \
+			not _apply_camera_track(capture_step):
+		_status.text = "Selected camera track cannot resolve at profiling step"
+		return
+	camera = _viewport.get_camera_3d()
+	if camera == null or (camera != scene and not scene.is_ancestor_of(camera)):
+		_status.text = "GPU stage profiling lost scene camera ownership"
+		return
+	const FRAME_COUNT := 12
+	var started: Dictionary = _gpu_stage_probe.begin(_rendering_method, _viewport,
+		camera, scene, FRAME_COUNT)
+	if not bool(started.get("ok", false)):
+		_status.text = "GPU stage profiling unavailable: " + String(started.get("error", "unsupported"))
+		return
+	_capture_pending = true
+	_gpu_stage_label.text = "GPU stage intervals: collecting 12 device-timestamp frames…"
+	_status.text = "Capturing native GPU stage boundaries (not a benchmark)"
+	var error := ""
+	for frame in range(180):
+		await RenderingServer.frame_post_draw
+		if not is_instance_valid(scene) or _active_scene != scene or \
+				not is_instance_valid(camera) or _viewport.get_camera_3d() != camera:
+			error = "Experiment or camera changed during GPU stage profiling"
+			break
+		var snapshot: Dictionary = _gpu_stage_probe.snapshot()
+		if (snapshot["samples"] as Array).size() >= FRAME_COUNT:
+			break
+	var resolved: Dictionary = _gpu_stage_probe.snapshot()
+	var source: Dictionary = _gpu_stage_probe.source()
+	_gpu_stage_probe.release()
+	_capture_pending = false
+	if error.is_empty() and (resolved["samples"] as Array).size() < FRAME_COUNT:
+		error = "GPU timestamp frames did not resolve within 180 rendered frames"
+	if not error.is_empty():
+		_gpu_stage_label.text = "GPU stage intervals: unavailable (" + error + ")"
+		_status.text = error
+		return
+	var summary: Dictionary = GPUStageProbe.summarize(resolved, source)
+	if not bool(summary.get("available", false)):
+		_gpu_stage_label.text = "GPU stage intervals: unavailable (no valid device intervals)"
+		_status.text = "GPU stage timing unavailable; no valid resolved GPU intervals"
+		return
+	summary["experiment_id"] = String(_manifest.get("id", ""))
+	summary["engine"] = Engine.get_version_info()
+	summary["runtime_environment"] = _runtime_environment.duplicate(true)
+	summary["camera_scene_path"] = _active_scene_camera_path()
+	summary["capture_timeline_step"] = capture_step
+	summary["timestamp"] = Time.get_datetime_string_from_system()
+	summary["requested_frames"] = FRAME_COUNT
+	_gpu_profile_count += 1
+	var stem: String = "gpu_stages_%s_p%d_%d" % [
+		Time.get_datetime_string_from_system().replace(":", "-"),
+		OS.get_process_id(), _gpu_profile_count]
+	var saved: Dictionary = GPUStageProfileReport.write(_gpu_profile_root, stem, summary)
+	if not bool(saved.get("ok", false)):
+		_gpu_stage_label.text = "GPU intervals captured; report not saved"
+		_status.text = "GPU timing report not saved: " + String(saved.get("error", "unknown"))
+		return
+	var windows: Dictionary = summary["windows"]
+	var covered: Dictionary = windows["covered_gpu_window"]
+	_gpu_stage_label.text = "GPU stage window p50 %.3f / p95 %.3f ms (not full frame or provider GPU)" % [
+		float(covered["p50_usec"]) / 1000.0, float(covered["p95_usec"]) / 1000.0]
+	_status.text = "Real GPU stage timeline saved: " + String(saved["path"])
+	_log_event("info", "profiling", "gpu_stage_profile_saved",
+		"Compositor GPU stage intervals saved", {"experiment_id": String(_manifest.get("id", ""))})
+
+
 func _capture_linear_exr() -> void:
 	if _capture_pending or _active_scene == null or _has_active_run() or _campaign != null:
 		_status.text = "Finish current capture/benchmark/campaign before HDR capture"
@@ -1748,6 +1856,7 @@ func _select_experiment(index: int) -> void:
 	_engine_render.reset()
 	_last_observability_ui_tick = -1
 	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
+	_gpu_stage_label.text = "GPU stage intervals: not captured for selected experiment"
 	_update_observability_ui()
 	_telemetry.text = "Host stepping: idle"
 	_comparison_table.clear()

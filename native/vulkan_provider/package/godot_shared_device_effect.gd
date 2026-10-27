@@ -3,8 +3,9 @@ extends CompositorEffect
 ## ONLY RenderingDevice submits commands; extension only checks borrowed Vulkan
 ## handles during this render callback and never retains or submits with them.
 
-const COMPUTE = preload("res://experiments/native-vulkan-provider/godot_shared_buffer.glsl")
-const ELEMENTS := 64
+const COMPUTE = preload("res://experiments/native-vulkan-provider/godot_shared_image.glsl")
+const EDGE := 8
+const ELEMENTS := EDGE * EDGE
 const BYTE_COUNT := ELEMENTS * 4
 
 var _native: Object
@@ -93,28 +94,35 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	if rd == null or not is_instance_valid(_native):
 		_fail("Godot RenderingDevice or native extension missing")
 		return
-	var input := PackedByteArray()
-	input.resize(BYTE_COUNT)
-	input.fill(0)
-	var buffer: RID = rd.storage_buffer_create(BYTE_COUNT, input)
-	if not buffer.is_valid():
-		_fail("Godot could not allocate shared-device storage buffer")
+	var fmt := RDTextureFormat.new()
+	fmt.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+	fmt.format = RenderingDevice.DATA_FORMAT_R32_UINT
+	fmt.width = EDGE
+	fmt.height = EDGE
+	fmt.depth = 1
+	fmt.array_layers = 1
+	fmt.mipmaps = 1
+	fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | \
+		RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+	var texture: RID = rd.texture_create(fmt, RDTextureView.new())
+	if not texture.is_valid():
+		_fail("Godot could not allocate Vulkan storage image")
 		return
-	_rids.append(buffer)
+	_rids.append(texture)
 	var logical: int = rd.get_driver_resource(RenderingDevice.DRIVER_RESOURCE_LOGICAL_DEVICE, RID(), 0)
 	var physical: int = rd.get_driver_resource(RenderingDevice.DRIVER_RESOURCE_PHYSICAL_DEVICE, RID(), 0)
-	var native_buffer: int = rd.get_driver_resource(RenderingDevice.DRIVER_RESOURCE_BUFFER, buffer, 0)
-	if logical == 0 or physical == 0 or native_buffer == 0:
+	var native_image: int = rd.get_driver_resource(RenderingDevice.DRIVER_RESOURCE_TEXTURE, texture, 0)
+	if logical == 0 or physical == 0 or native_image == 0:
 		_free_resources(rd)
 		_fail("Godot Vulkan resource handles were unavailable")
 		return
 	# Native Vulkan calls only read physical-device properties and buffer
 	# memory requirements. No competing queue or ownership transfer.
-	var witness: Dictionary = _native.call("inspect_godot_vulkan_buffer",
-		logical, physical, native_buffer, BYTE_COUNT)
+	var witness: Dictionary = _native.call("inspect_godot_vulkan_image",
+		logical, physical, native_image, BYTE_COUNT)
 	if not bool(witness.get("available", false)):
 		_free_resources(rd)
-		_fail("Native extension rejected actual Godot VkBuffer: " + str(witness))
+		_fail("Native extension rejected actual Godot VkImage: " + str(witness))
 		return
 	_mutex.lock()
 	_witness = witness.duplicate(true)
@@ -132,13 +140,13 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 		return
 	_rids.append(pipeline)
 	var binding := RDUniform.new()
-	binding.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+	binding.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 	binding.binding = 0
-	binding.add_id(buffer)
+	binding.add_id(texture)
 	var set: RID = rd.uniform_set_create([binding], shader, 0)
 	if not set.is_valid():
 		_free_resources(rd)
-		_fail("Cannot bind native-inspected Godot VkBuffer")
+		_fail("Cannot bind native-inspected Godot VkImage")
 		return
 	_rids.append(set)
 	rd.capture_timestamp("godauldron_shared_device_begin")
@@ -148,7 +156,7 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	rd.compute_list_dispatch(commands, 1, 1, 1)
 	rd.compute_list_end()
 	rd.capture_timestamp("godauldron_shared_device_end")
-	var error: Error = rd.buffer_get_data_async(buffer, Callable(self, "_on_readback"))
+	var error: Error = rd.texture_get_data_async(texture, 0, Callable(self, "_on_readback"))
 	if error != OK:
 		_free_resources(rd)
 		_fail("Godot-device GPU readback rejected (%d)" % int(error))

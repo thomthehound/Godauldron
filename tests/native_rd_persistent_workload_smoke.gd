@@ -32,12 +32,29 @@ func _await_phase(effect: CompositorEffect, expected: String) -> Dictionary:
 
 
 func _run() -> void:
+	var windows_d3d12 := OS.get_name() == "Windows"
+	var expected_driver := "d3d12" if windows_d3d12 else "vulkan"
 	if RenderingServer.get_current_rendering_method() != "forward_plus" or \
-			RenderingServer.get_current_rendering_driver_name() != "vulkan":
-		_fail("Native persistent compute validation needs graphical Vulkan Forward+")
+			RenderingServer.get_current_rendering_driver_name() != expected_driver:
+		_fail("Native workload requires actual %s Forward+; no fallback accepted (observed %s)" %
+			[expected_driver, RenderingServer.get_current_rendering_driver_name()])
 		return
-	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(
-		"res://experiments/native-vulkan-provider/manifest.json"))
+	var rd: RenderingDevice = RenderingServer.get_rendering_device()
+	if rd == null:
+		_fail("No active rendering device for native workload")
+		return
+	var device_name: String = rd.get_device_name()
+	var device_type: int = rd.get_device_type()
+	print("Native RD validation backend=", expected_driver,
+		" device=", device_name, " type=", device_type)
+	if windows_d3d12 and device_type != RenderingDevice.DEVICE_TYPE_CPU:
+		_fail("D3D12 software WARP required; current adapter is not CPU-backed: " + device_name)
+		return
+	var manifest_path := ("res://experiments/native-rd-windows/manifest.json"
+		if windows_d3d12 else "res://experiments/native-vulkan-provider/manifest.json")
+	var effect_path := ("res://experiments/native-rd-windows/native_persistent_workload_effect.gd"
+		if windows_d3d12 else "res://experiments/native-vulkan-provider/native_persistent_workload_effect.gd")
+	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(manifest_path))
 	if typeof(manifest) != TYPE_DICTIONARY or \
 			not Package.preflight(manifest).get("ok", false) or \
 			not ClassDB.class_exists("NativeRDWorkload"):
@@ -61,8 +78,7 @@ func _run() -> void:
 	if camera == null or camera.compositor != null:
 		_fail("No isolated camera compositor to attach native workload")
 		return
-	var script: GDScript = load(
-		"res://experiments/native-vulkan-provider/native_persistent_workload_effect.gd")
+	var script: GDScript = load(effect_path)
 	if script == null:
 		_fail("Installed native workload compositor effect missing")
 		return
@@ -183,5 +199,7 @@ func _run() -> void:
 	camera.compositor = null
 	print("Persistent native workload validated: ", BATCHES.size(),
 		" completed batches, ", total_dispatches,
-		" native dispatches, odd-size image, GPU barriers, per-session resource reuse and retirement")
+		" native dispatches, driver=", expected_driver,
+		" adapter=", device_name,
+		" odd-size image, GPU barriers, per-session resource reuse and retirement")
 	quit(0)

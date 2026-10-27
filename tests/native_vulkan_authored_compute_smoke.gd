@@ -44,7 +44,7 @@ func _verify() -> void:
 	var native: Object = stage.get("_native")
 	var camera: Camera3D = viewport.get_camera_3d()
 	if native == null or camera == null or \
-			not native.has_method("inspect_godot_vulkan_image") or
+			not native.has_method("inspect_godot_vulkan_image") or \
 			not native.has_method("record_godot_image_compute") or camera.compositor != null:
 		_fail("Native resource-witness method or active scene-owned camera missing")
 		return
@@ -81,12 +81,12 @@ func _verify() -> void:
 			witness.get("resource_owner") != "godot_global_rendering_device" or \
 			witness.get("queue_submission_owner") != "godot_rendering_device" or \
 			int(witness.get("image_required_bytes", -1)) != EXPECTED_ELEMENTS * 4 or \
-			int(witness.get("image_allocation_requirement_bytes", 0)) < EXPECTED_ELEMENTS * 4 or
-			native_record.get("native_execution") != "native_cpp_recorded_godot_rendering_device_commands" or
-			native_record.get("shader_source") != "native_build_embedded_compiled_spirv" or
-			int(native_record.get("seed", -1)) != 37 or
-			int(native_record.get("local_invocations", -1)) != EXPECTED_ELEMENTS or
-			native_record.has("owned_rids") or
+			int(witness.get("image_allocation_requirement_bytes", 0)) < EXPECTED_ELEMENTS * 4 or \
+			native_record.get("native_execution") != "native_cpp_recorded_godot_rendering_device_commands" or \
+			native_record.get("shader_source") != "native_build_embedded_compiled_spirv" or \
+			int(native_record.get("seed", -1)) != 37 or \
+			int(native_record.get("local_invocations", -1)) != EXPECTED_ELEMENTS or \
+			native_record.has("owned_rids") or \
 			native_record.get("queue_submission_owner") != "godot_rendering_device":
 		_fail("Native VkDevice/VkImage identity or actual GPU readback was unavailable")
 		return

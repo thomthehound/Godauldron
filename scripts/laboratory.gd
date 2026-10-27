@@ -2013,8 +2013,9 @@ func _select_experiment(index: int) -> void:
 	_update_playback_ui()
 	_bind_inspection()
 	_apply_graphics()
-	_refresh_provider_controls()
-	_status.text = String(_manifest.get("description", _manifest["display_name"]))
+	var provider_valid: bool = _refresh_provider_controls()
+	if provider_valid:
+		_status.text = String(_manifest.get("description", _manifest["display_name"]))
 	_discover_campaigns()
 	_log_event("info", "experiment", "selected", String(_manifest.get("display_name", "Experiment selected")),
 		{"experiment_id": String(_manifest["id"])})
@@ -2067,6 +2068,10 @@ func _refresh_provider_controls() -> bool:
 	_clear_provider_controls()
 	var read: Dictionary = ProviderControls.read(_active_scene, _rendering_method)
 	if not read["ok"]:
+		var error := Label.new()
+		error.text = "Provider settings unavailable: " + String(read["error"])
+		error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_provider_panel.add_child(error)
 		_status.text = "Provider setting contract rejected: " + String(read["error"])
 		return false
 	_provider_specs = read["controls"]

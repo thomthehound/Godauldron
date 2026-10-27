@@ -3,6 +3,7 @@ extends RefCounted
 ## GPU completion and rendering time are NOT measured here.
 
 const Observability = preload("res://scripts/performance_observability.gd")
+const ProviderTimeline = preload("res://scripts/provider_gpu_timeline.gd")
 
 enum Phase { IDLE, WARMUP, SAMPLE, COMPLETED, CANCELLED }
 
@@ -18,6 +19,7 @@ var sample_cpu_usec_total: int = 0
 var last_step_cpu_usec: int = 0
 var last_step_phase: String = ""
 var host_observations: Dictionary = {}
+var sample_step_submissions: Array[Dictionary] = []
 var _invalid_reason: String = ""
 
 var _scene: Node = null
@@ -78,10 +80,21 @@ func advance() -> void:
 	var was_warmup: bool = phase == Phase.WARMUP
 	last_step_phase = "warmup" if was_warmup else "sample"
 	var began: int = Time.get_ticks_usec()
+	var host_frame: int = Engine.get_frames_drawn() if not was_warmup else -1
 	if _scene.has_method("godauldron_step"):
 		_scene.call("godauldron_step", _fixed_step_seconds)
-	var elapsed: int = Time.get_ticks_usec() - began
+	var ended: int = Time.get_ticks_usec()
+	var elapsed: int = ended - began
 	last_step_cpu_usec = elapsed
+	if not was_warmup:
+		# Submission-side correlation only: one rendered frame may encompass
+		# several fixed steps, and dispatch need not execute on the GPU here.
+		sample_step_submissions.append({
+			"step_index": sample_steps_completed,
+			"engine_frames_drawn_at_callback": host_frame,
+			"host_callback_begin_usec": began,
+			"host_callback_end_usec": ended
+		})
 	if was_warmup:
 		warmup_cpu_usec_total += elapsed
 		warmup_steps_completed += 1
@@ -115,11 +128,18 @@ func make_report(experiment_id: String) -> Dictionary:
 		if typeof(reported) == TYPE_DICTIONARY:
 			metrics = reported.duplicate(true)
 	var gpu_timing: Dictionary = {"available": false, "reason": "run_not_completed"}
+	var gpu_timeline: Dictionary = ProviderTimeline.unavailable("run_not_completed")
 	if phase == Phase.COMPLETED:
 		gpu_timing = Observability.resolved_gpu_report(null)
 		if _scene != null and _scene.has_method("godauldron_resolved_gpu_timings"):
 			# Evaluated only after sampling; never charged to host callback timing.
 			gpu_timing = Observability.resolved_gpu_report(_scene.call("godauldron_resolved_gpu_timings"))
+		gpu_timeline = ProviderTimeline.resolve(null, sample_steps_completed)
+		if _scene != null and _scene.has_method("godauldron_resolved_gpu_timeline"):
+			# One-time, post-completion resolution. The provider must have already
+			# synchronized its declared native intervals.
+			gpu_timeline = ProviderTimeline.resolve(
+				_scene.call("godauldron_resolved_gpu_timeline"), sample_steps_completed)
 	return {
 		"format_version": 1,
 		"experiment_id": experiment_id,
@@ -141,6 +161,13 @@ func make_report(experiment_id: String) -> Dictionary:
 		"host_observability": host_observations.duplicate(true),
 		"invalid_reason": _invalid_reason,
 		"provider_gpu_timing": gpu_timing,
+		"provider_gpu_timeline": gpu_timeline,
+		"sample_step_submission_correlation": {
+			"source": "host_godauldron_step_callback_and_Engine_frames_drawn",
+			"gpu_completion_relation": "not_verified",
+			"renderer_frame_relation": "host_frame_at_callback_not_resolved_gpu_render_frame",
+			"steps": sample_step_submissions.duplicate(true)
+		},
 		"engine": Engine.get_version_info(),
 		"os": OS.get_name(),
 		"timestamp": Time.get_datetime_string_from_system()

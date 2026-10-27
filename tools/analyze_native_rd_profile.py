@@ -8,7 +8,10 @@ import math
 import statistics
 from pathlib import Path
 
-from tools.validate_native_rd_profile import validate
+if __package__:
+    from .validate_native_rd_profile import validate
+else:
+    from validate_native_rd_profile import validate
 
 
 def _percentile(values: list[float], fraction: float) -> float:

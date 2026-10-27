@@ -709,7 +709,8 @@ void NativeGpuProbe3D::godauldron_step(double) {
 Dictionary NativeGpuProbe3D::godauldron_pipeline_diagnostics() const {
     Dictionary entry;
     entry["name"] = "native_vulkan_compute";
-    entry["shader_origin"] = "native_compiled_embedded_spirv";
+    entry["shader_origin"] = accepted_shader_bytes_.is_empty() ?
+        "native_compiled_embedded_spirv" : "provider_reloaded_compiled_spirv";
     entry["phase"] = ready_ ? "prepared" : (pipeline_prepare_failures_ ? "failed" : "new");
     entry["prepare_attempts"] = pipeline_prepare_attempts_;
     entry["prepare_failures"] = pipeline_prepare_failures_;

@@ -4,9 +4,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-find_package(Vulkan REQUIRED)
+option(GODAULDRON_RD_ONLY "Build backend-neutral native RD workload without Vulkan diagnostics" OFF)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 
 include(FetchContent)
 # A released, backwards-compatible C++ binding target; no copied Godot source.
@@ -19,6 +18,29 @@ FetchContent_MakeAvailable(godot_cpp)
 
 set(GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GENERATED_DIR}")
+
+if(GODAULDRON_RD_ONLY)
+  if(NOT EXISTS "${GENERATED_DIR}/persistent_compute_spirv.h")
+    message(FATAL_ERROR "RD-only build needs compiled persistent_compute_spirv.h from the Linux shader build")
+  endif()
+  add_library(godauldron_native_rd_workload SHARED
+    native_rd_workload.cpp native_rd_workload.h register_rd_types.cpp
+    "${GENERATED_DIR}/persistent_compute_spirv.h")
+  target_include_directories(godauldron_native_rd_workload PRIVATE "${GENERATED_DIR}")
+  target_compile_features(godauldron_native_rd_workload PRIVATE cxx_std_23)
+  target_link_libraries(godauldron_native_rd_workload PRIVATE godot-cpp)
+  set_target_properties(godauldron_native_rd_workload PROPERTIES
+    OUTPUT_NAME "godauldron_native_rd_workload")
+  if(MSVC)
+    target_compile_options(godauldron_native_rd_workload PRIVATE /W4)
+  else()
+    target_compile_options(godauldron_native_rd_workload PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+  return()
+endif()
+
+find_package(Vulkan REQUIRED)
+find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 add_custom_command(
   OUTPUT "${GENERATED_DIR}/compute.spv"
   COMMAND "${GLSLANG_VALIDATOR}" -V -S comp

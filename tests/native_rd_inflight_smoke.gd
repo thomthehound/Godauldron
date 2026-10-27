@@ -102,6 +102,7 @@ func _run() -> void:
 
 	var seen: Dictionary = {}
 	var reused := false
+	var fourth_submitted := false
 	for frame in range(360):
 		await process_frame
 		var status: Dictionary = effect.call("status")
@@ -119,11 +120,12 @@ func _run() -> void:
 			seen[id] = true
 			if id == 3:
 				reused = int(result.get("completion", {}).get("completed_batches", 0)) > 					int(REQUESTS[id]["repetitions"])
-		if seen.size() >= CAPACITY and not seen.has(3):
+		if seen.size() >= CAPACITY and not fourth_submitted:
 			if int(effect.call("submit_series", PackedInt32Array(
 					REQUESTS[3]["seeds"]), REQUESTS[3]["repetitions"])) != 3:
 				_fail("Ring failed to reuse completed GPU resources")
 				return
+			fourth_submitted = true
 		if seen.size() == REQUESTS.size():
 			break
 	if seen.size() != REQUESTS.size():

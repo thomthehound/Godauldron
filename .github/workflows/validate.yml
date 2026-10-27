@@ -118,6 +118,8 @@ jobs:
         run: .\.engine\godot_console.exe --headless --path . --script res://tests/observability_smoke.gd
 
   native-vulkan-device:
+    # One native build per PR revision; avoid rebuilding bindings on push and PR.
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -139,9 +141,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python tools/fetch_preview.py --major 4
+      - name: Restore C++ bindings build cache
+        uses: actions/cache@v4
+        with:
+          path: .native-build
+          key: native-godotcpp-${{ runner.os }}-v10-godot47-${{ hashFiles('native/vulkan_provider/CMakeLists.txt') }}
+          restore-keys: native-godotcpp-${{ runner.os }}-v10-godot47-
       - name: Compile independent C++23 native Vulkan extension
         run: |
-          cmake -S native/vulkan_provider -B .native-build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S native/vulkan_provider -B .native-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O1 -DNDEBUG"
           cmake --build .native-build --parallel 3
           LIB="$(find .native-build -type f -name 'libgodauldron_native_vulkan_provider.so' -print -quit)"
           test -n "$LIB"

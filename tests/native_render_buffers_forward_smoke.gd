@@ -3,6 +3,7 @@ extends SceneTree
 
 const Probe = preload("res://scripts/render_buffer_probe.gd")
 const InspectionWindow = preload("res://scripts/render_buffer_inspection_window.gd")
+const Effect = preload("res://scripts/render_buffer_probe_effect.gd")
 
 
 func _initialize() -> void:
@@ -43,7 +44,11 @@ func _verify() -> void:
 	var original := Compositor.new()
 	var preserved: CompositorEffect = preload("res://scripts/hdr_scene_color_effect.gd").new()
 	preserved.enabled = false
-	var existing: Array[CompositorEffect] = [preserved]
+	# Keep the native velocity prepass requested across multiple frames.
+	# That gives the renderer a genuine previous-frame transform baseline.
+	var velocity_keeper: CompositorEffect = Effect.new()
+	velocity_keeper.needs_motion_vectors = true
+	var existing: Array[CompositorEffect] = [preserved, velocity_keeper]
 	original.compositor_effects = existing
 	world.compositor = original
 	scene.add_child(world)
@@ -79,8 +84,9 @@ func _verify() -> void:
 			return
 		var viewer: Window = host.get("_buffer_window")
 		if not viewer.visible or world.compositor != original or \
-				camera.compositor != null or original.compositor_effects.size() != 1 or \
-				original.compositor_effects[0] != preserved:
+				camera.compositor != null or original.compositor_effects.size() != 2 or \
+				original.compositor_effects[0] != preserved or \
+				original.compositor_effects[1] != velocity_keeper:
 			_fail("Renderer buffer capture failed or altered inherited compositor: %s" % [
 				(host.get("_status") as Label).text])
 			return
@@ -90,7 +96,7 @@ func _verify() -> void:
 				source.get("source") != "godot_render_scene_buffers_rd" or \
 				source.get("mode") != mode or \
 				source.get("existing_compositor_source") != "scene_world_environment" or \
-				int(source.get("preserved_effect_count", -1)) != 1:
+				int(source.get("preserved_effect_count", -1)) != 2:
 			_fail("Renderer %s buffer was not sourced from native floating GPU pixels" % mode)
 			return
 		var center: Color = pixels.get_pixel(pixels.get_width() / 2, pixels.get_height() / 2)
@@ -114,6 +120,40 @@ func _verify() -> void:
 			_fail("Native float samples could not be visualized separately: " + mode)
 			return
 		viewer.hide()
+	# Verify that the sampled velocity buffer actually reflects movement,
+	# rather than accepting a permanently zero-filled attachment as parity.
+	box.position.x = 0.4
+	var velocity_choice := -1
+	for i in range(mode_selector.item_count):
+		if mode_selector.get_item_metadata(i) == "velocity":
+			velocity_choice = i
+			break
+	mode_selector.select(velocity_choice)
+	host.call("_inspect_native_buffer")
+	if not bool(host.get("_capture_pending")):
+		_fail("Moving-object velocity sample could not be armed")
+		return
+	var moving_frames := 0
+	while bool(host.get("_capture_pending")) and moving_frames < 210:
+		moving_frames += 1
+		await process_frame
+	if bool(host.get("_capture_pending")):
+		_fail("Moving-object velocity sample timed out")
+		return
+	var moving_pixels: Image = (host.get("_buffer_window") as Window).get("_raw")
+	if moving_pixels == null or moving_pixels.is_empty():
+		_fail("No moving-object velocity pixels were returned")
+		return
+	var moving_center: Color = moving_pixels.get_pixel(
+		moving_pixels.get_width() / 2, moving_pixels.get_height() / 2)
+	if not is_finite(moving_center.r) or not is_finite(moving_center.g) or \
+			absf(moving_center.r) + absf(moving_center.g) < 0.00001:
+		_fail("Native velocity buffer did not reflect an actual moved mesh: " + str(moving_center))
+		return
+	sampled["moving_velocity"] = [moving_center.r, moving_center.g]
+	if camera.compositor != null or world.compositor != original:
+		_fail("Moving-object readback leaked temporary compositor ownership")
+		return
 	if Probe.capability("gl_compatibility", viewport, camera, "depth")["available"] or \
 			Probe.capability("mobile", viewport, camera, "normal_roughness")["available"]:
 		_fail("Unsupported native renderer/source capability was advertised")

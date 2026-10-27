@@ -46,6 +46,10 @@ The UI exposes separate nonnegative warmup and positive measurement step counts;
 
 The first implementation runs these callbacks on the Godot main thread and keeps the experiment scene loaded until a different experiment is selected. An experiment may perform its actual work asynchronously; its reported metrics must clearly distinguish submitted work from completed work.
 
+## Provider shader and pipeline lifecycle
+
+Providers may expose `godauldron_pipeline_diagnostics()` with bounded, validated native shader creation, pipeline creation, descriptor creation, bound-use counters and host API-call timings. The laboratory reads this explicitly or once after a run, never in measured callbacks. Actual native Vulkan and engine-owned RD workloads retain shader/pipeline ownership; the host does not reload shaders or infer driver cache hits from bind counts. See [Shader/pipeline diagnostics](SHADER_PIPELINE_DIAGNOSTICS.md).
+
 ## Provider-owned runtime controls
 
 An active scene may implement `godauldron_runtime_controls()` and `godauldron_set_runtime_control(id, value)` to expose typed **effective** settings for live inspection. These are separate from manifest setup parameters. The host validates finite bounds, choices, renderer availability and edit/restart semantics, forwards accepted changes to the provider, and rereads actual state. The host does not mirror native resource builders. All edits are refused during measured runs, campaigns, captures and analysis; before/after descriptor snapshots are taken outside measured callback timing and recorded in reports. See [Provider runtime controls](PROVIDER_RUNTIME_CONTROLS.md).

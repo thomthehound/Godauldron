@@ -4,6 +4,7 @@ extends SceneTree
 
 const NativePackage = preload("res://scripts/native_experiment_package.gd")
 const Runner = preload("res://scripts/experiment_run.gd")
+const PipelineDiagnostics = preload("res://scripts/provider_pipeline_diagnostics.gd")
 const SAMPLING_STEPS := 6
 
 
@@ -43,6 +44,22 @@ func _verify() -> void:
 		return
 	if run.sample_step_submissions.size() != SAMPLING_STEPS:
 		_fail("Native submission correlation was not recorded")
+		return
+	var pipeline_setup: Dictionary = PipelineDiagnostics.read(scene)
+	if not pipeline_setup.get("available", false) or pipeline_setup["pipelines"].size() != 1:
+		_fail("Actual independent native Vulkan pipeline lifecycle not available: " + str(pipeline_setup))
+		return
+	var pipe: Dictionary = pipeline_setup["pipelines"][0]
+	if pipe.get("shader_origin") != "native_compiled_embedded_spirv" or \
+			int(pipe.get("prepare_attempts", -1)) != 1 or \
+			int(pipe.get("prepare_failures", -1)) != 0 or \
+			int(pipe.get("shader_creations", -1)) != 1 or \
+			int(pipe.get("pipeline_creations", -1)) != 1 or \
+			int(pipe.get("descriptor_creations", -1)) != 1 or \
+			int(pipe.get("pipeline_binds", -1)) != SAMPLING_STEPS or \
+			pipe.get("cache_hit_observation") != "not_reported" or \
+			int(pipe.get("prepare_total_host_usec", -1)) < 0:
+		_fail("Native Vulkan pipeline creation/reuse evidence is inconsistent: " + str(pipe))
 		return
 	var report: Dictionary = run.make_report("org.godauldron.native-vulkan-device-probe")
 	var evidence: Dictionary = report.get("provider_gpu_timeline", {})

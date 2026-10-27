@@ -135,6 +135,28 @@ func _run() -> void:
 				print("Verified actual software DXGI adapter: ", dxgi)
 
 		total_dispatches += seeds.size()
+		# Timed *host API calls*, never mistaken for GPU execution or
+		# undocumented driver pipeline-cache hits.
+		if int(completed.get("prepare_attempts", -1)) != 1 or \
+				int(completed.get("prepare_failures", -1)) != 0 or \
+				int(completed.get("shader_creations", -1)) != 1 or \
+				int(completed.get("pipeline_binds", -1)) != batch_index + 1 or \
+				completed.get("cache_hit_observation") != "not_exposed_by_rendering_device" or \
+				completed.get("timing_source") != "steady_host_wall_microseconds" or \
+				not String(completed.get("timing_scope", "")).contains("excludes GPU execution") or \
+				completed.get("last_prepare_error") != "":
+			_fail("Native shader/pipeline creation or reuse provenance invalid: " + str(completed))
+			return
+		var stage_total := 0
+		for stage_key in ["shader_create_host_usec", "pipeline_create_host_usec",
+				"descriptor_create_host_usec"]:
+			if int(completed.get(stage_key, -1)) < 0:
+				_fail("Native pipeline stage timing missing: " + stage_key)
+				return
+			stage_total += int(completed[stage_key])
+		if int(completed.get("prepare_total_host_usec", -1)) < stage_total:
+			_fail("Native RD preparation duration shorter than its timed API calls")
+			return
 		if not result.get("ok", false) or bytes.size() != ELEMENTS * 4 or \
 				not result.get("rejected_early_release", false) or \
 				recorded.get("execution") != "native_cpp_persistent_shader_and_dispatch" or \
@@ -198,6 +220,8 @@ func _run() -> void:
 	if not second_result.get("ok", false) or second_bytes.size() != 256 or \
 			int(second_result.get("record", {}).get("resident_series_length", -1)) != 3 or \
 			int(second_result.get("record", {}).get("recorded_dispatches", -1)) != 6 or \
+			int(second_completion.get("shader_creations", -1)) != 1 or \
+			int(second_completion.get("pipeline_binds", -1)) != 1 or \
 			int(second_completion.get("pipeline_creations", -1)) != 1 or \
 			int(second_completion.get("descriptor_creations", -1)) != 1 or \
 			int(second_completion.get("pending_batches", -1)) != 0 or \

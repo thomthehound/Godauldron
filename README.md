@@ -4,7 +4,7 @@ Godauldron is a general-purpose technology experimentation, integration, demonst
 
 Godauldron is not coupled to any particular SDK, graphics vendor, compute backend, or technical domain. Subjects may include render passes, shaders, simulation, physics, hair, animation, upscaling, image processing, rendering middleware, GPU libraries, and unrelated future technologies.
 
-For an evidence-based comparison with AMD FidelityFX Cauldron, including deliberately delegated engine capabilities and open parity gates, see [Cauldron coverage](docs/CAULDRON_PARITY.md).
+For an evidence-based comparison with AMD FidelityFX Cauldron, including deliberately delegated engine capabilities and open parity gates, see [Cauldron coverage](docs/CAULDRON_PARITY.md). [Shader/pipeline lifecycle diagnostics](docs/SHADER_PIPELINE_DIAGNOSTICS.md) distinguishes measured host setup calls, persistent bind reuse, failures and unavailable driver-cache evidence.
 
 ## Current implementation
 

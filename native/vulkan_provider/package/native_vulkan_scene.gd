@@ -39,6 +39,12 @@ func godauldron_resolved_gpu_timeline() -> Dictionary:
 	return _native.call("godauldron_resolved_gpu_timeline")
 
 
+func godauldron_pipeline_diagnostics() -> Dictionary:
+	if _native == null:
+		return {"provider": "native-vulkan-queue-probe", "backend": "Vulkan", "pipelines": []}
+	return _native.call("godauldron_pipeline_diagnostics")
+
+
 func godauldron_metrics() -> Dictionary:
 	if _native == null:
 		return {}

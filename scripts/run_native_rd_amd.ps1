@@ -6,6 +6,7 @@ param(
     [int]$Warmup = 3,
     [int]$Samples = 12,
     [int]$Passes = 8,
+    [int]$ResidentBatches = 1,
     [string]$Output = "native_rd_amd_profile.json",
     [string]$Baseline = ""
 )
@@ -38,7 +39,7 @@ try {
     $gpuArgs = @("--path", ".", "--rendering-method", "forward_plus", "--rendering-driver", "d3d12",
         "--script", "res://tests/native_rd_hardware_profile.gd", "--", "--mode", "physical_amd",
         "--width", "$Width", "--height", "$Height", "--warmup", "$Warmup", "--samples", "$Samples",
-        "--passes", "$Passes", "--output", "$destination")
+        "--passes", "$Passes", "--resident_batches", "$ResidentBatches", "--output", "$destination")
     & $godot @gpuArgs
     if ($LASTEXITCODE -ne 0) { throw "Physical AMD native GPU acceptance failed" }
     python tools/validate_native_rd_profile.py $destination --mode physical_amd

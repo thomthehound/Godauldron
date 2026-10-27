@@ -27,11 +27,16 @@ def distribution(values: list[float], indices: list[int] | None = None) -> dict:
         return {"available": False, "samples": 0}
     median = _percentile(values, 0.5)
     q1, q3 = _percentile(values, 0.25), _percentile(values, 0.75)
-    fence = q3 + 1.5 * (q3 - q1)
-    # Tukey fences are descriptive and only used with sufficient observations.
-    outliers = ([indices[i] if indices is not None else i
-                 for i, value in enumerate(values) if value > fence]
-                if len(values) >= 8 else [])
+    low_fence = q1 - 1.5 * (q3 - q1)
+    high_fence = q3 + 1.5 * (q3 - q1)
+    # Preserve original batch IDs. A low tail matters when short GPU
+    # windows occur amid predominantly longer measurements.
+    low_outliers = ([indices[i] if indices is not None else i
+                     for i, value in enumerate(values) if value < low_fence]
+                    if len(values) >= 8 else [])
+    high_outliers = ([indices[i] if indices is not None else i
+                      for i, value in enumerate(values) if value > high_fence]
+                     if len(values) >= 8 else [])
     mid = len(values) // 2
     return {
         "available": True,
@@ -46,18 +51,69 @@ def distribution(values: list[float], indices: list[int] | None = None) -> dict:
         "median_absolute_deviation_usec": statistics.median(abs(v - median) for v in values),
         "coefficient_of_variation": statistics.pstdev(values) / statistics.fmean(values),
         "p95_to_p50_ratio": _percentile(values, 0.95) / median,
-        "upper_tukey_fence_usec": fence if len(values) >= 8 else None,
-        "high_outlier_batch_indices": outliers,
+        "lower_tukey_fence_usec": low_fence if len(values) >= 8 else None,
+        "upper_tukey_fence_usec": high_fence if len(values) >= 8 else None,
+        "low_outlier_batch_indices": low_outliers,
+        "high_outlier_batch_indices": high_outliers,
         "first_half_p50_usec": _percentile(values[:mid], 0.5) if mid >= 4 else None,
         "second_half_p50_usec": _percentile(values[mid:], 0.5) if len(values) - mid >= 4 else None,
     }
 
 
-def rate_distribution(values: list[float]) -> dict:
-    measured = distribution(values)
+def rate_distribution(values: list[float], indices: list[int]) -> dict:
+    measured = distribution(values, indices)
     return {
         (key.removesuffix("_usec") + "_per_second" if key.endswith("_usec") else key):
             value for key, value in measured.items()
+    }
+
+
+
+def marker_cadence(samples: list[dict], passes: int, pixel_dispatches: int) -> dict:
+    """Device-clock batch cadence, not isolated GPU compute or device occupancy."""
+    if len(samples) < 2 or any(
+        type(record.get("gpu_start_ns")) is not int or
+        type(record.get("gpu_end_ns")) is not int or
+        type(record.get("device_frame")) is not int
+        for record in samples
+    ):
+        return {"available": False, "reason": "requires_two_or_more_complete_device_marker_pairs"}
+
+    first = samples[0]["gpu_start_ns"]
+    final = samples[-1]["gpu_end_ns"]
+    elapsed_ns = final - first
+    start_gaps_usec = []
+    frame_gaps = []
+    for previous, current in zip(samples, samples[1:]):
+        gap_ns = current["gpu_start_ns"] - previous["gpu_start_ns"]
+        frame_gap = current["device_frame"] - previous["device_frame"]
+        if gap_ns <= 0 or frame_gap < 0:
+            raise ValueError("Native GPU timestamp cadence is not monotonic")
+        start_gaps_usec.append(gap_ns / 1000.0)
+        frame_gaps.append(frame_gap)
+    if elapsed_ns <= 0:
+        raise ValueError("Native GPU profiling elapsed device time is not positive")
+
+    active_window_ns = sum(record["gpu_end_ns"] - record["gpu_start_ns"]
+                           for record in samples)
+    count = len(samples)
+    return {
+        "available": True,
+        "clock_domain": "same-device captured GPU timestamp values",
+        "scope": "first measured marker start through final measured marker end; includes inter-batch idle, engine frame scheduling and other GPU activity",
+        "measured_elapsed_usec": elapsed_ns / 1000.0,
+        "start_to_start_usec": distribution(start_gaps_usec),
+        "device_frame_delta": {
+            "minimum": min(frame_gaps),
+            "median": statistics.median(frame_gaps),
+            "maximum": max(frame_gaps),
+            "all_equal": len(set(frame_gaps)) == 1,
+        },
+        "completed_batch_rate_per_second": count * 1e9 / elapsed_ns,
+        "dispatch_rate_per_second": count * passes * 1e9 / elapsed_ns,
+        "nominal_pixel_dispatch_rate_per_second": count * pixel_dispatches * 1e9 / elapsed_ns,
+        "marker_window_fraction_of_observed_elapsed": active_window_ns / elapsed_ns,
+        "fraction_scope": "fraction of measured interval covered by native dispatch-list marker windows; NOT total GPU utilization",
     }
 
 
@@ -68,14 +124,15 @@ def analyze(report: dict) -> dict:
     timed = [r for r in samples if r.get("gpu_compute_window_usec") is not None]
     gpu_values = [float(r["gpu_compute_window_usec"]) for r in timed]
     pixel_dispatches = settings["width"] * settings["height"] * settings["passes"]
-    gpu = distribution(gpu_values, [r["batch_index"] for r in timed])
+    indices = [r["batch_index"] for r in timed]
+    gpu = distribution(gpu_values, indices)
     # Normalized counts are rates over the marker window, not bandwidth,
     # device occupancy, standalone kernel time or complete frame throughput.
     gpu["pixel_dispatches_per_second"] = (
-        rate_distribution([pixel_dispatches * 1_000_000.0 / t for t in gpu_values])
+        rate_distribution([pixel_dispatches * 1_000_000.0 / t for t in gpu_values], indices)
         if gpu_values else {"available": False, "samples": 0})
     gpu["dispatches_per_second"] = (
-        rate_distribution([settings["passes"] * 1_000_000.0 / t for t in gpu_values])
+        rate_distribution([settings["passes"] * 1_000_000.0 / t for t in gpu_values], indices)
         if gpu_values else {"available": False, "samples": 0})
     gpu["rate_scope"] = (
         "nominal pixel-dispatch and dispatch rates over the Godot RD timestamp window; "
@@ -93,13 +150,20 @@ def analyze(report: dict) -> dict:
             "warmup_batches": settings["warmup"], "measured_batches": settings["samples"],
         },
         "gpu_compute_window": gpu,
+        "gpu_batch_cadence": marker_cadence(
+            timed, settings["passes"], pixel_dispatches)
+            if len(timed) == len(samples) else {
+                "available": False, "reason": "incomplete_measured_device_markers"},
         "host_request_to_readback": distribution(
-            [float(r["host_request_to_readback_usec"]) for r in samples]),
+            [float(r["host_request_to_readback_usec"]) for r in samples],
+            [r["batch_index"] for r in samples]),
         "host_validation": distribution(
-            [float(r["host_validation_usec"]) for r in samples])
+            [float(r["host_validation_usec"]) for r in samples],
+            [r["batch_index"] for r in samples])
             if report["schema_version"] >= 2 else {"available": False, "samples": 0},
         "host_request_to_validated": distribution(
-            [float(r["host_request_to_validated_usec"]) for r in samples])
+            [float(r["host_request_to_validated_usec"]) for r in samples],
+            [r["batch_index"] for r in samples])
             if report["schema_version"] >= 2 else {"available": False, "samples": 0},
         "resource_lifecycle": report.get("resource_lifecycle"),
         "gpu_timestamp_rejections": report["gpu_timing"].get("rejected_timestamp_pairs", 0),
@@ -179,7 +243,13 @@ def main() -> None:
     host = result["host_request_to_readback"]
     print(f"Device GPU window: p50={gpu.get('p50_usec')} us; "
           f"p95={gpu.get('p95_usec')} us; samples={gpu['samples']}")
-    print(f"High GPU outlier batch indices: {gpu.get('high_outlier_batch_indices', [])}")
+    print(f"GPU low/high outlier batch indices: {gpu.get('low_outlier_batch_indices', [])} / "
+          f"{gpu.get('high_outlier_batch_indices', [])}")
+    cadence = result["gpu_batch_cadence"]
+    if cadence["available"]:
+        print(f"Device batch start cadence: p50={cadence['start_to_start_usec']['p50_usec']} us; "
+              f"elapsed dispatch rate={cadence['dispatch_rate_per_second']:.2f}/s "
+              f"(including inter-batch intervals)")
     print(f"Host request-to-readback: p50={host['p50_usec']} us; "
           f"p95={host['p95_usec']} us; NOT GPU execution time")
     if args.baseline:

@@ -6,6 +6,10 @@ var _loaded: Node3D = null
 var _asset_path: String = ""
 var _load_error: String = ""
 var _camera: Camera3D
+var _sun: DirectionalLight3D
+var _fill: OmniLight3D
+var _world: WorldEnvironment
+var _background_theme := "midnight"
 
 
 func _ready() -> void:
@@ -16,26 +20,26 @@ func _ready() -> void:
 	_camera.look_at(Vector3(0, 0.7, 0), Vector3.UP)
 	_camera.current = true
 
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-50, -25, 0)
-	sun.light_energy = 1.0
-	add_child(sun)
+	_sun = DirectionalLight3D.new()
+	_sun.rotation_degrees = Vector3(-50, -25, 0)
+	_sun.light_energy = 1.0
+	add_child(_sun)
 
-	var fill := OmniLight3D.new()
-	fill.position = Vector3(-5, 5, 4)
-	fill.light_energy = 1.2
-	fill.omni_range = 28.0
-	add_child(fill)
+	_fill = OmniLight3D.new()
+	_fill.position = Vector3(-5, 5, 4)
+	_fill.light_energy = 1.2
+	_fill.omni_range = 28.0
+	add_child(_fill)
 
-	var world := WorldEnvironment.new()
+	_world = WorldEnvironment.new()
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color(0.045, 0.055, 0.075)
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color(0.62, 0.69, 0.78)
 	environment.ambient_light_energy = 0.5
-	world.environment = environment
-	add_child(world)
+	_world.environment = environment
+	add_child(_world)
 
 
 func _load_asset(path: String, force_reload: bool) -> void:
@@ -116,3 +120,54 @@ func godauldron_metrics() -> Dictionary:
 		"scene_node_count": node_count,
 		"scene_mesh_count": mesh_count
 	}
+
+
+# These are actual Godot lights and authored environment state. The provider
+# remains responsible for changing its scene and confirming effective values.
+func godauldron_runtime_controls() -> Array[Dictionary]:
+	return [
+		{"id": "sun_energy", "label": "Sun energy", "type": "float",
+			"mode": "live", "unit": "relative",
+			"min": 0.0, "max": 3.0, "step": 0.1, "value": _sun.light_energy},
+		{"id": "fill_energy", "label": "Fill energy", "type": "float",
+			"mode": "live", "unit": "relative",
+			"min": 0.0, "max": 3.0, "step": 0.1, "value": _fill.light_energy},
+		{"id": "sun_shadows", "label": "Sun shadows", "type": "bool",
+			"mode": "live", "value": _sun.shadow_enabled},
+		{"id": "backdrop", "label": "Backdrop", "type": "choice",
+			"mode": "live", "value": _background_theme,
+			"options": [
+				{"label": "Midnight", "value": "midnight"},
+				{"label": "Neutral gray", "value": "neutral"},
+				{"label": "Black", "value": "black"}]}
+	]
+
+
+func godauldron_set_runtime_control(id: String, value: Variant) -> Dictionary:
+	match id:
+		"sun_energy", "fill_energy":
+			if typeof(value) != TYPE_FLOAT or value < 0.0 or value > 3.0 or \
+					absf(value * 10.0 - roundf(value * 10.0)) > 0.0001:
+				return {"ok": false, "error": "Invalid light energy"}
+			if id == "sun_energy":
+				_sun.light_energy = value
+			else:
+				_fill.light_energy = value
+		"sun_shadows":
+			if typeof(value) != TYPE_BOOL:
+				return {"ok": false, "error": "Expected boolean shadow state"}
+			_sun.shadow_enabled = value
+		"backdrop":
+			if value not in ["midnight", "neutral", "black"]:
+				return {"ok": false, "error": "Unrecognized backdrop"}
+			_background_theme = value
+			match _background_theme:
+				"midnight":
+					_world.environment.background_color = Color(0.045, 0.055, 0.075)
+				"neutral":
+					_world.environment.background_color = Color(0.28, 0.28, 0.28)
+				"black":
+					_world.environment.background_color = Color.BLACK
+		_:
+			return {"ok": false, "error": "Unknown provider control"}
+	return {"ok": true}

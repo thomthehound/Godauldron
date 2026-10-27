@@ -54,6 +54,9 @@ This saves a **reproducible configuration**, not a simulation checkpoint. Solver
 
 ## Native Vulkan GPU diagnostic
 
+A separate [same-device Vulkan image resource diagnostic](docs/GODOT_NATIVE_VULKAN_RESOURCE_INTEROP.md) now exercises the native-extension path to a **Godot-owned** VkDevice and VkBuffer: a C++ GDExtension validates borrowed Vulkan image handles on the renderer thread, while Godot's command graph runs a genuine compute shader against that same storage image and verifies asynchronous readback. Godot retains queue/synchronization ownership. This is resource interoperability, **not** native command submission, producer-native compute graph integration, or validated cross-queue sharing.
+
+
 Godauldron includes an optional [C++23 native Vulkan provider diagnostic](docs/NATIVE_VULKAN_PROVIDER.md) for validating the end-to-end `godauldron_resolved_gpu_timeline()` interface. A dedicated Linux software-Vulkan CI job builds and installs a real GDExtension, dispatches a compute shader, copies GPU buffer data, resolves native device timestamp queries, checks completion fences and verifies the copied results. Vulkan validation layers gate GPU command correctness. The fixture owns its own device and queue: it establishes native provider execution, **not** shared-resource interoperability with Godot, hardware benchmark performance or production SDK integration. The extension is not installed in ordinary project checkouts.
 
 ## External native experiments / LoxFX

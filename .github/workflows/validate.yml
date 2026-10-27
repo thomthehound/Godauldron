@@ -2,8 +2,16 @@ name: Validate laboratory
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+
+# Feature branches validate via pull_request or manual dispatch, not a
+# redundant push workflow. Only one run per branch consumes build capacity.
+# Pushes to main always retain complete, uncancelled CI.
+concurrency:
+  group: validate-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   workflow-lint:
@@ -118,8 +126,7 @@ jobs:
         run: .\.engine\godot_console.exe --headless --path . --script res://tests/observability_smoke.gd
 
   native-vulkan-device:
-    # One native build per PR revision; avoid rebuilding bindings on push and PR.
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    # Executed on PRs, manual dispatch and main. Never silently skipped.
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -168,6 +175,14 @@ jobs:
           fi
       - name: Verify real native Vulkan compute/copy, GPU queries and fence completion alongside Forward+
         run: timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_provider_smoke.gd
+      - name: Verify native GDExtension on the actual Godot VkDevice and GPU storage buffer
+        run: |
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 150s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_vulkan_shared_device_smoke.gd 2>&1 | tee native-godot-shared-device-validation.log
+          if grep -E 'VUID-|Validation Error' native-godot-shared-device-validation.log; then
+            echo "Native shared-device work violated Vulkan validation"
+            exit 1
+          fi
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

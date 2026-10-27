@@ -26,10 +26,62 @@ void NativeGpuProbe3D::_bind_methods() {
                          &NativeGpuProbe3D::godauldron_resolved_gpu_timeline);
     ClassDB::bind_method(D_METHOD("godauldron_metrics"),
                          &NativeGpuProbe3D::godauldron_metrics);
+    ClassDB::bind_method(D_METHOD("inspect_godot_vulkan_image", "device",
+                                 "physical_device", "image", "requested_bytes"),
+                         &NativeGpuProbe3D::inspect_godot_vulkan_image);
 }
 
 NativeGpuProbe3D::~NativeGpuProbe3D() {
     cleanup();
+}
+
+// Read-only Vulkan query of a live Godot-owned VkImage obtained from the
+// public RenderingDevice DRIVER_RESOURCE_TEXTURE path. No queue submission.
+// In current Godot Vulkan, DRIVER_RESOURCE_BUFFER returns an internal
+// BufferInfo pointer rather than a VkBuffer. NEVER reinterpret that as Vulkan.
+Dictionary NativeGpuProbe3D::inspect_godot_vulkan_image(
+        int64_t borrowed_device, int64_t borrowed_physical_device,
+        int64_t borrowed_image, int64_t requested_bytes) const {
+    Dictionary out;
+    out["available"] = false;
+    if (borrowed_device == 0 || borrowed_physical_device == 0 ||
+        borrowed_image == 0 || requested_bytes <= 0 ||
+        requested_bytes > 16 * 1024 * 1024) {
+        out["reason"] = "invalid_engine_native_image_handles_or_size";
+        return out;
+    }
+    VkDevice device = reinterpret_cast<VkDevice>(static_cast<uintptr_t>(borrowed_device));
+    VkPhysicalDevice physical =
+        reinterpret_cast<VkPhysicalDevice>(static_cast<uintptr_t>(borrowed_physical_device));
+    VkImage image = VK_NULL_HANDLE;
+#if VK_USE_64_BIT_PTR_DEFINES
+    image = reinterpret_cast<VkImage>(static_cast<uintptr_t>(borrowed_image));
+#else
+    image = static_cast<VkImage>(borrowed_image);
+#endif
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(physical, &properties);
+    VkMemoryRequirements requirements{};
+    vkGetImageMemoryRequirements(device, image, &requirements);
+    if (requirements.size < static_cast<VkDeviceSize>(requested_bytes) ||
+        requirements.memoryTypeBits == 0 || requirements.alignment == 0) {
+        out["reason"] = "borrowed_image_memory_requirements_invalid";
+        return out;
+    }
+    out["available"] = true;
+    out["reason"] = "";
+    out["backend"] = "Vulkan";
+    out["provider_role"] = "native_extension_read_only_handle_witness";
+    out["resource_owner"] = "godot_global_rendering_device";
+    out["queue_submission_owner"] = "godot_rendering_device";
+    out["device_name"] = String(properties.deviceName);
+    out["vendor_id"] = static_cast<int64_t>(properties.vendorID);
+    out["device_id"] = static_cast<int64_t>(properties.deviceID);
+    out["image_required_bytes"] = requested_bytes;
+    out["image_allocation_requirement_bytes"] =
+        static_cast<int64_t>(requirements.size);
+    out["image_allocation_alignment"] = static_cast<int64_t>(requirements.alignment);
+    return out;
 }
 
 bool NativeGpuProbe3D::fail(std::string message) {

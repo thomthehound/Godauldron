@@ -20,6 +20,12 @@ public:
     void godauldron_step(double dt);
     godot::Dictionary godauldron_resolved_gpu_timeline();
     godot::Dictionary godauldron_metrics() const;
+    // Called ONLY inside an engine RenderingDevice compositor callback.
+    // Read-only Vulkan handle inspection; NEVER submits to Godot's queue.
+    godot::Dictionary inspect_godot_vulkan_image(int64_t borrowed_device,
+                                                   int64_t borrowed_physical_device,
+                                                   int64_t borrowed_image,
+                                                   int64_t requested_bytes) const;
 
 protected:
     static void _bind_methods();

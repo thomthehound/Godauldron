@@ -201,6 +201,14 @@ jobs:
             echo "Native workload reuse violated Vulkan validation"
             exit 1
           fi
+      - name: Verify independent native GPU submissions and concurrent readbacks
+        run: |
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 180s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_rd_inflight_smoke.gd 2>&1 | tee native-inflight-validation.log
+          if grep -E 'VUID-|Validation Error' native-inflight-validation.log; then
+            echo "Native in-flight ring violated Vulkan validation"
+            exit 1
+          fi
 
   windows-d3d12-native-rd:
     runs-on: windows-latest
@@ -260,6 +268,11 @@ jobs:
         run: |
           & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_persistent_workload_smoke.gd
           if ($LASTEXITCODE -ne 0) { throw "D3D12 WARP native compute test failed; never count a fallback renderer as coverage" }
+      - name: Verify distinct D3D12 GPU slots and overlapping asynchronous readbacks
+        shell: pwsh
+        run: |
+          & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_inflight_smoke.gd
+          if ($LASTEXITCODE -ne 0) { throw "D3D12 native RD in-flight ring test failed" }
       - name: Verify on-device profiler collects WARP GPU execution and distinct timing domains
         shell: pwsh
         run: |

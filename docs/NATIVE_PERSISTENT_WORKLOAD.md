@@ -20,6 +20,16 @@ After recording, the adapter is **pending**. No further batch and no release is 
 
 This is a **single GPU-resident dispatch series per readback**, not an independent queue, parallel overlapping submissions, or per-dispatch timestamp attribution. The final result is checked against all series dispatches, rather than pretending unobserved intermediate readbacks were validated individually.
 
+## Bounded in-flight submissions
+
+The optional `native_rd_inflight_effect.gd` compositor hosts 2–4 independent `NativeRDWorkload` instances and output-image RIDs, all submitted through Godot's existing `RenderingDevice`. A workload is submitted using `submit_series(seeds, repetitions)`, which returns a monotonically increasing ID or `-1` when invalid, closing or at capacity. **Capacity includes queued requests, GPU submissions awaiting readback, and completed outputs not yet consumed**. Rejected requests never allocate a GPU resource. The native shader, barriers, validation and completion semantics are unchanged.
+
+A compositor render callback records each admitted series against a *distinct* image. Each image has its own shader, pipeline and descriptor set created once per slot and reused after that slot's async readback callback acknowledges completion. Completed data is returned via `take_completed()` with the original request ID, byte array, native lifecycle diagnostics and host submission-to-readback interval. Results are not assumed to arrive in submission order. `status()` supplies queued/in-flight/ready counts and the observed maximum number of in-flight readbacks.
+
+`request_release()` rejects release while work is queued, running or has not yet been consumed. Once drained, it closes admission and releases each slot's native resources and image on the render thread. No user code owns a raw queue, borrowed Vulkan/D3D12 device, or independent native fence. This establishes multiple submitted command lists and readbacks pending simultaneously, **not** parallel execution on separate GPU queues or measured overlap of device execution intervals. The existing serial single-image path remains unchanged.
+
+Linux Vulkan validation and D3D12 WARP graphical CI both exercise three outstanding, separately verified submissions, backpressure, a fourth submission reusing completed resources and complete retirement. Device-specific throughput must be measured on physical hardware before making any speedup claim.
+
 ## Tested workload
 
 The shader `native/vulkan_provider/persistent_image.comp` is built to SPIR-V and embedded in the C++23 binary. It stores `seed + spatial_index` at each pixel on the first dispatch. Subsequent dispatches read the prior value, add their own seed and pixel index, and store it back. This exercises actual storage-image dependency barriers rather than repeatedly overwriting an image with a constant.

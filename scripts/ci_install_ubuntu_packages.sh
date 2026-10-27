@@ -22,8 +22,13 @@ is_available() {
                        pkg-config --exists vulkan ;;
         xvfb) command -v xvfb-run >/dev/null 2>&1 ;;
         mesa-vulkan-drivers)
-            find /usr/share/vulkan/icd.d /etc/vulkan/icd.d \
-                -iname '*lvp*.json' -print -quit 2>/dev/null | grep -q . ;;
+            for dir in /usr/share/vulkan/icd.d /etc/vulkan/icd.d; do
+                if [[ -d "$dir" ]] &&
+                   find "$dir" -iname '*lvp*.json' -print -quit | grep -q .; then
+                    return 0
+                fi
+            done
+            return 1 ;;
         *)
             dpkg-query -W -f='${Status}' "$package" 2>/dev/null |
                 grep -qx 'install ok installed' ;;

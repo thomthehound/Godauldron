@@ -184,14 +184,16 @@ func _run() -> void:
 		_fail("Autonomous stream did not keep native readback slots busy: " + str(stream_done))
 		return
 	var final_bytes: PackedByteArray = streaming.call("take_stream_final")
-	if final_bytes.size() != ELEMENTS * 4 or \
-			bool(streaming.call("request_release")) == false:
+	if final_bytes.size() != ELEMENTS * 4:
 		_fail("Autonomous stream omitted final output or refused retirement")
 		return
 	for pixel in range(ELEMENTS):
 		if final_bytes.decode_u32(pixel * 4) != 12 + 4 * pixel:
 			_fail("Autonomous stream final output mismatch at pixel %d" % pixel)
 			return
+	if not bool(streaming.call("request_release")):
+		_fail("Autonomous ring refused retirement after output validation")
+		return
 	var stream_released: Dictionary = {}
 	for frame in range(210):
 		await process_frame

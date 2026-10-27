@@ -100,6 +100,20 @@ func _verify() -> void:
 	if bad_compile.get("ok", true) or bad_compile.get("stage") != "compile":
 		_fail("Broken GLSL was not rejected before touching the native PSO")
 		return
+	var incompatible: FileAccess = FileAccess.open("user://bad_native_binding.comp",
+		FileAccess.WRITE)
+	if incompatible == null:
+		_fail("Could not write shader binding contract fixture")
+		return
+	incompatible.store_string("#version 450\nlayout(local_size_x=64) in;\n" +
+		"layout(set=0,binding=1,std430) buffer Counters { uint values[]; } c;\n" +
+		"void main(){atomicAdd(c.values[gl_GlobalInvocationID.x],1u);}\n")
+	incompatible.close()
+	var bad_interface: Dictionary = scene.call("godauldron_reload_shader_from_source",
+		"user://bad_native_binding.comp")
+	if bad_interface.get("ok", true) or bad_interface.get("stage") != "shader":
+		_fail("Incompatible shader resource binding was accepted for old native descriptor set")
+		return
 	var bad_bytes: Dictionary = scene.call("godauldron_replace_shader_bytes",
 		PackedByteArray([5, 6, 7, 8]))
 	if bad_bytes.get("ok", true) or bad_bytes.get("failure_stage") != "shader" or \
@@ -107,9 +121,14 @@ func _verify() -> void:
 		_fail("Malformed SPIR-V candidate replaced the working native pipeline")
 		return
 	var after_failure: Dictionary = PipelineDiagnostics.read(scene)
+	var source_result: Dictionary = after_failure.get("source_reload", {})
 	if not after_failure.get("available", false) or \
 			int(after_failure["pipelines"][0].get("reload_retired_pipelines", -1)) != 1 or \
-			int(after_failure["pipelines"][0].get("reload_failures", -1)) != 1:
+			int(after_failure["pipelines"][0].get("reload_failures", -1)) != 2 or \
+			int(source_result.get("failures", -1)) != 2 or \
+			int(source_result.get("attempts", -1)) != 3 or \
+			source_result.get("last_stage") != "shader" or \
+			not PipelineDiagnostics.summary(after_failure).contains("descriptor"):
 		_fail("Shader failure failed to preserve resource ownership/provenance")
 		return
 

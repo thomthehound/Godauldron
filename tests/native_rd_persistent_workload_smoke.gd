@@ -349,6 +349,19 @@ func _run() -> void:
 				inspected.get("source_reload", {}).get("active_language") != "hlsl":
 			_fail("Host-visible RD provider HLSL pipeline/diagnostic integration failed: " + str(inspected))
 			return
+		var owned: CompositorEffect = stage.get("_reload_effect")
+		viewport.remove_child(stage)
+		stage.queue_free()
+		var shutdown: Dictionary = {}
+		for frame in range(210):
+			await process_frame
+			shutdown = owned.call("shutdown_snapshot")
+			if shutdown.get("completed", false):
+				break
+		if not shutdown.get("completed", false) or shutdown.get("phase") != "released":
+			_fail("Scene removal leaked native RD shader/pipeline/descriptor/image: " +
+				str(shutdown))
+			return
 	print("Persistent native workload validated: ", BATCHES.size(),
 		" completed batches, ", total_dispatches,
 		" native dispatches, driver=", expected_driver,

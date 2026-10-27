@@ -219,7 +219,18 @@ jobs:
       - name: Configure and compile C++23 native RD-only extension
         shell: pwsh
         run: |
-          cmake -S native/vulkan_provider -B .native-rd-windows-build -G "Visual Studio 17 2022" -A x64 -DGODAULDRON_RD_ONLY=ON
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\\Installer\\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "Visual Studio Installer discovery tool not found" }
+          $version = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion).Trim()
+          if (-not $version) { throw "MSVC C++ compiler toolchain is unavailable" }
+          $major = [int]($version.Split('.')[0])
+          $generator = switch ($major) {
+            18 { "Visual Studio 18 2026" }
+            17 { "Visual Studio 17 2022" }
+            default { throw "Unsupported installed Visual Studio version: $version" }
+          }
+          Write-Host "Building native C++23 extension with $generator ($version)"
+          cmake -S native/vulkan_provider -B .native-rd-windows-build -G $generator -A x64 -DGODAULDRON_RD_ONLY=ON
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build .native-rd-windows-build --config Release --parallel 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

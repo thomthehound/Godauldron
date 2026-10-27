@@ -2,11 +2,13 @@ name: Validate laboratory
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
-# Only one validation of a feature branch should consume build capacity at once.
-# A push and its matching PR run share the same group; main remains uncancelled.
+# Feature branches validate via pull_request or manual dispatch, not a
+# redundant push workflow. Only one run per branch consumes build capacity.
+# Pushes to main always retain complete, uncancelled CI.
 concurrency:
   group: validate-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -124,8 +126,7 @@ jobs:
         run: .\.engine\godot_console.exe --headless --path . --script res://tests/observability_smoke.gd
 
   native-vulkan-device:
-    # One native build per PR revision; avoid rebuilding bindings on push and PR.
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    # Executed on PRs, manual dispatch and main. Never silently skipped.
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:

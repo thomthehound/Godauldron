@@ -109,6 +109,8 @@ static func read(scene: Node) -> Dictionary:
 				typeof(source.get("last_error")) != TYPE_STRING or \
 				String(source["last_error"]).length() > 1500 or \
 				(source.has("language") and source["language"] not in ["glsl", "hlsl"]) or \
+				(source.has("selected_language") and
+					source["selected_language"] not in ["glsl", "hlsl"]) or \
 				(source.has("active_language") and source["active_language"] not in [
 					"embedded_spirv", "glsl", "hlsl"]) or \
 				(source.has("compiler") and (typeof(source["compiler"]) != TYPE_STRING or \
@@ -158,8 +160,9 @@ static func summary(report: Dictionary) -> String:
 					String(entry["reload_failure_stage"]), String(entry["reload_error"])]
 	var source: Dictionary = report.get("source_reload", {})
 	if not source.is_empty():
-		line += "; active source %s, selected %s" % [
+		line += "; active source %s, selected %s, last compile %s" % [
 			String(source.get("active_language", "unknown")),
+			String(source.get("selected_language", "unknown")),
 			String(source.get("language", "unknown"))]
 		if not String(source.get("last_error", "")).is_empty():
 			line += "; %s %s: %s" % [

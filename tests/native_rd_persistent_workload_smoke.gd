@@ -67,6 +67,17 @@ func _run() -> void:
 		_fail("Installed native workload compositor effect missing")
 		return
 	var effect: CompositorEffect = script.new(WIDTH, HEIGHT)
+	# Input validation must not arm the compositor or allocate any RIDs.
+	var oversized := PackedInt32Array()
+	oversized.resize(33)
+	oversized.fill(1)
+	for invalid: PackedInt32Array in [
+			PackedInt32Array(), PackedInt32Array([0]),
+			PackedInt32Array([65536]), oversized]:
+		if bool(effect.call("request_batch", invalid)) or \
+				effect.call("status").get("phase") != "idle":
+			_fail("Invalid native workload batch was accepted before resource allocation")
+			return
 	var compositor := Compositor.new()
 	var effects: Array[CompositorEffect] = [effect]
 	compositor.compositor_effects = effects
@@ -88,6 +99,10 @@ func _run() -> void:
 			_fail("Native GPU batch never reached completed readback: " + str(state))
 			return
 		var result: Dictionary = effect.call("take_batch")
+		if bool(effect.call("request_batch", PackedInt32Array([0]))) or \
+				effect.call("status").get("phase") != "consumed":
+			_fail("Invalid request disturbed an already prepared reusable adapter")
+			return
 		var bytes: PackedByteArray = result.get("bytes", PackedByteArray())
 		var recorded: Dictionary = result.get("record", {})
 		var completed: Dictionary = result.get("completion", {})

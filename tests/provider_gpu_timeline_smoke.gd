@@ -103,6 +103,29 @@ func _verify() -> void:
 	missing_wait["steps"][0]["host_waits"][0]["wait_for"] = "unknown_event"
 	if not _rejected(missing_wait, 3, "unknown completion event"):
 		return
+	var nested: Dictionary = raw.duplicate(true)
+	nested["steps"][0]["events"].append({
+		"id": "copy_nested_0", "queue": "copy", "clock_domain": "device_clock_0",
+		"kind": "transfer", "start_ns": 105000000, "end_ns": 106000000
+	})
+	var merged: Dictionary = Timeline.resolve(nested, 3)
+	var correct_union := false
+	for queue in merged.get("queues", []):
+		if queue["queue"] == "copy" and \
+				absf(float(queue["covered_gpu_usec"]) - 9000.0) < 0.01 and \
+				int(queue["interval_count"]) == 4:
+			correct_union = true
+	if not merged.get("available", false) or not correct_union or merged["gpu_events"] != 10:
+		_fail("Nested native copy intervals were double-counted or lost")
+		return
+	var bad_barrier: Dictionary = raw.duplicate(true)
+	bad_barrier["steps"][0]["events"][2]["start_ns"] = 106000000
+	if not _rejected(bad_barrier, 3, "same-clock dependency ordering"):
+		return
+	var unreasonable: Dictionary = raw.duplicate(true)
+	unreasonable["steps"][0]["host_waits"][0]["duration_usec"] = 900000000.0
+	if not _rejected(unreasonable, 3, "unreasonable CPU wait"):
+		return
 	var cross_clock: Dictionary = raw.duplicate(true)
 	for record in cross_clock["steps"]:
 		record["events"][1]["clock_domain"] = "copy_clock_1"

@@ -5,6 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Only one validation of a feature branch should consume build capacity at once.
+# A push and its matching PR run share the same group; main remains uncancelled.
+concurrency:
+  group: validate-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   workflow-lint:
     runs-on: ubuntu-latest

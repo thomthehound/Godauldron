@@ -22,7 +22,9 @@ func _run_epoch(scene: Node) -> Dictionary:
 	run.begin(scene, {}, 2, SAMPLES, 1.0 / 60.0)
 	# Real GPU submission must make reload unsafe even if the host UI
 	# were bypassed and the request went straight to the native provider.
-	run.advance()
+	# Two warmup steps arm sampling; the third step submits GPU work.
+	for i in range(3):
+		run.advance()
 	var native: Node = scene.get("_native")
 	var rejected: Dictionary = native.call("godauldron_replace_shader",
 		PackedByteArray([3, 2, 35, 7]))

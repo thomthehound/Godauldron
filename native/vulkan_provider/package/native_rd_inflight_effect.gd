@@ -391,7 +391,7 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 			return
 		var slot: Dictionary = _slots[slot_index]
 		var record_start: int = Time.get_ticks_usec()
-		if _stream_enabled and int(request["id"]) == _stream_warmup:
+		if _stream_enabled and int(request["id"]) + 1 - _stream_readback_interval == _stream_warmup:
 			_mutex.lock()
 			_stream_first_measured_usec = record_start
 			_mutex.unlock()

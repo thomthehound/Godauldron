@@ -94,32 +94,54 @@ func request_reload_spirv(bytecode: PackedByteArray) -> bool:
 
 func request_hlsl_reload(source_path: String,
 		compiler: String = "dxc") -> Dictionary:
+	return _request_source_reload(source_path, compiler, "hlsl")
+
+
+func request_glsl_reload(source_path: String,
+		compiler: String = "glslangValidator") -> Dictionary:
+	return _request_source_reload(source_path, compiler, "glsl")
+
+
+func _request_source_reload(source_path: String, compiler: String,
+		language: String) -> Dictionary:
 	_mutex.lock()
-	var available: bool = _phase in ["idle", "consumed"]
+	var available: bool = _phase in ["idle", "consumed"] and not _shutdown_requested
 	if available:
 		_phase = "compiling"
 	_mutex.unlock()
 	if not available:
 		return {"ok": false, "error": "native_rd_pipeline_not_idle"}
 	var compile_result: Dictionary = {}
-	var output_path: String = "user://native_rd_hlsl_%d.spv" % Time.get_ticks_usec()
+	var output_path: String = "user://native_rd_%s_%d.spv" % [
+		language, Time.get_ticks_usec()]
 	if not FileAccess.file_exists(source_path):
-		compile_result = {"ok": false, "error": "native_rd_hlsl_source_missing"}
+		compile_result = {"ok": false, "error": "native_rd_%s_source_missing" % language}
 	else:
+		var arguments := PackedStringArray()
+		if language == "hlsl":
+			arguments = PackedStringArray([
+				"-spirv", "-T", "cs_6_6", "-E", "main",
+				"-fspv-target-env=vulkan1.1",
+				"-Fo", ProjectSettings.globalize_path(output_path),
+				ProjectSettings.globalize_path(source_path)
+			])
+		else:
+			arguments = PackedStringArray([
+				"-V", "-S", "comp", "--target-env", "vulkan1.1",
+				"-o", ProjectSettings.globalize_path(output_path),
+				ProjectSettings.globalize_path(source_path)
+			])
 		var logs: Array = []
-		var exit_code: int = OS.execute(compiler, PackedStringArray([
-			"-spirv", "-T", "cs_6_6", "-E", "main",
-			"-fspv-target-env=vulkan1.1",
-			"-Fo", ProjectSettings.globalize_path(output_path),
-			ProjectSettings.globalize_path(source_path)
-		]), logs, true)
+		var exit_code: int = OS.execute(compiler, arguments, logs, true)
 		if exit_code != 0:
 			compile_result = {"ok": false, "error":
-				"DXC failed (%d): %s" % [exit_code, str(logs).substr(0, 1200)]}
+				"%s failed (%d): %s" % [
+					compiler, exit_code, str(logs).substr(0, 1200)]}
 		else:
 			var bytes: PackedByteArray = FileAccess.get_file_as_bytes(output_path)
 			if bytes.is_empty() or bytes.size() > 1024 * 1024:
-				compile_result = {"ok": false, "error": "DXC generated no valid bytecode"}
+				compile_result = {"ok": false, "error":
+					"%s generated no valid bytecode" % compiler}
 			else:
 				compile_result = {"ok": true, "bytes": bytes}
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
@@ -130,12 +152,12 @@ func request_hlsl_reload(source_path: String,
 	else:
 		_phase = "consumed"
 		_source_reload = {"ok": false, "stage": "compile",
-			"error": compile_result.get("error", "DXC failed")}
+			"language": language,
+			"error": compile_result.get("error", "Shader compiler failed")}
 	_mutex.unlock()
 	if compile_result.get("ok", false):
-		return {"ok": true, "queued": true}
+		return {"ok": true, "queued": true, "language": language}
 	return compile_result
-
 
 func reload_snapshot() -> Dictionary:
 	_mutex.lock()

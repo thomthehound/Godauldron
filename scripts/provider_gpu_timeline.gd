@@ -9,6 +9,8 @@ const MAX_EVENTS := 32768
 const MAX_WAITS := 16384
 const MAX_QUEUES := 64
 const MAX_NAME := 128
+const MAX_GPU_EVENT_NS := 600000000000  # Single measured interval at most 10 minutes.
+const MAX_HOST_WAIT_USEC := 600000000.0
 const KINDS := ["compute", "graphics", "transfer", "synchronization", "other"]
 const WAIT_KINDS := ["fence", "semaphore", "device_idle", "readback", "other"]
 
@@ -130,7 +132,8 @@ static func resolve(value: Variant, expected_steps: int) -> Dictionary:
 				return unavailable("invalid_gpu_event_kind")
 			if typeof(event.get("start_ns")) != TYPE_INT or \
 					typeof(event.get("end_ns")) != TYPE_INT or \
-					int(event["start_ns"]) < 0 or int(event["end_ns"]) <= int(event["start_ns"]):
+					int(event["start_ns"]) < 0 or int(event["end_ns"]) <= int(event["start_ns"]) or \
+				int(event["end_ns"]) - int(event["start_ns"]) > MAX_GPU_EVENT_NS:
 				return unavailable("invalid_gpu_timestamp_interval")
 			var dependencies: Variant = event.get("depends_on", [])
 			if typeof(dependencies) != TYPE_ARRAY or dependencies.size() > 64:
@@ -184,7 +187,7 @@ static func resolve(value: Variant, expected_steps: int) -> Dictionary:
 					wait.get("outcome") != "completed" or \
 					typeof(duration) not in [TYPE_INT, TYPE_FLOAT] or \
 					not is_finite(float(duration)) or float(duration) < 0.0 or \
-					not _name(wait.get("queue")):
+					float(duration) > MAX_HOST_WAIT_USEC or not _name(wait.get("queue")):
 				return unavailable("invalid_completed_host_wait")
 			var waiting_for: Variant = wait.get("wait_for", "")
 			if waiting_for != "" and not _name(waiting_for):

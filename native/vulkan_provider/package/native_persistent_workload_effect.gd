@@ -136,7 +136,9 @@ func request_hlsl_reload(source_path: String,
 func reload_snapshot() -> Dictionary:
 	_mutex.lock()
 	var report := _reload_result.duplicate(true)
-	report["phase"] = _phase
+	# Preserve the workload's actual native "prepared" phase. The
+	# host's "consumed" state is a separate compositor admission state.
+	report["compositor_phase"] = _phase
 	report["source_reload"] = _source_reload.duplicate(true)
 	_mutex.unlock()
 	return report

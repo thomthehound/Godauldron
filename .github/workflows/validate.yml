@@ -111,11 +111,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python tools/fetch_preview.py --major 4 --platform win64.exe
       - name: Import project on Windows
-        run: .\.engine\godot.exe --headless --path . --editor --import --quit
+        run: .\.engine\godot_console.exe --headless --path . --editor --import --quit
       - name: Verify provider GPU queue timeline and lifecycle on Windows
-        run: .\.engine\godot.exe --headless --path . --script res://tests/provider_gpu_timeline_smoke.gd
+        run: .\.engine\godot_console.exe --headless --path . --script res://tests/provider_gpu_timeline_smoke.gd
       - name: Verify legacy provider timing remains compatible
-        run: .\.engine\godot.exe --headless --path . --script res://tests/observability_smoke.gd
+        run: .\.engine\godot_console.exe --headless --path . --script res://tests/observability_smoke.gd
 
   forward-hdr-render:
     runs-on: ubuntu-24.04

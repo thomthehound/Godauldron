@@ -15,6 +15,7 @@ var _width: int = 0
 var _height: int = 0
 var _format: int = -1
 var _bytes: PackedByteArray = PackedByteArray()
+var _pipeline_evidence: Dictionary = {}
 
 
 func _init() -> void:
@@ -30,6 +31,7 @@ func request() -> bool:
 		_state = "armed"
 		_requested = true
 		_failure = ""
+		_pipeline_evidence = {}
 	_mutex.unlock()
 	return ok
 
@@ -40,6 +42,20 @@ func status() -> Dictionary:
 		"width": _width, "height": _height, "format": _format}
 	_mutex.unlock()
 	return result
+
+
+# Captured only after the asynchronous copy callback retires temporary RIDs.
+func pipeline_evidence() -> Dictionary:
+	_mutex.lock()
+	var result: Dictionary = _pipeline_evidence.duplicate(true)
+	_mutex.unlock()
+	return result
+
+
+func _pipeline_update(fields: Dictionary) -> void:
+	_mutex.lock()
+	_pipeline_evidence.merge(fields, true)
+	_mutex.unlock()
 
 
 func take_image() -> Dictionary:
@@ -86,14 +102,21 @@ func _copy_to_readable(rd: RenderingDevice, source: RID, info: RDTextureFormat) 
 		return {"ok": false, "error": "Internal scene color is neither CPU-copyable nor shader-sampleable"}
 	var half: bool = info.format == RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
 	var shader_file: RDShaderFile = HALF_COPY if half else FLOAT_COPY
+	var setup_started: int = Time.get_ticks_usec()
+	var shader_started: int = Time.get_ticks_usec()
 	var shader: RID = rd.shader_create_from_spirv(shader_file.get_spirv())
+	_pipeline_update({"shader_create_host_usec": Time.get_ticks_usec() - shader_started})
 	if not shader.is_valid():
 		return {"ok": false, "error": "Could not compile GPU scene-color copy shader"}
 	_stage_rids.append(shader)
+	_pipeline_update({"shader_creations": 1})
+	var pipeline_started: int = Time.get_ticks_usec()
 	var pipeline: RID = rd.compute_pipeline_create(shader)
+	_pipeline_update({"pipeline_create_host_usec": Time.get_ticks_usec() - pipeline_started})
 	if not pipeline.is_valid():
 		return {"ok": false, "error": "Could not create scene-color transfer pipeline"}
 	_stage_rids.append(pipeline)
+	_pipeline_update({"pipeline_creations": 1})
 	var desc := RDTextureFormat.new()
 	desc.texture_type = RenderingDevice.TEXTURE_TYPE_2D
 	desc.format = info.format
@@ -120,12 +143,18 @@ func _copy_to_readable(rd: RenderingDevice, source: RID, info: RDTextureFormat) 
 	output.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 	output.binding = 1
 	output.add_id(staging)
+	var descriptor_started: int = Time.get_ticks_usec()
 	var uniforms: RID = rd.uniform_set_create([input, output], shader, 0)
+	_pipeline_update({"descriptor_create_host_usec":
+		Time.get_ticks_usec() - descriptor_started})
 	if not uniforms.is_valid():
 		return {"ok": false, "error": "Could not bind scene-color transfer resources"}
 	_stage_rids.append(uniforms)
+	_pipeline_update({"descriptor_creations": 1, "setup_host_usec":
+		Time.get_ticks_usec() - setup_started})
 	var commands: int = rd.compute_list_begin()
 	rd.compute_list_bind_compute_pipeline(commands, pipeline)
+	_pipeline_update({"pipeline_binds": 1})
 	rd.compute_list_bind_uniform_set(commands, uniforms, 0)
 	rd.compute_list_dispatch(commands, ceili(float(info.width) / 8.0), ceili(float(info.height) / 8.0), 1)
 	rd.compute_list_end()
@@ -133,15 +162,16 @@ func _copy_to_readable(rd: RenderingDevice, source: RID, info: RDTextureFormat) 
 
 
 func _on_bytes(data: PackedByteArray, width: int, height: int, texture_format: int) -> void:
+	_free_stage(RenderingServer.get_rendering_device())
 	_mutex.lock()
 	if _state == "pending":
+		_pipeline_evidence["resources_retired_after_readback"] = true
 		_width = width
 		_height = height
 		_format = texture_format
 		_bytes = data
 		_state = "ready"
 	_mutex.unlock()
-	_free_stage(RenderingServer.get_rendering_device())
 
 
 func _render_callback(callback_type: int, render_data: RenderData) -> void:
@@ -182,7 +212,26 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 		_fail("Resolved color-buffer dimensions disagree with rendering resolution")
 		return
 	var readable: RID = texture
-	if not (info.usage_bits & RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT):
+	var gpu_copy: bool = not (info.usage_bits & RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT)
+	_pipeline_update({
+		"module": "hdr_scene_color",
+		"variant_key": ("rgba16f_copy" if info.format ==
+			RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT else "rgba32f_copy")
+			if gpu_copy else "direct_readback",
+		"shader_source": (("res://shaders/hdr_copy_rgba16f.glsl" if info.format ==
+			RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+			else "res://shaders/hdr_copy_rgba32f.glsl") if gpu_copy else ""),
+		"selection": {"source_format": info.format, "gpu_copy_required": gpu_copy},
+		"shader_origin": "godot_imported_rd_shader" if gpu_copy else "no_shader",
+		"timing_source": "host_wall_microseconds",
+		"cache_hit_observation": "not_exposed_by_rendering_device",
+		"shader_creations": 0, "pipeline_creations": 0,
+		"descriptor_creations": 0, "pipeline_binds": 0,
+		"shader_create_host_usec": 0, "pipeline_create_host_usec": 0,
+		"descriptor_create_host_usec": 0, "setup_host_usec": 0,
+		"resources_retired_after_readback": false
+	})
+	if gpu_copy:
 		# Engine render_buffers/color is generally shader-sampleable but
 		# not CPU-copyable. Transfer exact float texels on the GPU into a
 		# host-owned copy-readable float texture, without SDR conversion.

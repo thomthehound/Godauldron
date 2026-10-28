@@ -8,6 +8,11 @@ const SHADERS := {
 	"normal_roughness": preload("res://shaders/inspect_normal_roughness.glsl"),
 	"velocity": preload("res://shaders/inspect_velocity.glsl")
 }
+const SOURCES := {
+	"depth": "res://shaders/inspect_depth.glsl",
+	"normal_roughness": "res://shaders/inspect_normal_roughness.glsl",
+	"velocity": "res://shaders/inspect_velocity.glsl"
+}
 
 var _mode: String = ""
 var _mutex := Mutex.new()
@@ -19,6 +24,7 @@ var _source_format := -1
 var _buffer_name := ""
 var _bytes := PackedByteArray()
 var _staging_rids: Array[RID] = []
+var _pipeline_evidence: Dictionary = {}
 
 
 func _init() -> void:
@@ -35,6 +41,7 @@ func request(mode: String) -> bool:
 		_mode = mode
 		_state = "armed"
 		_error = ""
+		_pipeline_evidence = {}
 		access_resolved_depth = mode == "depth"
 		needs_normal_roughness = mode == "normal_roughness"
 		needs_motion_vectors = mode == "velocity"
@@ -51,6 +58,20 @@ func status() -> Dictionary:
 	}
 	_mutex.unlock()
 	return record
+
+
+# The GPU callback owns the evidence; callers read it only after completion.
+func pipeline_evidence() -> Dictionary:
+	_mutex.lock()
+	var result: Dictionary = _pipeline_evidence.duplicate(true)
+	_mutex.unlock()
+	return result
+
+
+func _pipeline_update(fields: Dictionary) -> void:
+	_mutex.lock()
+	_pipeline_evidence.merge(fields, true)
+	_mutex.unlock()
 
 
 func take_image() -> Dictionary:
@@ -98,6 +119,7 @@ func _on_bytes(data: PackedByteArray, width: int, height: int) -> void:
 	_free_staging(RenderingServer.get_rendering_device())
 	_mutex.lock()
 	if _state == "pending":
+		_pipeline_evidence["resources_retired_after_readback"] = true
 		_width = width
 		_height = height
 		_bytes = data
@@ -162,17 +184,38 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	_buffer_name = buffer_name
 	_mutex.unlock()
 	var shader_file: RDShaderFile = SHADERS[mode]
+	_pipeline_update({
+		"module": "render_buffer_inspection",
+		"variant_key": mode,
+		"shader_source": SOURCES[mode],
+		"selection": {"buffer": buffer_name, "source_format": info.format},
+		"shader_origin": "godot_imported_rd_shader",
+		"timing_source": "host_wall_microseconds",
+		"cache_hit_observation": "not_exposed_by_rendering_device",
+		"shader_creations": 0, "pipeline_creations": 0,
+		"descriptor_creations": 0, "pipeline_binds": 0,
+		"shader_create_host_usec": 0, "pipeline_create_host_usec": 0,
+		"descriptor_create_host_usec": 0, "setup_host_usec": 0,
+		"resources_retired_after_readback": false
+	})
+	var setup_started: int = Time.get_ticks_usec()
+	var shader_started: int = Time.get_ticks_usec()
 	var shader: RID = rd.shader_create_from_spirv(shader_file.get_spirv())
+	_pipeline_update({"shader_create_host_usec": Time.get_ticks_usec() - shader_started})
 	if not shader.is_valid():
 		_fail("Diagnostic GPU transfer shader failed to compile")
 		return
 	_staging_rids.append(shader)
+	_pipeline_update({"shader_creations": 1})
+	var pipeline_started: int = Time.get_ticks_usec()
 	var pipeline: RID = rd.compute_pipeline_create(shader)
+	_pipeline_update({"pipeline_create_host_usec": Time.get_ticks_usec() - pipeline_started})
 	if not pipeline.is_valid():
 		_free_staging(rd)
 		_fail("Diagnostic GPU transfer pipeline is unavailable")
 		return
 	_staging_rids.append(pipeline)
+	_pipeline_update({"pipeline_creations": 1})
 	var format := RDTextureFormat.new()
 	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
 	format.format = RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT
@@ -204,14 +247,20 @@ func _render_callback(callback_type: int, render_data: RenderData) -> void:
 	destination_binding.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 	destination_binding.binding = 1
 	destination_binding.add_id(staging)
+	var descriptor_started: int = Time.get_ticks_usec()
 	var set: RID = rd.uniform_set_create([source_binding, destination_binding], shader, 0)
+	_pipeline_update({"descriptor_create_host_usec":
+		Time.get_ticks_usec() - descriptor_started})
 	if not set.is_valid():
 		_free_staging(rd)
 		_fail("Cannot bind native source buffer for GPU transfer")
 		return
 	_staging_rids.append(set)
+	_pipeline_update({"descriptor_creations": 1, "setup_host_usec":
+		Time.get_ticks_usec() - setup_started})
 	var commands: int = rd.compute_list_begin()
 	rd.compute_list_bind_compute_pipeline(commands, pipeline)
+	_pipeline_update({"pipeline_binds": 1})
 	rd.compute_list_bind_uniform_set(commands, set, 0)
 	rd.compute_list_dispatch(commands, ceili(float(size.x) / 8.0),
 		ceili(float(size.y) / 8.0), 1)

@@ -97,6 +97,14 @@ func show_buffer(raw: Image, mode: String, source: Dictionary) -> bool:
 	_description.text = "%s  |  %d × %d internal pixels  |  source format %d\n%s" % [
 		mode, raw.get_width(), raw.get_height(), int(source.get("data_format", -1)),
 		String(source.get("buffer", ""))]
+	var pipeline: Dictionary = source.get("pipeline", {})
+	if not pipeline.is_empty():
+		_description.text += "\nShader variant %s | RD setup %.3f ms host wall (shader %.3f, pipeline %.3f, descriptors %.3f); cache unobservable" % [
+			String(pipeline.get("variant_key", "unknown")),
+			float(pipeline.get("setup_host_usec", 0)) / 1000.0,
+			float(pipeline.get("shader_create_host_usec", 0)) / 1000.0,
+			float(pipeline.get("pipeline_create_host_usec", 0)) / 1000.0,
+			float(pipeline.get("descriptor_create_host_usec", 0)) / 1000.0]
 	_readout.text = "Preview is remapped for visibility; click to read unchanged float values."
 	popup_centered()
 	return true

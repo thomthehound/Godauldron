@@ -80,7 +80,8 @@ func source(mode: String, result: Dictionary) -> Dictionary:
 		"existing_compositor_source": _inherited_source,
 		"preserved_effect_count": 0 if _effective_original == null else \
 			_effective_original.compositor_effects.size(),
-		"performance": "one-shot unmeasured asynchronous GPU readback"
+		"performance": "one-shot unmeasured asynchronous GPU readback",
+		"pipeline": _effect.pipeline_evidence() if _effect != null else {}
 	}
 
 

@@ -94,6 +94,38 @@ func _verify() -> void:
 			evidence.get("source", {}).get("stage") != "post_transparent_pre_postprocess":
 		_fail("Actual renderer HDR capture lost provenance")
 		return
+	var capture_pipeline: Dictionary = evidence.get("source", {}).get("pipeline", {})
+	var selection: Dictionary = capture_pipeline.get("selection", {})
+	var native_format: int = int(selection.get("source_format", -1))
+	var gpu_copy: bool = bool(selection.get("gpu_copy_required", false))
+	var expected_variant: String = (
+		"rgba16f_copy" if native_format ==
+		RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT else "rgba32f_copy"
+	) if gpu_copy else "direct_readback"
+	var expected_path: String = (
+		"res://shaders/hdr_copy_rgba16f.glsl" if native_format ==
+		RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT else
+		"res://shaders/hdr_copy_rgba32f.glsl") if gpu_copy else ""
+	var calls: int = 1 if gpu_copy else 0
+	var costs: int = (
+		int(capture_pipeline.get("shader_create_host_usec", -1)) +
+		int(capture_pipeline.get("pipeline_create_host_usec", -1)) +
+		int(capture_pipeline.get("descriptor_create_host_usec", -1)))
+	if capture_pipeline.get("module") != "hdr_scene_color" or \
+			native_format not in [RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT,
+				RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT] or \
+			capture_pipeline.get("variant_key") != expected_variant or \
+			capture_pipeline.get("shader_source") != expected_path or \
+			capture_pipeline.get("shader_creations") != calls or \
+			capture_pipeline.get("pipeline_creations") != calls or \
+			capture_pipeline.get("descriptor_creations") != calls or \
+			capture_pipeline.get("pipeline_binds") != calls or \
+			capture_pipeline.get("resources_retired_after_readback") != true or \
+			capture_pipeline.get("cache_hit_observation") != "not_exposed_by_rendering_device" or \
+			costs < 0 or costs > int(capture_pipeline.get("setup_host_usec", -1)):
+		_fail("Scene-linear HDR capture lost true shader variant, RD costs or retirement: " +
+			str(capture_pipeline))
+		return
 	# A WorldEnvironment compositor is inherited when the active camera
 	# has no explicit compositor. The temporary host effect must preserve
 	# those provider effects and restore camera.compositor to null.

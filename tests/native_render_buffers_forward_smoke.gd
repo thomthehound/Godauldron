@@ -99,6 +99,28 @@ func _verify() -> void:
 				int(source.get("preserved_effect_count", -1)) != 2:
 			_fail("Renderer %s buffer was not sourced from native floating GPU pixels" % mode)
 			return
+		var pipeline: Dictionary = source.get("pipeline", {})
+		var expected_shader: String = "res://shaders/inspect_%s.glsl" % mode
+		var stage_total: int = (
+			int(pipeline.get("shader_create_host_usec", -1)) +
+			int(pipeline.get("pipeline_create_host_usec", -1)) +
+			int(pipeline.get("descriptor_create_host_usec", -1)))
+		if pipeline.get("module") != "render_buffer_inspection" or \
+				pipeline.get("variant_key") != mode or \
+				pipeline.get("shader_source") != expected_shader or \
+				pipeline.get("selection", {}).get("buffer") != source.get("buffer") or \
+				int(pipeline.get("selection", {}).get("source_format", -1)) != int(source["data_format"]) or \
+				int(pipeline.get("shader_creations", -1)) != 1 or \
+				int(pipeline.get("pipeline_creations", -1)) != 1 or \
+				int(pipeline.get("descriptor_creations", -1)) != 1 or \
+				int(pipeline.get("pipeline_binds", -1)) != 1 or \
+				pipeline.get("resources_retired_after_readback") != true or \
+				pipeline.get("cache_hit_observation") != "not_exposed_by_rendering_device" or \
+				stage_total < 0 or stage_total > int(pipeline.get("setup_host_usec", -1)) or \
+				not (viewer.get("_description") as Label).text.contains("Shader variant " + mode):
+			_fail("Native %s pipeline selection, cost or retirement is not real: %s" % [
+				mode, str(pipeline)])
+			return
 		var center: Color = pixels.get_pixel(pixels.get_width() / 2, pixels.get_height() / 2)
 		if not is_finite(center.r) or not is_finite(center.g) or not is_finite(center.b):
 			_fail("Nonfinite native buffer center sample: " + mode)

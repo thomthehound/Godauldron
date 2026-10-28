@@ -9,6 +9,9 @@ const PATHS := ["source_compile_and_build", "resident_spirv_byte_match",
 
 var _settings := {"mode": "software", "width": 13, "height": 9,
 	"warmup": 3, "samples": 12, "output": "user://native_rd_variant_profile.json"}
+var _active_effect: CompositorEffect
+var _active_camera: Camera3D
+var _failing := false
 
 
 func _initialize() -> void:
@@ -16,8 +19,55 @@ func _initialize() -> void:
 
 
 func _fail(message: String) -> void:
+	if _failing:
+		return
+	_failing = true
 	push_error(message)
+	if _active_effect == null:
+		quit(1)
+		return
+	call_deferred("_cleanup_failed_profile")
+
+
+func _cleanup_failed_profile() -> void:
+	# The compositor owns Godot GPU RIDs. Retire through its render-thread
+	# shutdown boundary while allowing an outstanding readback to finish.
+	_active_effect.call("request_shutdown")
+	var completed := false
+	for frame in range(240):
+		if bool(_active_effect.call("shutdown_snapshot").get("completed", false)):
+			completed = true
+			break
+		await process_frame
+	if not completed:
+		push_error("Native RD profiler cleanup did not complete")
+	if _active_camera != null:
+		_active_camera.compositor = null
 	quit(1)
+
+
+func _check_dxc_spirv(source_path: String) -> Dictionary:
+	# Check the actual shader and code-generation backend before allocating
+	# GPU resources. DXIL-only DXC binaries accept HLSL but reject -spirv.
+	var output_path := "user://native_rd_dxc_preflight_%d.spv" % OS.get_process_id()
+	var arguments := PackedStringArray([
+		"-spirv", "-T", "cs_6_6", "-E", "main",
+		"-fspv-target-env=vulkan1.1",
+		"-Fo", ProjectSettings.globalize_path(output_path),
+		ProjectSettings.globalize_path(source_path)])
+	var logs: Array = []
+	var exit_code: int = OS.execute("dxc", arguments, logs, true)
+	var bytecode := PackedByteArray()
+	if exit_code == 0 and FileAccess.file_exists(output_path):
+		bytecode = FileAccess.get_file_as_bytes(output_path)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(output_path))
+	if exit_code != 0 or bytecode.size() < 20 or \
+			bytecode.decode_u32(0) != 0x07230203:
+		return {"ok": false, "error":
+			"DXC cannot compile SPIR-V; select a SPIR-V-enabled dxc.exe " +
+			"(Microsoft DXC v1.9.2609 in CI). Exit %d: %s" %
+			[exit_code, str(logs).substr(0, 800)]}
+	return {"ok": true}
 
 
 func _parse_args() -> bool:
@@ -111,6 +161,22 @@ func _run() -> void:
 			"reinstall it with native/rd_windows/install_package.py; " +
 			"no clean rebuild or deletion is required.")
 		return
+	# This benchmark owns the shader source and compositor script it tests.
+	# The installed experiment supplies the GDExtension and scene, but its
+	# editable shader files may intentionally differ from the SDK fixture.
+	var fixture_root := "res://native/vulkan_provider/package/"
+	var effect_script: GDScript = load(
+		fixture_root + "native_persistent_workload_effect.gd")
+	var source_path := fixture_root + "reload_rd_image.hlsl"
+	var source: String = FileAccess.get_file_as_string(source_path)
+	if effect_script == null or not source.contains(
+			"result_image[id.xy] = previous + parameters.seed + index;"):
+		_fail("Native RD benchmark fixture is missing or incompatible: " + source_path)
+		return
+	var compiler_check: Dictionary = _check_dxc_spirv(source_path)
+	if not compiler_check.get("ok", false):
+		_fail(String(compiler_check.get("error", "DXC SPIR-V preflight failed")))
+		return
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
 	var viewport: SubViewport = host.get("_viewport")
@@ -129,21 +195,11 @@ func _run() -> void:
 	if camera == null or camera.compositor != null:
 		_fail("Provider camera is not isolated")
 		return
-	# This benchmark owns the shader source and compositor script it tests.
-	# The installed experiment supplies the GDExtension and scene, but its
-	# editable shader files may intentionally differ from the SDK fixture.
-	var fixture_root := "res://native/vulkan_provider/package/"
-	var effect_script: GDScript = load(
-		fixture_root + "native_persistent_workload_effect.gd")
-	var source_path := fixture_root + "reload_rd_image.hlsl"
-	var source: String = FileAccess.get_file_as_string(source_path)
-	if effect_script == null or not source.contains(
-			"result_image[id.xy] = previous + parameters.seed + index;"):
-		_fail("Native RD benchmark fixture is missing or incompatible: " + source_path)
-		return
 	var width: int = int(_settings["width"])
 	var height: int = int(_settings["height"])
 	var effect: CompositorEffect = effect_script.new(width, height, _settings["mode"], true)
+	_active_effect = effect
+	_active_camera = camera
 	var compositor := Compositor.new()
 	var effects: Array[CompositorEffect] = [effect]
 	compositor.compositor_effects = effects
@@ -152,19 +208,11 @@ func _run() -> void:
 	var batch_index := 0
 	var baseline: Dictionary = await _execute(effect, 0, width, height, batch_index)
 	if baseline.get("ok", false) and not baseline.get("completion", {}).has("variant_active_id"):
-		# An unexpected older metadata contract must still retire RIDs on
-		# Godot's render thread after its completed asynchronous readback.
-		if bool(effect.call("request_release")):
-			await _await_phase(effect, "released")
-		camera.compositor = null
 		_fail("Installed native RD DLL lacks variant_active_id metadata. " +
 			"Rebuild and reinstall the RD-only extension without wiping the build.")
 		return
 	if not baseline.get("ok", false) or \
 			int(baseline.get("completion", {}).get("variant_active_id", -1)) != 1:
-		if baseline.get("ok", false) and bool(effect.call("request_release")):
-			await _await_phase(effect, "released")
-		camera.compositor = null
 		_fail("Native RD embedded pipeline baseline failed: " + str(baseline))
 		return
 	batch_index += 1

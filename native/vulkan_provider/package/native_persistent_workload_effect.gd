@@ -109,8 +109,8 @@ func request_select_variant(variant_id: int) -> bool:
 
 
 func request_hlsl_reload(source_path: String,
-		compiler: String = "dxc") -> Dictionary:
-	return _request_source_reload(source_path, compiler, "hlsl")
+		compiler: String = "dxc", capture_candidate: bool = false) -> Dictionary:
+	return _request_source_reload(source_path, compiler, "hlsl", capture_candidate)
 
 
 func request_glsl_reload(source_path: String,
@@ -119,7 +119,7 @@ func request_glsl_reload(source_path: String,
 
 
 func _request_source_reload(source_path: String, compiler: String,
-		language: String) -> Dictionary:
+		language: String, capture_candidate: bool = false) -> Dictionary:
 	_mutex.lock()
 	var available: bool = _phase in ["idle", "consumed"] and not _shutdown_requested
 	if available:
@@ -172,17 +172,13 @@ func _request_source_reload(source_path: String, compiler: String,
 			"error": compile_result.get("error", "Shader compiler failed")}
 	_mutex.unlock()
 	if compile_result.get("ok", false):
-		return {"ok": true, "queued": true, "language": language}
+		var success := {"ok": true, "queued": true, "language": language}
+		# Explicit profiling only: return the compiler's local candidate,
+		# independent of the render callback consuming the queued bytecode.
+		if capture_candidate:
+			success["candidate_bytecode"] = compile_result["bytes"]
+		return success
 	return compile_result
-
-# Capture the compiler-produced candidate before the render callback consumes
-# it. This is a copy, not an accepted shader or resident GPU resource.
-func queued_candidate_bytecode() -> PackedByteArray:
-	_mutex.lock()
-	var bytes := _reload_bytecode.duplicate() if _phase == "reload_armed" else PackedByteArray()
-	_mutex.unlock()
-	return bytes
-
 
 func reload_snapshot() -> Dictionary:
 	_mutex.lock()

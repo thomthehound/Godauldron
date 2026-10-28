@@ -488,6 +488,10 @@ Dictionary NativeRDWorkload::replace_spirv(
     reload_error_ = "";
     reload_failure_stage_ = "";
     reload_host_usec_ = elapsed_host_usec(started);
+    reload_last_success_host_usec_ = reload_host_usec_;
+    reload_last_success_shader_create_host_usec_ = shader_usec;
+    reload_last_success_pipeline_create_host_usec_ = pipeline_usec;
+    reload_last_success_descriptor_create_host_usec_ = descriptor_usec;
     Dictionary out = diagnostics();
     out["ok"] = true;
     out["reload_shader_create_host_usec"] = shader_usec;
@@ -564,6 +568,20 @@ Dictionary NativeRDWorkload::diagnostics() const {
     result["reload_generation"] = reload_generation_;
     result["reload_retired_pipelines"] = reload_retirements_;
     result["reload_host_usec"] = reload_host_usec_;
+    result["reload_last_success_host_usec"] = reload_last_success_host_usec_;
+    result["reload_last_success_shader_create_host_usec"] =
+            reload_last_success_shader_create_host_usec_;
+    result["reload_last_success_pipeline_create_host_usec"] =
+            reload_last_success_pipeline_create_host_usec_;
+    result["reload_last_success_descriptor_create_host_usec"] =
+            reload_last_success_descriptor_create_host_usec_;
+    // Fixed contract validated from each candidate's SPIR-V before swap.
+    result["shader_variant_workgroup_x"] = 8;
+    result["shader_variant_workgroup_y"] = 8;
+    result["shader_variant_workgroup_z"] = 1;
+    result["shader_variant_image_format"] = "r32ui";
+    result["shader_variant_push_constant_bytes"] = 8;
+    result["shader_variant_evidence"] = "validated_spirv_interface";
     result["reload_error"] = reload_error_;
     result["reload_failure_stage"] = reload_failure_stage_;
     result["reload_available"] = phase_ == Phase::PREPARED &&

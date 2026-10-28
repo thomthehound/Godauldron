@@ -272,7 +272,10 @@ func _run() -> void:
 	# Device timestamps resolve later than the asynchronous readback. Do not
 	# substitute request-to-readback wall time if a GPU timestamp is missing.
 	var required_intervals := batch_index
-	for frame in range(240):
+	# Software adapters may never provide resolved GPU timestamps. Do not
+	# burn hundreds of diagnostic frames chasing an unavailable query domain.
+	var resolve_frames := 180 if _settings["mode"] == "physical_amd" else 32
+	for frame in range(resolve_frames):
 		var current: Dictionary = effect.call("profile_snapshot")
 		if current.get("gpu_intervals", {}).size() >= required_intervals:
 			break

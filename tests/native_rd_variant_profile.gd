@@ -103,6 +103,14 @@ func _run() -> void:
 			not ClassDB.class_exists("NativeRDWorkload"):
 		_fail("Native RD provider package unavailable")
 		return
+	# The installed GDExtension may predate the SDK source in this checkout.
+	# Reject incompatible native code before creating any Godot GPU resources.
+	if not ClassDB.class_has_method("NativeRDWorkload", "select_variant"):
+		_fail("Installed native RD DLL predates resident shader variants. " +
+			"Rebuild the RD-only extension in .native-rd-windows-build and " +
+			"reinstall it with native/rd_windows/install_package.py; " +
+			"no clean rebuild or deletion is required.")
+		return
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)
 	var viewport: SubViewport = host.get("_viewport")
@@ -143,9 +151,21 @@ func _run() -> void:
 	# One real preparation before the comparison, excluded from its samples.
 	var batch_index := 0
 	var baseline: Dictionary = await _execute(effect, 0, width, height, batch_index)
+	if baseline.get("ok", false) and not baseline.get("completion", {}).has("variant_active_id"):
+		# An unexpected older metadata contract must still retire RIDs on
+		# Godot's render thread after its completed asynchronous readback.
+		if bool(effect.call("request_release")):
+			await _await_phase(effect, "released")
+		camera.compositor = null
+		_fail("Installed native RD DLL lacks variant_active_id metadata. " +
+			"Rebuild and reinstall the RD-only extension without wiping the build.")
+		return
 	if not baseline.get("ok", false) or \
 			int(baseline.get("completion", {}).get("variant_active_id", -1)) != 1:
-		_fail("Baseline embedded shader did not produce correct GPU output: " + str(baseline))
+		if baseline.get("ok", false) and bool(effect.call("request_release")):
+			await _await_phase(effect, "released")
+		camera.compositor = null
+		_fail("Native RD embedded pipeline baseline failed: " + str(baseline))
 		return
 	batch_index += 1
 	var records: Array[Dictionary] = []

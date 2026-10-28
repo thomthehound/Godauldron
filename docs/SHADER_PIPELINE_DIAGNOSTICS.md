@@ -79,6 +79,14 @@ A successful replacement preserves its encompassing host-wall duration and the s
 
 The host validates optional variant metadata as a complete set and accepts the rebuild stage costs only when they fit within their enclosing accepted interval. Incomplete, negative, or contradictory evidence is unavailable rather than silently corrected. The UI reports these values during explicit pipeline inspection and report finalization; no additional driver queries or synchronization enter the benchmark loop. Godot's public RD API does not expose driver shader-cache hits, internal PSO compilation stages, shader occupancy or real wave size, so none is inferred from observed timings.
 
+## Real diagnostic render-module shader variants
+
+The render-buffer inspector now reports the **actually selected** depth, normal/roughness or velocity GLSL shader and the source attachment and format that selected it. Its compositor measures the real Godot RenderingDevice shader, compute pipeline and descriptor creation calls, including the enclosing setup interval. It records one pipeline bind and verifies that its transient RIDs were retired before publishing the asynchronous GPU result. The inspection viewer displays the selected variant and measured setup costs alongside the original unmodified float pixels.
+
+Scene-linear HDR capture similarly records whether the resolved source was directly copyable (no shader or pipeline created) or required a compute transfer, selecting the real RGBA16F or RGBA32F copy shader. The actual branch, selected source format, created resources and separate stage timings are stored in the EXR source sidecar. Both pathways preserve the compositor owner and are invoked only by explicit, unmeasured captures. They do **not** insert compiler work, instrumentation or readbacks into the steady-state benchmark path.
+
+These one-shot effects do not implement shader hot reload or cross-session pipeline caches. Their recorded host API durations exclude GPU execution and cannot establish a driver cache hit. Their shader names and source-format selections are actual module decisions, not inferred capabilities or fabricated global render-pass tracking.
+
 ## Remaining shader development parity
 
 - Expose real shader compile errors and source mapping where a provider or engine API provides them; the current embedded SPIR-V is compiled ahead of execution.

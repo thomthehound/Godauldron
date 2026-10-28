@@ -175,6 +175,15 @@ func _request_source_reload(source_path: String, compiler: String,
 		return {"ok": true, "queued": true, "language": language}
 	return compile_result
 
+# Capture the compiler-produced candidate before the render callback consumes
+# it. This is a copy, not an accepted shader or resident GPU resource.
+func queued_candidate_bytecode() -> PackedByteArray:
+	_mutex.lock()
+	var bytes := _reload_bytecode.duplicate() if _phase == "reload_armed" else PackedByteArray()
+	_mutex.unlock()
+	return bytes
+
+
 func reload_snapshot() -> Dictionary:
 	_mutex.lock()
 	var report := _reload_result.duplicate(true)

@@ -13,6 +13,7 @@ SHARED_EFFECTS = (
     ROOT / "native" / "vulkan_provider" / "package" / "native_persistent_workload_effect.gd",
     ROOT / "native" / "vulkan_provider" / "package" / "native_rd_inflight_effect.gd",
     ROOT / "native" / "vulkan_provider" / "package" / "reload_rd_image.hlsl",
+    ROOT / "native" / "vulkan_provider" / "package" / "reload_rd_image.comp",
 )
 
 

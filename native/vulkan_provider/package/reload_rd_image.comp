@@ -1,0 +1,18 @@
+#version 450
+
+// Godot-owned R32_UINT storage image and native compute pipeline.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 0, r32ui) uniform uimage2D result_image;
+layout(push_constant) uniform Parameters {
+    uint seed;
+    uint pass_index;
+} parameters;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dimensions = imageSize(result_image);
+    if (pixel.x >= dimensions.x || pixel.y >= dimensions.y) return;
+    uint index = uint(pixel.y * dimensions.x + pixel.x);
+    uint previous = parameters.pass_index == 0u ? 0u : imageLoad(result_image, pixel).r;
+    imageStore(result_image, pixel, uvec4(previous + parameters.seed + index, 0u, 0u, 0u));
+}

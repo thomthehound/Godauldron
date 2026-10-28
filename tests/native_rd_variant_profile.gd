@@ -121,13 +121,17 @@ func _run() -> void:
 	if camera == null or camera.compositor != null:
 		_fail("Provider camera is not isolated")
 		return
-	var package_root := ("res://experiments/native-rd-windows/" if windows
-		else "res://experiments/native-vulkan-provider/")
-	var effect_script: GDScript = load(package_root + "native_persistent_workload_effect.gd")
-	var source: String = FileAccess.get_file_as_string(package_root + "reload_rd_image.hlsl")
+	# This benchmark owns the shader source and compositor script it tests.
+	# The installed experiment supplies the GDExtension and scene, but its
+	# editable shader files may intentionally differ from the SDK fixture.
+	var fixture_root := "res://native/vulkan_provider/package/"
+	var effect_script: GDScript = load(
+		fixture_root + "native_persistent_workload_effect.gd")
+	var source_path := fixture_root + "reload_rd_image.hlsl"
+	var source: String = FileAccess.get_file_as_string(source_path)
 	if effect_script == null or not source.contains(
 			"result_image[id.xy] = previous + parameters.seed + index;"):
-		_fail("Installed native RD HLSL source is not the expected semantic workload")
+		_fail("Native RD benchmark fixture is missing or incompatible: " + source_path)
 		return
 	var width: int = int(_settings["width"])
 	var height: int = int(_settings["height"])

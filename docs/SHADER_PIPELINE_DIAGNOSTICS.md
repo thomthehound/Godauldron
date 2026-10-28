@@ -71,6 +71,14 @@ A reload is an explicit, unmeasured operation. The compositor accepts a candidat
 
 **Scope:** this is backend-neutral **RenderingDevice** GLSL/HLSL-to-SPIR-V reload for the native persistent workload. The native Windows RD scene exposes a provider-owned GLSL/HLSL choice, defaulting to HLSL so DXC-only installations continue to work. Selection does not change the active shader: source compilation and native acceptance remain distinct, and diagnostics report selected, last-compiled and accepted languages separately. GLSL compilation through D3D12 requires `glslangValidator`; the Windows GPU acceptance workflow provisions and caches it. Software-adapter D3D12 execution is verified, whereas physical AMD D3D12 GLSL/HLSL acceptance remains outstanding. Other RD effects and native DXIL D3D12 engines require explicit adoption, not an assumed global hot-reload capability.
 
+## Verified shader variants and rebuild costs
+
+The native RenderingDevice workload validates its embedded shader and every accepted reload against the same SPIR-V interface: 8×8×1 compute workgroup, set 0/binding 0 `r32ui` storage image, and two 32-bit push constants. These properties are reported as **interface evidence**, not a promise of shader-code equivalence or a driver-selected wave size. The accepted source language and replacement generation remain separately tracked by the provider scene. A failed candidate cannot become the active variant.
+
+A successful replacement preserves its encompassing host-wall duration and the separate `shader_create_from_spirv`, `compute_pipeline_create` and `uniform_set_create` call durations. These **last accepted rebuild** values remain intact after subsequent ABI, allocation or lifecycle failures; the independent `reload_host_usec` field always describes the most recent native attempt, successful or rejected. The native Windows scene additionally measures the wall interval of its latest source compilation request, including compiler process startup and source I/O. Compiler invocation happens outside native GPU execution and is not included in the provider's RD pipeline rebuild timings.
+
+The host validates optional variant metadata as a complete set and accepts the rebuild stage costs only when they fit within their enclosing accepted interval. Incomplete, negative, or contradictory evidence is unavailable rather than silently corrected. The UI reports these values during explicit pipeline inspection and report finalization; no additional driver queries or synchronization enter the benchmark loop. Godot's public RD API does not expose driver shader-cache hits, internal PSO compilation stages, shader occupancy or real wave size, so none is inferred from observed timings.
+
 ## Remaining shader development parity
 
 - Expose real shader compile errors and source mapping where a provider or engine API provides them; the current embedded SPIR-V is compiled ahead of execution.

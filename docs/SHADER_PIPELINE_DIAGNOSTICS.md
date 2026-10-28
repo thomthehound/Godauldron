@@ -118,7 +118,7 @@ Get-Command dxc.exe | Select-Object -ExpandProperty Source
 
 # Prove the selected compiler really emits SPIR-V for this exact shader.
 $probe = Join-Path $env:TEMP "godauldron-dxc-preflight.spv"
-& $compiler -spirv -T cs_6_6 -E main -fspv-target-env=vulkan1.1 -Fo $probe native/vulkan_provider/package/reload_rd_image.hlsl
+& $compiler -spirv -T cs_6_6 -E main '-fspv-target-env=vulkan1.1' -Fo $probe native/vulkan_provider/package/reload_rd_image.hlsl
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $probe)) {
     throw "Selected DXC cannot compile benchmark shader to SPIR-V"
 }
@@ -133,6 +133,8 @@ if ($LASTEXITCODE -ne 0) { throw "Physical AMD benchmark failed" }
 python tools/validate_native_rd_variant_profile.py native_rd_amd_variants.json --mode physical_amd
 if ($LASTEXITCODE -ne 0) { throw "Physical AMD benchmark evidence failed validation" }
 ```
+
+PowerShell can split unquoted native options at a dot (for example, silently turning `-fspv-target-env=vulkan1.1` into an invalid `vulkan1` argument). Quote the **whole** option when invoking `dxc.exe` directly from PowerShell; Godot’s `OS.execute` uses a native argument array and is unaffected.
 
 The benchmark also performs its own real HLSL-to-SPIR-V compiler preflight before creating GPU resources and schedules render-thread retirement of GPU resources on subsequent failures, instead of quitting with live RIDs.
 

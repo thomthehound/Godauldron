@@ -144,7 +144,7 @@ func _run() -> void:
 		_fail("Baseline embedded shader did not produce correct GPU output: " + str(baseline))
 		return
 	batch_index += 1
-		var records: Array[Dictionary] = []
+	var records: Array[Dictionary] = []
 	var total: int = int(_settings["warmup"]) + int(_settings["samples"])
 	var previous_counts := {"shader_creations": 1, "pipeline_creations": 1,
 		"descriptor_creations": 1}

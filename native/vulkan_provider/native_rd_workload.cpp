@@ -232,6 +232,10 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     shader_bytes.resize(sizeof(kPersistentComputeSpirv));
     std::memcpy(shader_bytes.ptrw(), kPersistentComputeSpirv,
                 sizeof(kPersistentComputeSpirv));
+    if (!has_rd_image_abi(shader_bytes)) {
+        return prepare_failure("preflight", "embedded_shader_interface_mismatch",
+                               elapsed_host_usec(began));
+    }
     Ref<RDShaderSPIRV> spirv;
     spirv.instantiate();
     spirv->set_stage_bytecode(RenderingDevice::SHADER_STAGE_COMPUTE, shader_bytes);

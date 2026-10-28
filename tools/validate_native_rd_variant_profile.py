@@ -50,7 +50,7 @@ def check_distribution(summary: dict, values: list[float], label: str) -> None:
 
 
 def validate(report: dict, *, physical: bool = False) -> None:
-    if report.get("schema_version") != 1 or \
+    if report.get("schema_version") not in (1, 2) or \
             report.get("capture_type") != "native_rd_variant_path_comparison" or \
             report.get("validated") is not True:
         raise ValueError("Not a validated native RD variant path comparison")
@@ -59,6 +59,16 @@ def validate(report: dict, *, physical: bool = False) -> None:
     if type(warmup) is not int or type(samples) is not int or \
             not 1 <= warmup <= 8 or not 2 <= samples <= 64:
         raise ValueError("Invalid sample bounds")
+    balanced = report["schema_version"] == 2
+    if balanced:
+        order = report.get("execution_order", {})
+        if warmup not in (3, 6) or samples % 3 != 0 or not 3 <= samples <= 63 or \
+                order.get("method") != "three_order_cyclic_rotation" or \
+                order.get("warmup_full_cycles") != warmup // 3 or \
+                order.get("source_compilation_before_all_arms") is not True or \
+                order.get("GPU_execution_counterbalanced") is not True or \
+                order.get("source_pipeline_build_counterbalanced") is not False:
+            raise ValueError("Invalid counterbalanced trial design")
     device = report["device"]
     if device["backend"] not in ("d3d12", "vulkan"):
         raise ValueError("Unsupported GPU backend")
@@ -78,7 +88,9 @@ def validate(report: dict, *, physical: bool = False) -> None:
     gpu_resolved = 0
     for i, record in enumerate(records):
         trial, position = divmod(i, len(PATHS))
-        if record.get("path") != PATHS[position] or \
+        expected_path = PATHS[(trial + position) % len(PATHS)] if balanced else PATHS[position]
+        if record.get("path") != expected_path or \
+                (balanced and record.get("execution_slot") != position) or \
                 record.get("trial") != trial or \
                 record.get("warmup") is not (trial < warmup) or \
                 record.get("variant_id") != trial + 2 or \
@@ -91,7 +103,9 @@ def validate(report: dict, *, physical: bool = False) -> None:
         selection = record.get("native_selection_host_usec")
         lookup = record.get("native_lookup_host_usec")
         compiler = record.get("compiler_request_host_usec")
-        if position == 0:
+        source_arm = record["path"] == PATHS[0]
+        bytes_arm = record["path"] == PATHS[1]
+        if source_arm:
             for key in (native, compiler):
                 number(key, "source compile/build duration")
             if number(native, "native build") < sum(
@@ -102,7 +116,7 @@ def validate(report: dict, *, physical: bool = False) -> None:
                 raise ValueError("Native build cannot be shorter than its API stages")
             if selection is not None or lookup is not None:
                 raise ValueError("Source build cannot claim ID selection")
-        elif position == 1:
+        elif bytes_arm:
             number(native, "SPIR-V resident-byte match")
             if compiler is not None or selection is not None or lookup is not None:
                 raise ValueError("Byte match conflated with compiler or ID selection")
@@ -112,7 +126,7 @@ def validate(report: dict, *, physical: bool = False) -> None:
                 raise ValueError("ID lookup is longer than native selection")
             if compiler is not None or native is not None:
                 raise ValueError("Direct ID selection invoked another path")
-        if position != 0 and any(
+        if not source_arm and any(
                 record[k] != 0 for k in (
                     "native_shader_create_host_usec",
                     "native_pipeline_create_host_usec",

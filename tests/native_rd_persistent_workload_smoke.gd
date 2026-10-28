@@ -224,8 +224,24 @@ func _run() -> void:
 			if replaced.get("phase") != "consumed" or not reload.get("ok", false) or \
 					int(reload.get("reload_generation", -1)) != batch_index + 1 or \
 					int(reload.get("reload_retired_pipelines", -1)) != batch_index + 1 or \
-					reload.get("shader_origin") != "provider_reloaded_spirv":
+					reload.get("shader_origin") != "provider_reloaded_spirv" or \
+				reload.get("shader_variant_evidence") != "validated_spirv_interface" or \
+				int(reload.get("shader_variant_workgroup_x", 0)) != 8 or \
+				int(reload.get("shader_variant_workgroup_y", 0)) != 8 or \
+				int(reload.get("shader_variant_workgroup_z", 0)) != 1 or \
+				reload.get("shader_variant_image_format") != "r32ui" or \
+				int(reload.get("shader_variant_push_constant_bytes", 0)) != 8:
 				_fail("RD shader candidate was not fully swapped/retired: " + str(reload))
+				return
+			var accepted_rebuild_cost: int = int(reload.get("reload_last_success_host_usec", -1))
+			var measured_stages: int = (
+				int(reload.get("reload_last_success_shader_create_host_usec", -1)) +
+				int(reload.get("reload_last_success_pipeline_create_host_usec", -1)) +
+				int(reload.get("reload_last_success_descriptor_create_host_usec", -1)))
+			if accepted_rebuild_cost < 0 or measured_stages < 0 or \
+					measured_stages > accepted_rebuild_cost or \
+					accepted_rebuild_cost != int(reload.get("reload_host_usec", -1)):
+				_fail("Accepted RD pipeline rebuild costs are inconsistent: " + str(reload))
 				return
 			expected_pipeline_creations += 1
 			expected_shader_creations += 1
@@ -253,6 +269,9 @@ func _run() -> void:
 					return
 				var glsl_done: Dictionary = await _await_phase(effect, "consumed")
 				var glsl_result: Dictionary = effect.call("reload_snapshot")
+				if int(glsl_result.get("reload_last_success_host_usec", -1)) != accepted_rebuild_cost:
+					_fail("Rejected GLSL incorrectly changed last accepted rebuild cost")
+					return
 				if glsl_done.get("phase") != "consumed" or glsl_result.get("ok", true) or \
 						glsl_result.get("error") != "rd_pipeline_reload_incompatible_image_or_push_constant_abi" or \
 						int(glsl_result.get("reload_generation", -1)) != 1:
@@ -416,6 +435,9 @@ func _run() -> void:
 				break
 		var glsl_inspected: Dictionary = PipelineDiagnostics.read(stage)
 		if not glsl_inspected.get("available", false) or \
+				not glsl_inspected.get("source_reload", {}).has("compile_request_host_usec") or \
+				not PipelineDiagnostics.summary(glsl_inspected).contains("last accepted rebuild") or \
+				not PipelineDiagnostics.summary(glsl_inspected).contains("last source compile request") or \
 				glsl_inspected["pipelines"].size() != 1 or \
 				int(glsl_inspected["pipelines"][0].get("reload_generation", 0)) != 2 or \
 				int(glsl_inspected["pipelines"][0].get("reload_retired_pipelines", 0)) != 2 or \

@@ -139,6 +139,55 @@ func _verify() -> void:
 	if Diagnostics.read(provider).get("available", true):
 		_fail("Rebuild stage costs exceeded the actual encompassing interval")
 		return
+	# Resident shader variants report exact-byte provider reuse rather than
+	# fictitious driver cache hits or one destroyed PSO per selection.
+	provider.evidence = copy.duplicate(true)
+	var retained: Dictionary = provider.evidence["pipelines"][0]
+	retained["prepare_count"] = 1
+	retained["reload_attempts"] = 3
+	retained["reload_generation"] = 2
+	retained["reload_failures"] = 1
+	retained["reload_retired_pipelines"] = 0
+	retained["reload_host_usec"] = 20
+	retained["reload_error"] = ""
+	retained["reload_failure_stage"] = ""
+	retained["reload_available"] = true
+	retained["shader_creations"] = 2
+	retained["pipeline_creations"] = 2
+	retained["variant_capacity"] = 3
+	retained["variant_resident_count"] = 2
+	retained["variant_active_id"] = 2
+	retained["variant_builds"] = 2
+	retained["variant_reuses"] = 1
+	retained["variant_evictions"] = 0
+	retained["variant_release_retirements"] = 0
+	retained["variant_last_action"] = "reused"
+	retained["resident_variants"] = [
+		{"id": 1, "active": false}, {"id": 2, "active": true}]
+	var residency_report: Dictionary = Diagnostics.read(provider)
+	if not residency_report.get("available", false) or \
+			not Diagnostics.summary(residency_report).contains("2/3 resident") or \
+			not Diagnostics.summary(residency_report).contains("1 reused"):
+		_fail("Real provider pipeline variant residency was discarded")
+		return
+	for change in ["variant_active_id", "variant_builds",
+			"variant_resident_count", "reload_retired_pipelines"]:
+		provider.evidence = copy.duplicate(true)
+		var broken_residency: Dictionary = provider.evidence["pipelines"][0]
+		for key in retained.keys():
+			broken_residency[key] = retained[key]
+		broken_residency[change] = int(broken_residency[change]) + 1
+		if Diagnostics.read(provider).get("available", true):
+			_fail("Contradictory variant residency passed inspection: " + change)
+			return
+	provider.evidence = copy.duplicate(true)
+	var missing_residency: Dictionary = provider.evidence["pipelines"][0]
+	for key in retained.keys():
+		missing_residency[key] = retained[key]
+	missing_residency.erase("variant_evictions")
+	if Diagnostics.read(provider).get("available", true):
+		_fail("Partial variant residency was accepted as measured data")
+		return
 	provider.evidence = copy
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)

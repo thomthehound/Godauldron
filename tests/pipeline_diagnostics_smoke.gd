@@ -188,6 +188,37 @@ func _verify() -> void:
 	if Diagnostics.read(provider).get("available", true):
 		_fail("Partial variant residency was accepted as measured data")
 		return
+	provider.evidence = copy.duplicate(true)
+	var selected: Dictionary = provider.evidence["pipelines"][0]
+	for key in retained.keys():
+		selected[key] = retained[key]
+	selected["variant_selection_requests"] = 1
+	selected["variant_selection_failures"] = 0
+	selected["variant_last_lookup_host_usec"] = 2
+	selected["variant_last_selection_host_usec"] = 5
+	var selection_report: Dictionary = Diagnostics.read(provider)
+	if not selection_report.get("available", false) or \
+			not Diagnostics.summary(selection_report).contains("direct selections 1"):
+		_fail("Explicit provider variant selection evidence was lost")
+		return
+	for field in ["variant_selection_requests", "variant_selection_failures",
+			"variant_last_lookup_host_usec", "variant_last_selection_host_usec"]:
+		provider.evidence = copy.duplicate(true)
+		var partial: Dictionary = provider.evidence["pipelines"][0]
+		for key in selected.keys():
+			partial[key] = selected[key]
+		partial.erase(field)
+		if Diagnostics.read(provider).get("available", true):
+			_fail("Partial native selection evidence was accepted: " + field)
+			return
+	provider.evidence = copy.duplicate(true)
+	var bad_cost: Dictionary = provider.evidence["pipelines"][0]
+	for key in selected.keys():
+		bad_cost[key] = selected[key]
+	bad_cost["variant_last_lookup_host_usec"] = 6
+	if Diagnostics.read(provider).get("available", true):
+		_fail("Impossible variant ID lookup duration was accepted")
+		return
 	provider.evidence = copy
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)

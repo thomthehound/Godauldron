@@ -27,6 +27,7 @@ var _last_resolved_frame := -1
 var _gpu_intervals: Dictionary = {}
 var _rejected_gpu_intervals := 0
 var _reload_bytecode := PackedByteArray()
+var _selected_variant_id := 0
 var _reload_result: Dictionary = {}
 var _source_reload: Dictionary = {}
 var _shutdown_requested := false
@@ -88,6 +89,21 @@ func request_reload_spirv(bytecode: PackedByteArray) -> bool:
 		_reload_bytecode = bytecode.duplicate()
 		_reload_result = {}
 		_phase = "reload_armed"
+	_mutex.unlock()
+	return allowed
+
+
+# Explicit selection of an existing GPU pipeline. No shader compiler,
+# source I/O or native RID allocation occurs on this path.
+func request_select_variant(variant_id: int) -> bool:
+	if variant_id < 1:
+		return false
+	_mutex.lock()
+	var allowed: bool = _phase in ["idle", "consumed"] and not _shutdown_requested
+	if allowed:
+		_selected_variant_id = variant_id
+		_reload_result = {}
+		_phase = "select_armed"
 	_mutex.unlock()
 	return allowed
 
@@ -421,7 +437,8 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 	if action == "armed":
 		_phase = "in_flight"
 	_mutex.unlock()
-	if action not in ["armed", "release_requested", "reload_armed"] and not _profiling:
+	if action not in ["armed", "release_requested", "reload_armed",
+			"select_armed"] and not _profiling:
 		return
 	var rd: RenderingDevice = RenderingServer.get_rendering_device()
 	if rd == null:
@@ -429,7 +446,22 @@ func _render_callback(callback_type: int, _render_data: RenderData) -> void:
 		return
 	if _profiling:
 		_harvest_gpu_timestamps(rd)
-	if action not in ["armed", "release_requested", "reload_armed"]:
+	if action not in ["armed", "release_requested", "reload_armed",
+			"select_armed"]:
+		return
+	if action == "select_armed":
+		_mutex.lock()
+		var variant_id: int = _selected_variant_id
+		_selected_variant_id = 0
+		_mutex.unlock()
+		var selection: Dictionary = (
+			_workload.call("select_variant", rd, variant_id)
+			if _workload != null else
+			{"ok": false, "error": "rd_variant_pipeline_not_prepared"})
+		_mutex.lock()
+		_reload_result = selection.duplicate(true)
+		_phase = "consumed"
+		_mutex.unlock()
 		return
 	if action == "reload_armed":
 		# A queued batch is never allowed to race resource replacement.

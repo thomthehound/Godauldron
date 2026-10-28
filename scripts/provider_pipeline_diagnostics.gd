@@ -90,7 +90,7 @@ static func read(scene: Node) -> Dictionary:
 					typeof(item.get("reload_error")) != TYPE_STRING or \
 					String(item["reload_error"]).length() > MAX_LABEL or \
 					item.get("reload_failure_stage") not in ["", "shader", "pipeline",
-						"lifecycle", "in_flight"]:
+						"descriptor", "lifecycle", "in_flight"]:
 				return unavailable("invalid_pipeline_reload_failure")
 			entry["reload_available"] = item["reload_available"]
 			entry["reload_error"] = item["reload_error"]

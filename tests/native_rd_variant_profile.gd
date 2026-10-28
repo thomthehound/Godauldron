@@ -4,9 +4,11 @@ extends SceneTree
 
 const Package = preload("res://scripts/native_experiment_package.gd")
 const Observability = preload("res://scripts/performance_observability.gd")
+const PATHS := ["source_compile_and_build", "resident_spirv_byte_match",
+	"direct_resident_id"]
 
 var _settings := {"mode": "software", "width": 13, "height": 9,
-	"warmup": 1, "samples": 4, "output": "user://native_rd_variant_profile.json"}
+	"warmup": 3, "samples": 12, "output": "user://native_rd_variant_profile.json"}
 
 
 func _initialize() -> void:
@@ -37,8 +39,9 @@ func _parse_args() -> bool:
 		int(_settings["width"]) >= 1 and int(_settings["height"]) >= 1 and \
 		int(_settings["width"]) * int(_settings["height"]) <= 1024 * 1024 and \
 		int(_settings["width"]) <= 2048 and int(_settings["height"]) <= 2048 and \
-		int(_settings["warmup"]) >= 1 and int(_settings["warmup"]) <= 8 and \
-		int(_settings["samples"]) >= 2 and int(_settings["samples"]) <= 64 and \
+		int(_settings["warmup"]) >= 3 and int(_settings["warmup"]) <= 6 and \
+		int(_settings["samples"]) >= 3 and int(_settings["samples"]) <= 63 and \
+		int(_settings["warmup"]) % 3 == 0 and int(_settings["samples"]) % 3 == 0 and \
 		not String(_settings["output"]).is_empty()
 
 
@@ -185,90 +188,92 @@ func _run() -> void:
 				shader_usec < 0 or pipeline_usec < 0 or descriptor_usec < 0:
 			_fail("Source pipeline setup timings are inconsistent")
 			return
-		var source_gpu: Dictionary = await _execute(effect, offset, width, height, batch_index)
-		batch_index += 1
-		if not source_gpu.get("ok", false):
-			_fail("New source variant produced wrong GPU output: " + str(source_gpu))
-			return
-		var source_record := {"path": "source_compile_and_build",
-			"compiler_request_host_usec": compiler_usec,
-			"native_reload_host_usec": native_total,
-			"native_shader_create_host_usec": shader_usec,
-			"native_pipeline_create_host_usec": pipeline_usec,
-			"native_descriptor_create_host_usec": descriptor_usec,
-			"native_lookup_host_usec": null,
-			"native_selection_host_usec": null,
-			"gpu": source_gpu}
-		if not await _select(effect, 1):
-			_fail("Embedded baseline variant was evicted or could not be restored")
-			return
-		# This uses the very same compiler-produced bytes, with no compile call.
-		if not bool(effect.call("request_reload_spirv", bytecode)):
-			_fail("Cannot queue precompiled shader bytes")
-			return
-		var bytes_phase: Dictionary = await _await_phase(effect, "consumed")
-		var matched: Dictionary = effect.call("reload_snapshot")
-		if bytes_phase.get("phase") != "consumed" or not matched.get("ok", false) or \
-				matched.get("variant_last_action") != "reused" or \
-				int(matched.get("variant_active_id", -1)) != selected_id:
-			_fail("Exact SPIR-V bytes did not select resident PSO: " + str(matched))
-			return
-		var bytecode_gpu: Dictionary = await _execute(effect, offset, width, height, batch_index)
-		batch_index += 1
-		if not bytecode_gpu.get("ok", false):
-			_fail("Bytecode-selected GPU output differs: " + str(bytecode_gpu))
-			return
-		var bytecode_record := {"path": "resident_spirv_byte_match",
-			"compiler_request_host_usec": null,
-			"native_reload_host_usec": int(matched.get("reload_host_usec", -1)),
-			"native_shader_create_host_usec": 0,
-			"native_pipeline_create_host_usec": 0,
-			"native_descriptor_create_host_usec": 0,
-			"native_lookup_host_usec": null,
-			"native_selection_host_usec": null,
-			"gpu": bytecode_gpu}
-		if not await _select(effect, 1) or \
-				not bool(effect.call("request_select_variant", selected_id)):
-			_fail("Cannot queue direct resident ID selection")
-			return
-		var select_phase: Dictionary = await _await_phase(effect, "consumed")
-		var picked: Dictionary = effect.call("reload_snapshot")
-		if select_phase.get("phase") != "consumed" or not picked.get("ok", false) or \
-				int(picked.get("variant_active_id", -1)) != selected_id or \
-				picked.get("variant_last_action") != "reused" or \
-				int(picked.get("variant_last_lookup_host_usec", -1)) < 0 or \
-				int(picked.get("variant_last_lookup_host_usec", 0)) > \
-					int(picked.get("variant_last_selection_host_usec", -1)):
-			_fail("Direct resident variant ID selection did not finish: " + str(picked))
-			return
-		var direct_gpu: Dictionary = await _execute(effect, offset, width, height, batch_index)
-		batch_index += 1
-		if not direct_gpu.get("ok", false):
-			_fail("Direct-selected GPU output differs: " + str(direct_gpu))
-			return
-		var direct_record := {"path": "direct_resident_id",
-			"compiler_request_host_usec": null,
-			"native_reload_host_usec": null,
-			"native_shader_create_host_usec": 0,
-			"native_pipeline_create_host_usec": 0,
-			"native_descriptor_create_host_usec": 0,
-			"native_lookup_host_usec": int(picked["variant_last_lookup_host_usec"]),
-			"native_selection_host_usec": int(picked["variant_last_selection_host_usec"]),
-			"gpu": direct_gpu}
-		var latest: Dictionary = direct_gpu.get("completion", {})
+		# Source compilation and native PSO construction are causally required
+		# before either resident-selection path. GPU execution and the two
+		# resident-selection operations CAN be balanced: rotate all three
+		# orders across trials rather than always warming the source arm first.
+		var order := [PATHS[trial % 3], PATHS[(trial + 1) % 3],
+			PATHS[(trial + 2) % 3]]
+		var trial_records: Array[Dictionary] = []
+		for slot in range(3):
+			var arm: String = order[slot]
+			var entry := {"path": arm, "trial": trial,
+				"warmup": trial < int(_settings["warmup"]),
+				"variant_id": selected_id, "execution_slot": slot,
+				"compiler_request_host_usec": null,
+				"native_reload_host_usec": null,
+				"native_shader_create_host_usec": 0,
+				"native_pipeline_create_host_usec": 0,
+				"native_descriptor_create_host_usec": 0,
+				"native_lookup_host_usec": null,
+				"native_selection_host_usec": null}
+			if arm == "source_compile_and_build":
+				# First use of this shader need not be the first GPU arm.
+				# Restoring its original RID does not remeasure build costs.
+				if not await _select(effect, selected_id):
+					_fail("Cannot restore the newly constructed GPU shader")
+					return
+				entry["compiler_request_host_usec"] = compiler_usec
+				entry["native_reload_host_usec"] = native_total
+				entry["native_shader_create_host_usec"] = shader_usec
+				entry["native_pipeline_create_host_usec"] = pipeline_usec
+				entry["native_descriptor_create_host_usec"] = descriptor_usec
+			elif arm == "resident_spirv_byte_match":
+				if not await _select(effect, 1) or \
+						not bool(effect.call("request_reload_spirv", bytecode)):
+					_fail("Cannot queue exact compiled SPIR-V variant")
+					return
+				var bytes_phase: Dictionary = await _await_phase(effect, "consumed")
+				var matched: Dictionary = effect.call("reload_snapshot")
+				if bytes_phase.get("phase") != "consumed" or \
+						not matched.get("ok", false) or \
+						matched.get("variant_last_action") != "reused" or \
+						int(matched.get("variant_active_id", -1)) != selected_id:
+					_fail("Exact SPIR-V bytes did not reuse the resident PSO: " +
+						str(matched))
+					return
+				entry["native_reload_host_usec"] = int(
+					matched.get("reload_host_usec", -1))
+			else:
+				if not await _select(effect, 1) or \
+						not bool(effect.call("request_select_variant", selected_id)):
+					_fail("Cannot queue direct resident ID selection")
+					return
+				var id_phase: Dictionary = await _await_phase(effect, "consumed")
+				var picked: Dictionary = effect.call("reload_snapshot")
+				if id_phase.get("phase") != "consumed" or \
+						not picked.get("ok", false) or \
+						int(picked.get("variant_active_id", -1)) != selected_id or \
+						picked.get("variant_last_action") != "reused" or \
+						int(picked.get("variant_last_lookup_host_usec", -1)) < 0 or \
+						int(picked.get("variant_last_lookup_host_usec", 0)) > \
+							int(picked.get("variant_last_selection_host_usec", -1)):
+					_fail("Direct resident ID selection did not finish: " + str(picked))
+					return
+				entry["native_lookup_host_usec"] = int(
+					picked["variant_last_lookup_host_usec"])
+				entry["native_selection_host_usec"] = int(
+					picked["variant_last_selection_host_usec"])
+			# All three arms execute the same native pipeline and validate
+			# actual pixels. No source compiling or RID allocation is inside
+			# the device timestamp interval.
+			var gpu: Dictionary = await _execute(
+				effect, offset, width, height, batch_index)
+			batch_index += 1
+			if not gpu.get("ok", false):
+				_fail("Matched GPU variant failed in " + arm + ": " + str(gpu))
+				return
+			entry["gpu_batch_index"] = int(gpu["gpu_batch_index"])
+			entry["host_request_to_readback_usec"] = int(
+				gpu["host_request_to_readback_usec"])
+			trial_records.append(entry)
+		var latest: Dictionary = effect.call("reload_snapshot")
+
 		for count_key in previous_counts:
 			if int(latest.get(count_key, -1)) != trial + 2:
 				_fail("Variant path unexpectedly recreated GPU resources: " + count_key)
 				return
-		for record in [source_record, bytecode_record, direct_record]:
-			record["trial"] = trial
-			record["warmup"] = trial < int(_settings["warmup"])
-			record["variant_id"] = selected_id
-			record["gpu_batch_index"] = int(record["gpu"]["gpu_batch_index"])
-			record["host_request_to_readback_usec"] = int(
-				record["gpu"]["host_request_to_readback_usec"])
-			record.erase("gpu")
-			records.append(record)
+		records.append_array(trial_records)
 	# Device timestamps resolve later than the asynchronous readback. Do not
 	# substitute request-to-readback wall time if a GPU timestamp is missing.
 	var required_intervals := batch_index
@@ -283,8 +288,7 @@ func _run() -> void:
 	var profile: Dictionary = effect.call("profile_snapshot")
 	var intervals: Dictionary = profile.get("gpu_intervals", {})
 	var distributions := {}
-	var path_names := ["source_compile_and_build", "resident_spirv_byte_match",
-		"direct_resident_id"]
+	var path_names := PATHS
 	for path_name in path_names:
 		var compiler_samples: Array[float] = []
 		var native_samples: Array[float] = []
@@ -349,6 +353,13 @@ func _run() -> void:
 		"device": device,
 		"shader_abi": "8x8x1 r32ui image and 8-byte push constants",
 		"shader_variant": "identical executable shader per trial across all three paths",
+		"execution_order": {
+			"method": "three_order_cyclic_rotation",
+			"warmup_full_cycles": int(_settings["warmup"]) / 3,
+			"source_compilation_before_all_arms": true,
+			"GPU_execution_counterbalanced": true,
+			"source_pipeline_build_counterbalanced": false
+		},
 		"timing": {"host": "steady wall microseconds, excludes GPU execution",
 			"gpu": "resolved Godot RD device timestamp compute-list window, excludes readback",
 			"readback": "request-to-readback host wall, includes frame scheduling and transfer",

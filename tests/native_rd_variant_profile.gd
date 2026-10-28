@@ -260,7 +260,6 @@ func _run() -> void:
 			if int(latest.get(count_key, -1)) != trial + 2:
 				_fail("Variant path unexpectedly recreated GPU resources: " + count_key)
 				return
-		previous_counts = latest.duplicate(true)
 		for record in [source_record, bytecode_record, direct_record]:
 			record["trial"] = trial
 			record["warmup"] = trial < int(_settings["warmup"])

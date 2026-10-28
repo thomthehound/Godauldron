@@ -401,7 +401,44 @@ func _run() -> void:
 				inspected.get("source_reload", {}).get("active_language") != "hlsl":
 			_fail("Host-visible RD provider HLSL pipeline/diagnostic integration failed: " + str(inspected))
 			return
+		if not stage.call("godauldron_set_runtime_control", "shader_reload_language", "glsl").get("ok", false):
+			_fail("RD provider could not select GLSL for a real D3D12 PSO")
+			return
+		var glsl_queued: Dictionary = stage.call("godauldron_reload_shader")
+		if not glsl_queued.get("ok", false) or not glsl_queued.get("queued", false):
+			_fail("D3D12 provider scene could not compile GLSL: " + str(glsl_queued))
+			return
+		for frame in range(210):
+			await process_frame
+			scene_report = stage.call("godauldron_pipeline_diagnostics")
+			var entries: Array = scene_report.get("pipelines", [])
+			if not entries.is_empty() and int(entries[0].get("reload_generation", 0)) == 2:
+				break
+		var glsl_inspected: Dictionary = PipelineDiagnostics.read(stage)
+		if not glsl_inspected.get("available", false) or \
+				glsl_inspected["pipelines"].size() != 1 or \
+				int(glsl_inspected["pipelines"][0].get("reload_generation", 0)) != 2 or \
+				int(glsl_inspected["pipelines"][0].get("reload_retired_pipelines", 0)) != 2 or \
+				glsl_inspected.get("source_reload", {}).get("active_language") != "glsl":
+			_fail("D3D12 scene did not accept and retire GLSL PSO: " + str(glsl_inspected))
+			return
 		var owned: CompositorEffect = stage.get("_reload_effect")
+		if not owned.call("request_batch", PackedInt32Array([3, 5])):
+			_fail("D3D12 GLSL provider PSO could not arm real GPU work")
+			return
+		var glsl_ready: Dictionary = await _await_phase(owned, "ready")
+		if glsl_ready.get("phase") != "ready":
+			_fail("D3D12 GLSL provider PSO did not finish: " + str(glsl_ready))
+			return
+		var glsl_batch: Dictionary = owned.call("take_batch")
+		var glsl_bytes: PackedByteArray = glsl_batch.get("bytes", PackedByteArray())
+		if not glsl_batch.get("ok", false) or glsl_bytes.size() != WIDTH * HEIGHT * 4:
+			_fail("D3D12 GLSL provider produced no readback: " + str(glsl_batch))
+			return
+		for pixel in range(WIDTH * HEIGHT):
+			if glsl_bytes.decode_u32(pixel * 4) != 8 + 2 * pixel:
+				_fail("D3D12 scene GLSL replacement produced incorrect pixel %d" % pixel)
+				return
 		viewport.remove_child(stage)
 		stage.queue_free()
 		var shutdown: Dictionary = {}

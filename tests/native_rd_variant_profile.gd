@@ -154,7 +154,7 @@ func _run() -> void:
 	if baseline.get("ok", false) and not baseline.get("completion", {}).has("variant_active_id"):
 		# An unexpected older metadata contract must still retire RIDs on
 		# Godot's render thread after its completed asynchronous readback.
-		if effect.request_release():
+		if bool(effect.call("request_release")):
 			await _await_phase(effect, "released")
 		camera.compositor = null
 		_fail("Installed native RD DLL lacks variant_active_id metadata. " +
@@ -162,7 +162,7 @@ func _run() -> void:
 		return
 	if not baseline.get("ok", false) or \
 			int(baseline.get("completion", {}).get("variant_active_id", -1)) != 1:
-		if baseline.get("ok", false) and effect.request_release():
+		if baseline.get("ok", false) and bool(effect.call("request_release")):
 			await _await_phase(effect, "released")
 		camera.compositor = null
 		_fail("Native RD embedded pipeline baseline failed: " + str(baseline))

@@ -249,7 +249,7 @@ jobs:
       - name: Compare compiled, byte-matched, and direct resident variants on Vulkan
         run: |
           set -o pipefail
-          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 240s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_rd_variant_profile.gd -- --mode software --warmup 1 --samples 3 --output res://native_rd_vulkan_variants.json 2>&1 | tee native-rd-variant-validation.log
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation timeout --signal=TERM --kill-after=5s 240s xvfb-run -a .engine/godot --path . --rendering-method forward_plus --script res://tests/native_rd_variant_profile.gd -- --mode software --warmup 3 --samples 3 --output res://native_rd_vulkan_variants.json 2>&1 | tee native-rd-variant-validation.log
           python tools/validate_native_rd_variant_profile.py native_rd_vulkan_variants.json --mode software
           if grep -E 'VUID-|Validation Error' native-rd-variant-validation.log; then
             echo "Variant comparison violates native Vulkan validation"
@@ -379,7 +379,7 @@ jobs:
       - name: Compare compiled, byte-matched, and direct resident variants on D3D12 WARP
         shell: pwsh
         run: |
-          & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_variant_profile.gd -- --mode software --warmup 1 --samples 3 --output res://native_rd_warp_variants.json
+          & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_variant_profile.gd -- --mode software --warmup 3 --samples 3 --output res://native_rd_warp_variants.json
           if ($LASTEXITCODE -ne 0) { throw "Native RD D3D12 variant path benchmark failed" }
           python tools/validate_native_rd_variant_profile.py native_rd_warp_variants.json --mode software
           if ($LASTEXITCODE -ne 0) { throw "Native RD WARP variant profile evidence is invalid" }

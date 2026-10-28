@@ -62,6 +62,40 @@ def fixture() -> dict:
     }
 
 
+def balanced_fixture() -> dict:
+    report = fixture()
+    warmup, samples = 3, 3
+    template_by_path = {r["path"]: r for r in report["records"][:3]}
+    rows = []
+    for trial in range(warmup + samples):
+        for slot in range(3):
+            path = PATHS[(trial + slot) % 3]
+            row = copy.deepcopy(template_by_path[path])
+            row.update(path=path, trial=trial, execution_slot=slot,
+                       warmup=trial < warmup, variant_id=trial + 2,
+                       gpu_batch_index=trial * 3 + slot + 1,
+                       gpu_device_frame=trial * 3 + slot + 1)
+            rows.append(row)
+    report["schema_version"] = 2
+    report["settings"].update(warmup=warmup, samples=samples)
+    report["execution_order"] = {
+        "method": "three_order_cyclic_rotation",
+        "warmup_full_cycles": 1,
+        "source_compilation_before_all_arms": True,
+        "GPU_execution_counterbalanced": True,
+        "source_pipeline_build_counterbalanced": False,
+    }
+    report["records"] = rows
+    report["gpu_timing"].update(required_measured=9, resolved_measured=9)
+    for path in PATHS:
+        for section in report["results"][path].values():
+            if section["count"] > 0:
+                section["count"] = 3
+    report["resource_lifecycle"].update(
+        variant_builds=7, pipeline_creations=7, variant_evictions=4)
+    return report
+
+
 class VariantPathProvenanceTest(unittest.TestCase):
     def test_matching_shader_paths_and_missing_gpu_time(self) -> None:
         report = fixture()
@@ -88,6 +122,26 @@ class VariantPathProvenanceTest(unittest.TestCase):
         # device timestamp without changing its count.
         with self.assertRaisesRegex(ValueError, "incorrect sample count"):
             validate(report)
+
+    def test_counterbalanced_three_orders_and_causal_compilation(self) -> None:
+        report = balanced_fixture()
+        validate(report)
+        measured = [r for r in report["records"] if not r["warmup"]]
+        for slot in range(3):
+            self.assertEqual({r["path"] for r in measured
+                              if r["execution_slot"] == slot}, set(PATHS))
+        for tamper in (
+            lambda r: r["records"][4].update(path=PATHS[1]),
+            lambda r: r["records"][4].update(execution_slot=0),
+            lambda r: r["execution_order"].update(
+                source_pipeline_build_counterbalanced=True),
+            lambda r: r["settings"].update(samples=4),
+        ):
+            with self.subTest(tamper=tamper):
+                bad = copy.deepcopy(report)
+                tamper(bad)
+                with self.assertRaises(ValueError):
+                    validate(bad)
 
     def test_domain_mixups_and_eviction_fabrication(self) -> None:
         edits = (

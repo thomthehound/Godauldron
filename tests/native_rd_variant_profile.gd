@@ -144,8 +144,7 @@ func _run() -> void:
 		_fail("Baseline embedded shader did not produce correct GPU output: " + str(baseline))
 		return
 	batch_index += 1
-	var initial: Dictionary = baseline["completion"]
-	var records: Array[Dictionary] = []
+		var records: Array[Dictionary] = []
 	var total: int = int(_settings["warmup"]) + int(_settings["samples"])
 	var previous_counts := {"shader_creations": 1, "pipeline_creations": 1,
 		"descriptor_creations": 1}
@@ -346,7 +345,7 @@ func _run() -> void:
 		"windows_dxgi_verification": baseline.get("adapter_evidence", {}),
 		"physical_amd_verified": windows and _settings["mode"] == "physical_amd" and \
 			bool(baseline.get("adapter_evidence", {}).get("verified_physical_amd", false))}
-	var report := {"schema_version": 1,
+	var report := {"schema_version": 2,
 		"capture_type": "native_rd_variant_path_comparison",
 		"validated": true,
 		"settings": _settings.duplicate(true),

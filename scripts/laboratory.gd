@@ -143,6 +143,8 @@ var _observability_label: Label
 var _provider_timing_label: Label
 var _pipeline_lifecycle_label: Label
 var _reload_shader_button: Button
+var _pipeline_variant_picker: OptionButton
+var _select_pipeline_variant_button: Button
 var _provider_timeline_label: Label
 var _provider_timeline_window: Window
 var _provider_timeline_data: Dictionary = {}
@@ -751,6 +753,17 @@ func _build_ui() -> void:
 	_reload_shader_button.pressed.connect(_reload_provider_shader)
 	_reload_shader_button.disabled = true
 	pipeline_row.add_child(_reload_shader_button)
+	_pipeline_variant_picker = OptionButton.new()
+	_pipeline_variant_picker.tooltip_text = "Actual provider-owned resident GPU pipelines; no source compilation"
+	_pipeline_variant_picker.visible = false
+	pipeline_row.add_child(_pipeline_variant_picker)
+	_select_pipeline_variant_button = Button.new()
+	_select_pipeline_variant_button.text = "Select variant"
+	_select_pipeline_variant_button.tooltip_text = "Switch to a resident shader pipeline on the provider render thread"
+	_select_pipeline_variant_button.visible = false
+	_select_pipeline_variant_button.disabled = true
+	_select_pipeline_variant_button.pressed.connect(_select_provider_pipeline_variant)
+	pipeline_row.add_child(_select_pipeline_variant_button)
 	_pipeline_lifecycle_label = Label.new()
 	_pipeline_lifecycle_label.text = "Provider pipelines: not inspected"
 	_pipeline_lifecycle_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1948,6 +1961,10 @@ func _select_experiment(index: int) -> void:
 	_provider_timing_label.text = "Provider GPU: unavailable (no completed run for selected experiment)"
 	_pipeline_lifecycle_label.text = "Provider pipelines: not inspected for selected experiment"
 	_reload_shader_button.disabled = true
+	_pipeline_variant_picker.clear()
+	_pipeline_variant_picker.visible = false
+	_select_pipeline_variant_button.visible = false
+	_select_pipeline_variant_button.disabled = true
 	_provider_timeline_label.text = "Provider queue timeline: unavailable (no completed run)"
 	_provider_timeline_data.clear()
 	if _provider_timeline_window != null:
@@ -3311,7 +3328,53 @@ func _reload_provider_shader() -> void:
 		_status.text = "Native shader replacement queued on provider render thread; inspect pipelines after completion"
 	else:
 		_status.text = "Native shader pipeline replaced (generation %d)" % int(result.get("generation", -1))
-	_pipeline_lifecycle_label.text = PipelineDiagnostics.summary(PipelineDiagnostics.read(_active_scene))
+	var report: Dictionary = PipelineDiagnostics.read(_active_scene)
+	_pipeline_lifecycle_label.text = PipelineDiagnostics.summary(report)
+	_update_pipeline_variant_picker(report)
+
+
+func _update_pipeline_variant_picker(report: Dictionary) -> void:
+	_pipeline_variant_picker.clear()
+	var available := _active_scene != null and \
+			_active_scene.has_method("godauldron_select_pipeline_variant") and \
+			bool(report.get("available", false))
+	if available:
+		for pipeline in report.get("pipelines", []):
+			var active_id: int = int(pipeline.get("variant_active_id", 0))
+			for resident in pipeline.get("resident_variants", []):
+				var id: int = int(resident.get("id", 0))
+				if id < 1:
+					continue
+				_pipeline_variant_picker.add_item("Variant %d%s" % [
+					id, " (active)" if id == active_id else ""])
+				_pipeline_variant_picker.set_item_metadata(
+					_pipeline_variant_picker.item_count - 1, id)
+				if id == active_id:
+					_pipeline_variant_picker.select(_pipeline_variant_picker.item_count - 1)
+	var has_variants := _pipeline_variant_picker.item_count > 0
+	_pipeline_variant_picker.visible = has_variants
+	_select_pipeline_variant_button.visible = has_variants
+	_select_pipeline_variant_button.disabled = not has_variants
+
+
+func _select_provider_pipeline_variant() -> void:
+	if _capture_pending or _has_active_run() or _campaign != null or \
+			(_comparison_window != null and \
+			(_comparison_window.visible or bool(_comparison_window.call("analysis_busy")))):
+		_status.text = "Pipeline selection unavailable during measurement, capture or analysis"
+		return
+	if _active_scene == null or \
+			not _active_scene.has_method("godauldron_select_pipeline_variant") or \
+			_pipeline_variant_picker.selected < 0:
+		_status.text = "No selectable resident provider pipeline"
+		return
+	var id: int = int(_pipeline_variant_picker.get_item_metadata(
+		_pipeline_variant_picker.selected))
+	var result: Variant = _active_scene.call("godauldron_select_pipeline_variant", id)
+	if typeof(result) != TYPE_DICTIONARY or not result.get("ok", false):
+		_status.text = "Resident pipeline selection rejected: " + str(result)
+	else:
+		_status.text = "Resident pipeline %d selection queued; inspect after provider completion" % id
 
 
 func _inspect_provider_pipelines() -> void:
@@ -3322,6 +3385,7 @@ func _inspect_provider_pipelines() -> void:
 		return
 	var report: Dictionary = PipelineDiagnostics.read(_active_scene)
 	_pipeline_lifecycle_label.text = PipelineDiagnostics.summary(report)
+	_update_pipeline_variant_picker(report)
 
 
 func _show_provider_gpu_timeline() -> void:

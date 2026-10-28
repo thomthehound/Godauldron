@@ -611,6 +611,51 @@ func _run() -> void:
 			_fail("D3D12 scene did not accept and retire GLSL PSO: " + str(glsl_inspected))
 			return
 		var owned: CompositorEffect = stage.get("_reload_effect")
+		host.call("_inspect_provider_pipelines")
+		var picker: OptionButton = host.get("_pipeline_variant_picker")
+		var pick_button: Button = host.get("_select_pipeline_variant_button")
+		if picker == null or pick_button == null or not picker.visible or \
+				picker.item_count != 3 or pick_button.disabled:
+			_fail("Laboratory did not expose the real resident RD variants")
+			return
+		var compile_attempts: int = int(glsl_inspected["source_reload"]["attempts"])
+		var previous_compile_usec: int = int(
+			glsl_inspected["source_reload"]["compile_request_host_usec"])
+		for choice in range(2):
+			var id: int = 2 if choice == 0 else 3
+			var selected := false
+			for item in range(picker.item_count):
+				if int(picker.get_item_metadata(item)) == id:
+					picker.select(item)
+					selected = true
+					break
+			if not selected:
+				_fail("Selected compiled RD pipeline was absent from laboratory control")
+				return
+			host.call("_select_provider_pipeline_variant")
+			if not String((host.get("_status") as Label).text).contains(
+					"pipeline %d selection queued" % id):
+				_fail("Laboratory did not route real resident variant selection")
+				return
+			var changed: Dictionary = await _await_phase(owned, "consumed")
+			var inspected_choice: Dictionary = PipelineDiagnostics.read(stage)
+			var chosen: Dictionary = inspected_choice.get("pipelines", [{}])[0]
+			if changed.get("phase") != "consumed" or \
+					not inspected_choice.get("available", false) or \
+					int(chosen.get("variant_active_id", -1)) != id or \
+					int(chosen.get("variant_selection_requests", -1)) != choice + 1 or \
+					int(chosen.get("pipeline_creations", -1)) != 3 or \
+					int(chosen.get("variant_last_lookup_host_usec", -1)) < 0 or \
+					int(chosen.get("variant_last_lookup_host_usec", 0)) > \
+						int(chosen.get("variant_last_selection_host_usec", -1)) or \
+					int(inspected_choice.get("source_reload", {}).get("attempts", -1)) != compile_attempts or \
+					int(inspected_choice.get("source_reload", {}).get("compile_request_host_usec", -1)) != previous_compile_usec or \
+					inspected_choice.get("source_reload", {}).get("active_language") != (
+						"hlsl" if id == 2 else "glsl"):
+				_fail("Scene variant selection rebuilt resources or misreported active source: " +
+					str(inspected_choice))
+				return
+			host.call("_inspect_provider_pipelines")
 		if not owned.call("request_batch", PackedInt32Array([3, 5])):
 			_fail("D3D12 GLSL provider PSO could not arm real GPU work")
 			return

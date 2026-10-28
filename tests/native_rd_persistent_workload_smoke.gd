@@ -335,7 +335,8 @@ func _run() -> void:
 	var previous_shader_creations: int = int(before_reuse.get("shader_creations", -1))
 	var previous_pipeline_creations: int = int(before_reuse.get("pipeline_creations", -1))
 	var previous_descriptor_creations: int = int(before_reuse.get("descriptor_creations", -1))
-	for language in ["hlsl", "glsl", "hlsl"]:
+	for choice in range(3):
+		var language: String = "glsl" if choice == 1 else "hlsl"
 		var queued_variant: Dictionary = (
 			effect.call("request_hlsl_reload", hlsl_source_path) if language == "hlsl"
 			else effect.call("request_glsl_reload", glsl_source_path))
@@ -346,9 +347,7 @@ func _run() -> void:
 		var reused: Dictionary = effect.call("reload_snapshot")
 		if variant_done.get("phase") != "consumed" or not reused.get("ok", false) or \
 				reused.get("variant_last_action") not in ["reused", "already_active"] or \
-				int(reused.get("variant_reuses", -1)) != (1 if language == "hlsl" and \
-					int(reused.get("reload_generation", 0)) == 3 else
-					2 if language == "glsl" else 3) or \
+				int(reused.get("variant_reuses", -1)) != choice + 1 or \
 				int(reused.get("variant_resident_count", -1)) != 3 or \
 				int(reused.get("shader_creations", -1)) != previous_shader_creations or \
 				int(reused.get("pipeline_creations", -1)) != previous_pipeline_creations or \
@@ -395,7 +394,9 @@ func _run() -> void:
 		return
 	expected_pipeline_creations += 1
 	var final_batches := BATCHES.size()
-	for [path, extra] in [[new_source, 1], [glsl_source_path, 0]]:
+	for step in range(2):
+		var extra: int = 1 if step == 0 else 0
+		var path: String = new_source if step == 0 else glsl_source_path
 		if extra == 0:
 			var back: Dictionary = effect.call("request_glsl_reload", path)
 			if not back.get("ok", false):

@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <cstdint>
+#include <vector>
 
 class NativeRDWorkload : public godot::RefCounted {
     GDCLASS(NativeRDWorkload, godot::RefCounted)
@@ -50,6 +51,26 @@ private:
     godot::RID shader_;
     godot::RID pipeline_;
     godot::RID uniform_set_;
+    // The shader, pipeline and descriptor set are owned by one resident
+    // variant; the three RIDs above are borrowed aliases of the active entry.
+    struct Variant {
+        godot::PackedByteArray bytecode;
+        godot::RID shader;
+        godot::RID pipeline;
+        godot::RID descriptor;
+        int64_t id;
+        uint64_t last_used;
+    };
+    static constexpr size_t MAX_RESIDENT_VARIANTS = 3;
+    std::vector<Variant> variants_;
+    uint64_t variant_clock_ = 0;
+    int64_t next_variant_id_ = 1;
+    int64_t active_variant_id_ = 0;
+    int64_t variant_reuses_ = 0;
+    int64_t variant_builds_ = 0;
+    int64_t variant_evictions_ = 0;
+    int64_t variant_release_retirements_ = 0;
+    godot::String variant_last_action_ = "embedded";
     godot::PackedByteArray push_bytes_;
     int64_t width_ = 0;
     int64_t height_ = 0;

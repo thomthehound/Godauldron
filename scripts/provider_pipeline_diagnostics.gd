@@ -83,7 +83,11 @@ static func read(scene: Node) -> Dictionary:
 				if typeof(item.get(key)) != TYPE_INT or int(item[key]) < 0:
 					return unavailable("invalid_reload_measurement_" + key)
 				entry[key] = item[key]
-			if int(item["reload_generation"]) + int(item["reload_failures"]) != reloads or \
+			if int(item["reload_generation"]) + int(item["reload_failures"]) != reloads:
+				return unavailable("inconsistent_pipeline_reload_lifecycle")
+			# Legacy providers destroy the old pipeline on every swap. A
+			# provider with retained variants reports actual evictions instead.
+			if not item.has("variant_capacity") and \
 					int(item["reload_retired_pipelines"]) != int(item["reload_generation"]):
 				return unavailable("inconsistent_pipeline_reload_lifecycle")
 			if typeof(item.get("reload_available")) != TYPE_BOOL or \
@@ -95,6 +99,58 @@ static func read(scene: Node) -> Dictionary:
 			entry["reload_available"] = item["reload_available"]
 			entry["reload_error"] = item["reload_error"]
 			entry["reload_failure_stage"] = item["reload_failure_stage"]
+		# A resident variant is a provider-owned shader/pipeline/descriptor
+		# trio, never an observation of the driver's internal PSO cache.
+		var residency_keys := ["variant_capacity", "variant_resident_count",
+			"variant_active_id", "variant_builds", "variant_reuses",
+			"variant_evictions", "variant_release_retirements",
+			"variant_last_action", "resident_variants"]
+		var has_residency := false
+		for key in residency_keys:
+			has_residency = has_residency or item.has(key)
+		if has_residency:
+			for key in residency_keys:
+				if not item.has(key):
+					return unavailable("incomplete_pipeline_residency")
+			for key in residency_keys.slice(0, 7):
+				if typeof(item[key]) != TYPE_INT or int(item[key]) < 0:
+					return unavailable("invalid_pipeline_residency_counter")
+				entry[key] = item[key]
+			if item["variant_last_action"] not in [
+					"embedded", "created", "reused", "already_active"] or \
+					typeof(item["resident_variants"]) != TYPE_ARRAY:
+				return unavailable("invalid_pipeline_residency_action")
+			var capacity := int(item["variant_capacity"])
+			var resident_count := int(item["variant_resident_count"])
+			var active_id := int(item["variant_active_id"])
+			var builds := int(item["variant_builds"])
+			var reuses := int(item["variant_reuses"])
+			var evictions := int(item["variant_evictions"])
+			var release_retired := int(item["variant_release_retirements"])
+			if capacity < 1 or capacity > 32 or resident_count > capacity or \
+					item["resident_variants"].size() != resident_count or \
+					builds != resident_count + evictions + release_retired or \
+					evictions != int(item["reload_retired_pipelines"]) or \
+					reuses + builds - int(item["prepare_count"]) != int(item["reload_generation"]) or \
+					(active_id == 0) != (resident_count == 0) or \
+					(phase == "released" and resident_count != 0):
+				return unavailable("inconsistent_pipeline_residency")
+			var present := {}
+			var active_count := 0
+			for resident in item["resident_variants"]:
+				if typeof(resident) != TYPE_DICTIONARY or \
+						typeof(resident.get("id")) != TYPE_INT or \
+						int(resident["id"]) < 1 or present.has(resident["id"]) or \
+						typeof(resident.get("active")) != TYPE_BOOL or \
+						(resident["active"] != (int(resident["id"]) == active_id)):
+					return unavailable("invalid_resident_variant_identity")
+				present[resident["id"]] = true
+				if resident["active"]:
+					active_count += 1
+			if active_count != (1 if resident_count > 0 else 0):
+				return unavailable("invalid_active_variant")
+			entry["variant_last_action"] = item["variant_last_action"]
+			entry["resident_variants"] = item["resident_variants"].duplicate(true)
 		# Optional backend-owned shader variant and accepted rebuild costs.
 		# Incomplete groups are rejected rather than silently inferred.
 		var variant_keys := ["shader_variant_workgroup_x", "shader_variant_workgroup_y",
@@ -211,6 +267,15 @@ static func summary(report: Dictionary) -> String:
 			line += "; reload %s generation %d, %d failed, %d retired" % [
 				String(entry["name"]), int(entry["reload_generation"]),
 				int(entry["reload_failures"]), int(entry["reload_retired_pipelines"])]
+			if entry.has("variant_capacity"):
+				line += "; variants %d/%d resident, %d built, %d reused, %d evicted, active %d (%s)" % [
+					int(entry["variant_resident_count"]),
+					int(entry["variant_capacity"]),
+					int(entry["variant_builds"]),
+					int(entry["variant_reuses"]),
+					int(entry["variant_evictions"]),
+					int(entry["variant_active_id"]),
+					String(entry["variant_last_action"])]
 			if entry.has("shader_variant_evidence"):
 				line += "; shader %dx%dx%d %s push %dB (SPIR-V interface)" % [
 					int(entry["shader_variant_workgroup_x"]),

@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/rd_uniform.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+#include <godot_cpp/variant/array.hpp>
 
 #include <chrono>
 #include <cstring>
@@ -276,6 +277,10 @@ Dictionary NativeRDWorkload::prepare(RenderingDevice *rd, RID output_image,
     shader_ = shader;
     pipeline_ = pipeline;
     uniform_set_ = uniform_set;
+    variants_.push_back({shader_bytes, shader, pipeline, uniform_set,
+                         next_variant_id_++, ++variant_clock_});
+    active_variant_id_ = variants_.back().id;
+    ++variant_builds_;
     image_ = output_image;
     rd_ = rd;
     width_ = width;
@@ -437,6 +442,32 @@ Dictionary NativeRDWorkload::replace_spirv(
     if (!has_rd_image_abi(bytecode)) {
         return failure("shader", "rd_pipeline_reload_incompatible_image_or_push_constant_abi");
     }
+    // Byte-for-byte matching is the provider's own variant reuse contract.
+    // It makes no assertion about driver shader/PSO caches or source identity.
+    for (Variant &variant : variants_) {
+        if (variant.bytecode.size() != bytecode.size() ||
+            std::memcmp(variant.bytecode.ptr(), bytecode.ptr(),
+                        static_cast<size_t>(bytecode.size())) != 0) continue;
+        const bool already_active = variant.id == active_variant_id_;
+        shader_ = variant.shader;
+        pipeline_ = variant.pipeline;
+        uniform_set_ = variant.descriptor;
+        active_variant_id_ = variant.id;
+        variant.last_used = ++variant_clock_;
+        ++variant_reuses_;
+        ++reload_generation_;
+        variant_last_action_ = already_active ? "already_active" : "reused";
+        shader_origin_ = "provider_reloaded_spirv";
+        reload_error_ = "";
+        reload_failure_stage_ = "";
+        reload_host_usec_ = elapsed_host_usec(started);
+        Dictionary out = diagnostics();
+        out["ok"] = true;
+        out["reload_shader_create_host_usec"] = 0;
+        out["reload_pipeline_create_host_usec"] = 0;
+        out["reload_descriptor_create_host_usec"] = 0;
+        return out;
+    }
     Ref<RDShaderSPIRV> shader_code;
     shader_code.instantiate();
     shader_code->set_stage_bytecode(RenderingDevice::SHADER_STAGE_COMPUTE, bytecode);
@@ -473,21 +504,32 @@ Dictionary NativeRDWorkload::replace_spirv(
     }
     ++descriptor_creations_;
 
-    // Completed readback is the engine-owned GPU completion boundary; no
-    // additional submission may overlap this method on the render thread.
-    // Publish all three compatible resources atomically, then release the
-    // superseded engine-owned RIDs in descriptor/pipeline/shader order.
-    RID old_set = uniform_set_;
-    RID old_pipeline = pipeline_;
-    RID old_shader = shader_;
-    uniform_set_ = candidate_set;
-    pipeline_ = candidate_pipeline;
+    // Candidate creation succeeded. No in-flight GPU submission can still
+    // reference these RIDs: the engine's readback already completed.
+    variants_.push_back({bytecode, candidate_shader, candidate_pipeline,
+                         candidate_set, next_variant_id_++, ++variant_clock_});
+    active_variant_id_ = variants_.back().id;
     shader_ = candidate_shader;
-    rd->free_rid(old_set);
-    rd->free_rid(old_pipeline);
-    rd->free_rid(old_shader);
+    pipeline_ = candidate_pipeline;
+    uniform_set_ = candidate_set;
+    ++variant_builds_;
+    // Keep the most recently used variants. Evict only after committing the
+    // new candidate, with all GPU references completed by the readback gate.
+    if (variants_.size() > MAX_RESIDENT_VARIANTS) {
+        size_t victim = 0;
+        for (size_t i = 1; i < variants_.size(); ++i) {
+            if (variants_[i].last_used < variants_[victim].last_used) victim = i;
+        }
+        const Variant &old = variants_[victim];
+        rd->free_rid(old.descriptor);
+        rd->free_rid(old.pipeline);
+        rd->free_rid(old.shader);
+        variants_.erase(variants_.begin() + victim);
+        ++variant_evictions_;
+        ++reload_retirements_;
+    }
     ++reload_generation_;
-    ++reload_retirements_;
+    variant_last_action_ = "created";
     shader_origin_ = "provider_reloaded_spirv";
     reload_error_ = "";
     reload_failure_stage_ = "";
@@ -519,9 +561,14 @@ Dictionary NativeRDWorkload::release(RenderingDevice *rd) {
     }
     // The caller must own a completed readback for every batch, and must
     // call this method from the compositor render thread while RD is live.
-    rd->free_rid(uniform_set_);
-    rd->free_rid(pipeline_);
-    rd->free_rid(shader_);
+    for (const Variant &variant : variants_) {
+        rd->free_rid(variant.descriptor);
+        rd->free_rid(variant.pipeline);
+        rd->free_rid(variant.shader);
+        ++variant_release_retirements_;
+    }
+    variants_.clear();
+    active_variant_id_ = 0;
     uniform_set_ = RID();
     pipeline_ = RID();
     shader_ = RID();
@@ -571,6 +618,22 @@ Dictionary NativeRDWorkload::diagnostics() const {
     result["reload_failures"] = reload_failures_;
     result["reload_generation"] = reload_generation_;
     result["reload_retired_pipelines"] = reload_retirements_;
+    result["variant_capacity"] = static_cast<int64_t>(MAX_RESIDENT_VARIANTS);
+    result["variant_resident_count"] = static_cast<int64_t>(variants_.size());
+    result["variant_active_id"] = active_variant_id_;
+    result["variant_builds"] = variant_builds_;
+    result["variant_reuses"] = variant_reuses_;
+    result["variant_evictions"] = variant_evictions_;
+    result["variant_release_retirements"] = variant_release_retirements_;
+    result["variant_last_action"] = variant_last_action_;
+    Array residents;
+    for (const Variant &variant : variants_) {
+        Dictionary entry;
+        entry["id"] = variant.id;
+        entry["active"] = variant.id == active_variant_id_;
+        residents.append(entry);
+    }
+    result["resident_variants"] = residents;
     result["reload_host_usec"] = reload_host_usec_;
     result["reload_last_success_host_usec"] = reload_last_success_host_usec_;
     result["reload_last_success_shader_create_host_usec"] =

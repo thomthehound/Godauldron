@@ -223,7 +223,11 @@ func _run() -> void:
 			var reload: Dictionary = effect.call("reload_snapshot")
 			if replaced.get("phase") != "consumed" or not reload.get("ok", false) or \
 					int(reload.get("reload_generation", -1)) != batch_index + 1 or \
-					int(reload.get("reload_retired_pipelines", -1)) != batch_index + 1 or \
+					int(reload.get("reload_retired_pipelines", -1)) != 0 or \
+					int(reload.get("variant_resident_count", -1)) != batch_index + 2 or \
+					int(reload.get("variant_builds", -1)) != batch_index + 2 or \
+					int(reload.get("variant_reuses", -1)) != 0 or \
+					reload.get("variant_last_action") != "created" or \
 					reload.get("shader_origin") != "provider_reloaded_spirv" or \
 				reload.get("shader_variant_evidence") != "validated_spirv_interface" or \
 				int(reload.get("shader_variant_workgroup_x", 0)) != 8 or \
@@ -320,9 +324,112 @@ func _run() -> void:
 						invalid.get("ok", true) or \
 						invalid.get("error") != "rd_pipeline_reload_invalid_vulkan11_spirv" or \
 						int(invalid.get("reload_generation", -1)) != 1 or \
-						int(invalid.get("reload_retired_pipelines", -1)) != 1:
+						int(invalid.get("reload_retired_pipelines", -1)) != 0:
 					_fail("Failed candidate replaced the working RD pipeline: " + str(invalid))
 					return
+	# Recompiling identical sources must select already resident RIDs
+	# without re-creating a shader, pipeline or descriptor. Alternate back
+	# and forth before dispatching the next batch through the final HLSL PSO.
+	var before_reuse: Dictionary = effect.call("reload_snapshot")
+	var hlsl_id: int = int(before_reuse.get("variant_active_id", -1))
+	var previous_shader_creations: int = int(before_reuse.get("shader_creations", -1))
+	var previous_pipeline_creations: int = int(before_reuse.get("pipeline_creations", -1))
+	var previous_descriptor_creations: int = int(before_reuse.get("descriptor_creations", -1))
+	for choice in range(3):
+		var language: String = "glsl" if choice == 1 else "hlsl"
+		var queued_variant: Dictionary = (
+			effect.call("request_hlsl_reload", hlsl_source_path) if language == "hlsl"
+			else effect.call("request_glsl_reload", glsl_source_path))
+		if not queued_variant.get("ok", false):
+			_fail("Could not request already resident shader variant: " + str(queued_variant))
+			return
+		var variant_done: Dictionary = await _await_phase(effect, "consumed")
+		var reused: Dictionary = effect.call("reload_snapshot")
+		if variant_done.get("phase") != "consumed" or not reused.get("ok", false) or \
+				reused.get("variant_last_action") not in ["reused", "already_active"] or \
+				int(reused.get("variant_reuses", -1)) != choice + 1 or \
+				int(reused.get("variant_resident_count", -1)) != 3 or \
+				int(reused.get("shader_creations", -1)) != previous_shader_creations or \
+				int(reused.get("pipeline_creations", -1)) != previous_pipeline_creations or \
+				int(reused.get("descriptor_creations", -1)) != previous_descriptor_creations or \
+				int(reused.get("reload_retired_pipelines", -1)) != 0:
+			_fail("Matching shader bytecode caused a new GPU pipeline: " + str(reused))
+			return
+	var restored: Dictionary = effect.call("reload_snapshot")
+	if int(restored.get("variant_active_id", 0)) != hlsl_id or \
+			int(restored.get("reload_generation", 0)) != 5:
+		_fail("Switching back to resident HLSL changed its actual variant identity")
+		return
+
+	# A fourth distinct, ABI-compatible shader exercises bounded eviction.
+	# Its extra +1 per dispatch is checked using actual GPU image bytes.
+	var base_glsl: String = FileAccess.get_file_as_string(glsl_source_path)
+	var modified_glsl: String = base_glsl.replace(
+		"previous + parameters.seed + index",
+		"previous + parameters.seed + index + 1u")
+	if modified_glsl == base_glsl:
+		_fail("Could not construct a genuine different shader variant")
+		return
+	var new_source := "user://native_rd_variant_extra.comp"
+	var new_file: FileAccess = FileAccess.open(new_source, FileAccess.WRITE)
+	if new_file == null:
+		_fail("Could not stage real GPU variant")
+		return
+	new_file.store_string(modified_glsl)
+	new_file.close()
+	var variant_request: Dictionary = effect.call("request_glsl_reload", new_source)
+	if not variant_request.get("ok", false):
+		_fail("Distinct GLSL shader variant did not compile: " + str(variant_request))
+		return
+	var new_done: Dictionary = await _await_phase(effect, "consumed")
+	var new_variant: Dictionary = effect.call("reload_snapshot")
+	if new_done.get("phase") != "consumed" or not new_variant.get("ok", false) or \
+			new_variant.get("variant_last_action") != "created" or \
+			int(new_variant.get("variant_builds", -1)) != 4 or \
+			int(new_variant.get("variant_evictions", -1)) != 1 or \
+			int(new_variant.get("reload_retired_pipelines", -1)) != 1 or \
+			int(new_variant.get("variant_resident_count", -1)) != 3 or \
+			int(new_variant.get("pipeline_creations", -1)) != expected_pipeline_creations + 1:
+		_fail("Bounded shader variant creation/eviction failed: " + str(new_variant))
+		return
+	expected_pipeline_creations += 1
+	var final_batches := BATCHES.size()
+	for step in range(2):
+		var extra: int = 1 if step == 0 else 0
+		var path: String = new_source if step == 0 else glsl_source_path
+		if extra == 0:
+			var back: Dictionary = effect.call("request_glsl_reload", path)
+			if not back.get("ok", false):
+				_fail("Resident GLSL variant could not be reselected")
+				return
+			var back_done: Dictionary = await _await_phase(effect, "consumed")
+			var back_report: Dictionary = effect.call("reload_snapshot")
+			if back_done.get("phase") != "consumed" or \
+					back_report.get("variant_last_action") != "reused" or \
+					int(back_report.get("pipeline_creations", -1)) != expected_pipeline_creations:
+				_fail("Resident GLSL variant was rebuilt after an eviction: " + str(back_report))
+				return
+		if not bool(effect.call("request_batch", PackedInt32Array([3, 5]))):
+			_fail("Could not execute selected shader variant on the GPU")
+			return
+		if effect.call("request_glsl_reload", glsl_source_path).get("ok", true):
+			_fail("Variant switch was accepted while GPU work was in flight")
+			return
+		var executed: Dictionary = await _await_phase(effect, "ready")
+		if executed.get("phase") != "ready":
+			_fail("Selected shader variant did not finish GPU execution")
+			return
+		var output: Dictionary = effect.call("take_batch")
+		var image_data: PackedByteArray = output.get("bytes", PackedByteArray())
+		if not output.get("ok", false) or image_data.size() != ELEMENTS * 4:
+			_fail("Selected shader variant produced no image")
+			return
+		for pixel in range(ELEMENTS):
+			if image_data.decode_u32(pixel * 4) != 8 + pixel * 2 + extra * 2:
+				_fail("Variant GPU output incorrect at pixel %d" % pixel)
+				return
+		total_dispatches += 2
+		final_batches += 1
 	if not bool(effect.call("request_release")):
 		_fail("Native workload retirement rejected after last completed readback")
 		return
@@ -335,7 +442,9 @@ func _run() -> void:
 			completion.get("active_resources") != false or \
 			int(completion.get("pipeline_creations", -1)) != expected_pipeline_creations or \
 			int(completion.get("dispatch_count", -1)) != total_dispatches or \
-			int(completion.get("completed_batches", -1)) != BATCHES.size():
+			int(completion.get("completed_batches", -1)) != final_batches or \
+			int(completion.get("variant_resident_count", -1)) != 0 or \
+			int(completion.get("variant_release_retirements", -1)) != 3:
 		_fail("Persistent native workload leaked RD resources or dropped work")
 		return
 	# A fresh adapter executes three dependency-ordered resident batches
@@ -440,7 +549,8 @@ func _run() -> void:
 				not PipelineDiagnostics.summary(glsl_inspected).contains("last source compile request") or \
 				glsl_inspected["pipelines"].size() != 1 or \
 				int(glsl_inspected["pipelines"][0].get("reload_generation", 0)) != 2 or \
-				int(glsl_inspected["pipelines"][0].get("reload_retired_pipelines", 0)) != 2 or \
+				int(glsl_inspected["pipelines"][0].get("variant_resident_count", 0)) != 3 or \
+				int(glsl_inspected["pipelines"][0].get("reload_retired_pipelines", -1)) != 0 or \
 				glsl_inspected.get("source_reload", {}).get("active_language") != "glsl":
 			_fail("D3D12 scene did not accept and retire GLSL PSO: " + str(glsl_inspected))
 			return

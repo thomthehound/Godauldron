@@ -18,6 +18,37 @@ def number(value: object, name: str) -> float:
     return result
 
 
+def check_distribution(summary: dict, values: list[float], label: str) -> None:
+    if summary.get("count") != len(values):
+        raise ValueError(f"{label}: incorrect sample count")
+    values.sort()
+    if not values:
+        if any(summary.get(key) is not None for key in (
+                "mean_usec", "p50_usec", "p95_usec", "p99_usec",
+                "minimum_usec", "maximum_usec")):
+            raise ValueError(f"{label}: fabricated measurement")
+        return
+
+    def percentile(fraction: float) -> float:
+        x = fraction * (len(values) - 1)
+        lower = int(x)
+        return values[lower] + (values[min(lower + 1, len(values) - 1)]
+                                - values[lower]) * (x - lower)
+
+    expected = {
+        "mean_usec": sum(values) / len(values),
+        "p50_usec": percentile(.50),
+        "p95_usec": percentile(.95),
+        "p99_usec": percentile(.99),
+        "minimum_usec": values[0],
+        "maximum_usec": values[-1],
+    }
+    for key, actual in expected.items():
+        reported = number(summary.get(key), f"{label}.{key}")
+        if not math.isclose(reported, actual, rel_tol=1e-5, abs_tol=1e-3):
+            raise ValueError(f"{label}.{key}: summary differs from measured samples")
+
+
 def validate(report: dict, *, physical: bool = False) -> None:
     if report.get("schema_version") != 1 or \
             report.get("capture_type") != "native_rd_variant_path_comparison" or \
@@ -108,16 +139,22 @@ def validate(report: dict, *, physical: bool = False) -> None:
         raise ValueError("Path distribution missing")
     for path in PATHS:
         section = report["results"][path]
-        expected = samples if path == PATHS[0] else 0
-        if section["compiler_host_usec"].get("count") != expected or \
-                section["native_path_host_usec"].get("count") != samples or \
-                section["host_request_to_readback_usec"].get("count") != samples:
+        matched = [r for r in records if r["path"] == path and not r["warmup"]]
+        if len(matched) != samples:
             raise ValueError("Path distributions include warmups or lost samples")
-        found = sum(record["gpu_compute_window_usec"] is not None
-                    for record in records if record["path"] == path
-                    and not record["warmup"])
-        if section["gpu_compute_window_usec"].get("count") != found:
-            raise ValueError("GPU timing summary fabricated or omitted device intervals")
+        compiler = [float(r["compiler_request_host_usec"]) for r in matched
+                    if r["compiler_request_host_usec"] is not None]
+        native = [float(r["native_reload_host_usec"] if path != PATHS[2] else
+                        r["native_selection_host_usec"]) for r in matched]
+        gpu = [float(r["gpu_compute_window_usec"]) for r in matched
+               if r["gpu_compute_window_usec"] is not None]
+        host = [float(r["host_request_to_readback_usec"]) for r in matched]
+        for field, values in (
+                ("compiler_host_usec", compiler),
+                ("native_path_host_usec", native),
+                ("gpu_compute_window_usec", gpu),
+                ("host_request_to_readback_usec", host)):
+            check_distribution(section[field], values, f"{path}.{field}")
     lifecycle = report["resource_lifecycle"]
     if lifecycle.get("phase") != "released" or \
             lifecycle.get("active_resources") is not False or \

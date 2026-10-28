@@ -18,6 +18,8 @@ var _queued_language := ""
 var _accepted_generation := 0
 var _last_native_failures := 0
 var _compile_request_host_usec := 0
+var _queued_variant_id := 0
+var _variant_languages: Dictionary = {1: "embedded_spirv"}
 
 
 func godauldron_runtime_controls() -> Array[Dictionary]:
@@ -75,6 +77,28 @@ func godauldron_reload_shader() -> Dictionary:
 		_source_last_stage = "none"
 	return result
 
+# Only published resident IDs can be selected. The actual RID switch is
+# deferred to the compositor render thread after the GPU completion fence.
+func godauldron_select_pipeline_variant(id: int) -> Dictionary:
+	if _reload_effect == null or id < 1:
+		return {"ok": false, "error": "No resident RD pipeline"}
+	var report: Dictionary = godauldron_pipeline_diagnostics()
+	var pipelines: Array = report.get("pipelines", [])
+	if pipelines.is_empty():
+		return {"ok": false, "error": "No RD pipeline created"}
+	var found := false
+	for variant in pipelines[0].get("resident_variants", []):
+		if int(variant.get("id", 0)) == id:
+			found = true
+			break
+	if not found:
+		return {"ok": false, "error": "Variant is not resident"}
+	if not _reload_effect.call("request_select_variant", id):
+		return {"ok": false, "error": "Native RD pipeline is not idle"}
+	_queued_variant_id = id
+	return {"ok": true, "queued": true, "variant_id": id}
+
+
 func godauldron_pipeline_diagnostics() -> Dictionary:
 	var entries: Array[Dictionary] = []
 	if _reload_effect != null:
@@ -86,9 +110,15 @@ func godauldron_pipeline_diagnostics() -> Dictionary:
 			var failures: int = int(snapshot.get("reload_failures", 0))
 			if generation > _accepted_generation:
 				_accepted_generation = generation
+				var active_id: int = int(snapshot.get("variant_active_id", 0))
 				if not _queued_language.is_empty():
+					_variant_languages[active_id] = _queued_language
+				if _queued_variant_id > 0:
+					_active_language = String(_variant_languages.get(active_id, "embedded_spirv"))
+				elif not _queued_language.is_empty():
 					_active_language = _queued_language
 				_queued_language = ""
+				_queued_variant_id = 0
 				_source_last_error = ""
 				_source_last_stage = "applied"
 			elif failures > _last_native_failures:
@@ -97,7 +127,14 @@ func godauldron_pipeline_diagnostics() -> Dictionary:
 				var stage: String = String(snapshot.get("reload_failure_stage", "pipeline"))
 				_source_last_stage = stage if stage in ["shader", "pipeline"] else "pipeline"
 				_queued_language = ""
+				_queued_variant_id = 0
 			_last_native_failures = failures
+			var resident: Dictionary = {}
+			for variant in snapshot.get("resident_variants", []):
+				resident[variant.get("id")] = true
+			for id in _variant_languages.keys():
+				if not resident.has(id):
+					_variant_languages.erase(id)
 			entries.append(snapshot)
 	var source_path: String = glsl_source_path if _last_compiled_language == "glsl" else hlsl_source_path
 	var compiler: String = glsl_compiler if _last_compiled_language == "glsl" else hlsl_compiler

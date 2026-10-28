@@ -95,6 +95,58 @@ static func read(scene: Node) -> Dictionary:
 			entry["reload_available"] = item["reload_available"]
 			entry["reload_error"] = item["reload_error"]
 			entry["reload_failure_stage"] = item["reload_failure_stage"]
+		# Optional backend-owned shader variant and accepted rebuild costs.
+		# Incomplete groups are rejected rather than silently inferred.
+		var variant_keys := ["shader_variant_workgroup_x", "shader_variant_workgroup_y",
+			"shader_variant_workgroup_z", "shader_variant_image_format",
+			"shader_variant_push_constant_bytes", "shader_variant_evidence"]
+		var has_variant := false
+		for key in variant_keys:
+			has_variant = has_variant or item.has(key)
+		if has_variant:
+			for key in variant_keys:
+				if not item.has(key):
+					return unavailable("incomplete_shader_variant")
+			var threads := 1
+			for key in variant_keys.slice(0, 3):
+				var dimension: Variant = item[key]
+				if typeof(dimension) != TYPE_INT or int(dimension) < 1 or \
+						int(dimension) > 1024:
+					return unavailable("invalid_shader_variant_workgroup")
+				threads *= int(dimension)
+				entry[key] = dimension
+			if threads > 1024 or \
+					typeof(item["shader_variant_push_constant_bytes"]) != TYPE_INT or \
+					int(item["shader_variant_push_constant_bytes"]) < 0 or \
+					int(item["shader_variant_push_constant_bytes"]) > 256 or \
+					typeof(item["shader_variant_image_format"]) != TYPE_STRING or \
+					String(item["shader_variant_image_format"]).is_empty() or \
+					String(item["shader_variant_image_format"]).length() > 32 or \
+					item["shader_variant_evidence"] != "validated_spirv_interface":
+				return unavailable("invalid_shader_variant_contract")
+			for key in variant_keys.slice(3):
+				entry[key] = item[key]
+		var cost_keys := ["reload_last_success_host_usec",
+			"reload_last_success_shader_create_host_usec",
+			"reload_last_success_pipeline_create_host_usec",
+			"reload_last_success_descriptor_create_host_usec"]
+		var has_cost := false
+		for key in cost_keys:
+			has_cost = has_cost or item.has(key)
+		if has_cost:
+			if not item.has("reload_generation"):
+				return unavailable("rebuild_cost_without_reload_lifecycle")
+			var stages := 0
+			for key in cost_keys:
+				if typeof(item.get(key)) != TYPE_INT or int(item[key]) < 0:
+					return unavailable("invalid_accepted_rebuild_cost")
+				entry[key] = item[key]
+				if key != "reload_last_success_host_usec":
+					stages += int(item[key])
+			if stages > int(item["reload_last_success_host_usec"]) or \
+					(int(item["reload_generation"]) == 0 and \
+					int(item["reload_last_success_host_usec"]) != 0):
+				return unavailable("inconsistent_accepted_rebuild_cost")
 		measured.append(entry)
 	var source_reload: Dictionary = {}
 	if result.has("source_reload"):
@@ -118,6 +170,10 @@ static func read(scene: Node) -> Dictionary:
 				source.get("last_stage") not in ["none", "provider", "source",
 					"in_flight", "compile", "shader", "pipeline", "applied"]:
 			return unavailable("invalid_shader_source_reload_evidence")
+		if source.has("compile_request_host_usec") and \
+				(typeof(source["compile_request_host_usec"]) != TYPE_INT or \
+				int(source["compile_request_host_usec"]) < 0):
+			return unavailable("invalid_source_compile_duration")
 		source_reload = (source as Dictionary).duplicate(true)
 	return {"available": true, "provider": provider, "backend": backend,
 		"pipelines": measured, "source_reload": source_reload,
@@ -155,6 +211,20 @@ static func summary(report: Dictionary) -> String:
 			line += "; reload %s generation %d, %d failed, %d retired" % [
 				String(entry["name"]), int(entry["reload_generation"]),
 				int(entry["reload_failures"]), int(entry["reload_retired_pipelines"])]
+			if entry.has("shader_variant_evidence"):
+				line += "; shader %dx%dx%d %s push %dB (SPIR-V interface)" % [
+					int(entry["shader_variant_workgroup_x"]),
+					int(entry["shader_variant_workgroup_y"]),
+					int(entry["shader_variant_workgroup_z"]),
+					String(entry["shader_variant_image_format"]),
+					int(entry["shader_variant_push_constant_bytes"])]
+			if entry.has("reload_last_success_host_usec") and \
+					int(entry["reload_generation"]) > 0:
+				line += "; last accepted rebuild %.3f ms (shader %.3f, pipeline %.3f, descriptor %.3f ms host API)" % [
+					float(entry["reload_last_success_host_usec"]) / 1000.0,
+					float(entry["reload_last_success_shader_create_host_usec"]) / 1000.0,
+					float(entry["reload_last_success_pipeline_create_host_usec"]) / 1000.0,
+					float(entry["reload_last_success_descriptor_create_host_usec"]) / 1000.0]
 			if not String(entry["reload_error"]).is_empty():
 				line += "; last reload %s: %s" % [
 					String(entry["reload_failure_stage"]), String(entry["reload_error"])]
@@ -164,6 +234,9 @@ static func summary(report: Dictionary) -> String:
 			String(source.get("active_language", "unknown")),
 			String(source.get("selected_language", "unknown")),
 			String(source.get("language", "unknown"))]
+		if source.has("compile_request_host_usec"):
+			line += "; last source compile request %.3f ms host wall" % (
+				float(source["compile_request_host_usec"]) / 1000.0)
 		if not String(source.get("last_error", "")).is_empty():
 			line += "; %s %s: %s" % [
 				String(source.get("language", "shader")).to_upper(),

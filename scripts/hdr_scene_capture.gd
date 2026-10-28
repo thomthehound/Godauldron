@@ -93,6 +93,7 @@ func source() -> Dictionary:
 		"producer": "Godot CompositorEffect POST_TRANSPARENT resolved render_buffers/color",
 		"color_semantics": "scene-linear renderer buffer, before Godot built-in tonemap/postprocess; actual native provider effects may differ",
 		"performance": "unmeasured GPU asynchronous readback",
+		"pipeline": _effect.pipeline_evidence() if _effect != null else {},
 		"preserved_compositor_source": _original_source,
 		"preserved_existing_compositor_effects": 0 if _effective_original == null else _effective_original.compositor_effects.size()
 	}

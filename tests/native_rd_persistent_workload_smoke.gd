@@ -412,7 +412,8 @@ func _run() -> void:
 		if not bool(effect.call("request_batch", PackedInt32Array([3, 5]))):
 			_fail("Could not execute selected shader variant on the GPU")
 			return
-		if effect.call("request_glsl_reload", glsl_source_path).get("ok", true):
+		if effect.call("request_glsl_reload", glsl_source_path).get("ok", true) or \
+				bool(effect.call("request_select_variant", hlsl_id)):
 			_fail("Variant switch was accepted while GPU work was in flight")
 			return
 		var executed: Dictionary = await _await_phase(effect, "ready")
@@ -430,6 +431,61 @@ func _run() -> void:
 				return
 		total_dispatches += 2
 		final_batches += 1
+	# Direct resident selection is separate from source recompilation. The
+	# existing HLSL/GLSL RIDs remain live after LRU eviction of the embedded
+	# shader, and a missing ID cannot change the active pipeline.
+	if bool(effect.call("request_select_variant", 0)) or \
+			not bool(effect.call("request_select_variant", 999)):
+		_fail("Invalid resident variant admission did not reach native validation")
+		return
+	var missing_done: Dictionary = await _await_phase(effect, "consumed")
+	var missing: Dictionary = effect.call("reload_snapshot")
+	if missing_done.get("phase") != "consumed" or missing.get("ok", true) or \
+			missing.get("error") != "rd_variant_id_not_resident" or \
+			int(missing.get("variant_active_id", -1)) != 2 or \
+			int(missing.get("variant_selection_failures", -1)) != 1:
+		_fail("Missing resident variant altered the live pipeline: " + str(missing))
+		return
+	for choice in range(2):
+		var id: int = hlsl_id if choice == 0 else 2
+		if not bool(effect.call("request_select_variant", id)):
+			_fail("Cannot queue compiled variant without source compilation")
+			return
+		var switched_done: Dictionary = await _await_phase(effect, "consumed")
+		var switched: Dictionary = effect.call("reload_snapshot")
+		var lookup_usec: int = int(switched.get("variant_last_lookup_host_usec", -1))
+		var select_usec: int = int(switched.get("variant_last_selection_host_usec", -1))
+		if switched_done.get("phase") != "consumed" or not switched.get("ok", false) or \
+				int(switched.get("variant_active_id", -1)) != id or \
+				int(switched.get("variant_selection_requests", -1)) != choice + 2 or \
+				int(switched.get("variant_selection_failures", -1)) != 1 or \
+				int(switched.get("pipeline_creations", -1)) != expected_pipeline_creations or \
+				int(switched.get("descriptor_creations", -1)) != expected_descriptor_creations + 1 or \
+				int(switched.get("shader_creations", -1)) != expected_shader_creations + 1 or \
+				lookup_usec < 0 or select_usec < lookup_usec or \
+				select_usec != int(switched.get("reload_host_usec", -1)) or \
+				int(switched.get("reload_shader_create_host_usec", -1)) != 0 or \
+				int(switched.get("reload_pipeline_create_host_usec", -1)) != 0 or \
+				int(switched.get("reload_descriptor_create_host_usec", -1)) != 0:
+			_fail("Direct resident selection unexpectedly rebuilt native RD state: " + str(switched))
+			return
+		if not bool(effect.call("request_batch", PackedInt32Array([3, 5]))):
+			_fail("Directly selected pipeline could not dispatch GPU work")
+			return
+		var switched_ready: Dictionary = await _await_phase(effect, "ready")
+		if switched_ready.get("phase") != "ready":
+			_fail("Directly selected pipeline failed GPU execution")
+			return
+		var pixels: PackedByteArray = effect.call("take_batch").get("bytes", PackedByteArray())
+		if pixels.size() != ELEMENTS * 4:
+			_fail("Directly selected pipeline did not produce output")
+			return
+		for pixel in range(ELEMENTS):
+			if pixels.decode_u32(pixel * 4) != 8 + 2 * pixel:
+				_fail("Direct variant selection did not run correct GPU shader: %d" % pixel)
+				return
+		final_batches += 1
+		total_dispatches += 2
 	if not bool(effect.call("request_release")):
 		_fail("Native workload retirement rejected after last completed readback")
 		return

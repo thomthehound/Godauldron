@@ -110,8 +110,9 @@ func _run() -> void:
 	if not FileAccess.file_exists(hlsl_source_path):
 		_fail("Real HLSL source not present in installed RD package")
 		return
-	var glsl_source_path := "res://experiments/native-vulkan-provider/reload_rd_image.comp"
-	if not windows_d3d12 and not FileAccess.file_exists(glsl_source_path):
+	var glsl_source_path := ("res://experiments/native-rd-windows/reload_rd_image.comp"
+		if windows_d3d12 else "res://experiments/native-vulkan-provider/reload_rd_image.comp")
+	if not FileAccess.file_exists(glsl_source_path):
 		_fail("Real GLSL source not present in installed RD package")
 		return
 	for batch_index in range(BATCHES.size()):
@@ -206,7 +207,7 @@ func _run() -> void:
 		if batch_index in [0, 1]:
 			# Candidate creation is explicitly off the measured/GPU path,
 			# only once Godot has finished the readback for the last batch.
-			var use_glsl: bool = not windows_d3d12 and batch_index == 0
+			var use_glsl: bool = batch_index == 0
 			var request: Dictionary = (effect.call("request_glsl_reload", glsl_source_path)
 				if use_glsl else effect.call("request_hlsl_reload", hlsl_source_path))
 			if not request.get("ok", false) or \
@@ -233,32 +234,31 @@ func _run() -> void:
 				# A second source language uses the identical native ABI and
 				# rollback boundary. A different image binding compiles but
 				# must leave the working GLSL pipeline unchanged.
-				if not windows_d3d12:
-					var glsl_source: String = FileAccess.get_file_as_string(glsl_source_path)
-					var wrong_glsl: String = glsl_source.replace("binding = 0", "binding = 1")
-					if wrong_glsl == glsl_source:
-						_fail("Could not prepare real incompatible GLSL source")
-						return
-					var glsl_path := "user://native_rd_wrong_image.comp"
-					var glsl_file: FileAccess = FileAccess.open(glsl_path, FileAccess.WRITE)
-					if glsl_file == null:
-						_fail("Could not stage GLSL ABI rejection")
-						return
-					glsl_file.store_string(wrong_glsl)
-					glsl_file.close()
-					var glsl_request: Dictionary = effect.call("request_glsl_reload", glsl_path)
-					if not glsl_request.get("ok", false):
-						_fail("Incompatible GLSL must compile before ABI rejection: " +
-							str(glsl_request))
-						return
-					var glsl_done: Dictionary = await _await_phase(effect, "consumed")
-					var glsl_result: Dictionary = effect.call("reload_snapshot")
-					if glsl_done.get("phase") != "consumed" or glsl_result.get("ok", true) or \
-							glsl_result.get("error") != "rd_pipeline_reload_incompatible_image_or_push_constant_abi" or \
-							int(glsl_result.get("reload_generation", -1)) != 1:
-						_fail("Incompatible GLSL replaced the working RD pipeline: " +
-							str(glsl_result))
-						return
+				var glsl_source: String = FileAccess.get_file_as_string(glsl_source_path)
+				var wrong_glsl: String = glsl_source.replace("binding = 0", "binding = 1")
+				if wrong_glsl == glsl_source:
+					_fail("Could not prepare real incompatible GLSL source")
+					return
+				var glsl_path := "user://native_rd_wrong_image.comp"
+				var glsl_file: FileAccess = FileAccess.open(glsl_path, FileAccess.WRITE)
+				if glsl_file == null:
+					_fail("Could not stage GLSL ABI rejection")
+					return
+				glsl_file.store_string(wrong_glsl)
+				glsl_file.close()
+				var glsl_request: Dictionary = effect.call("request_glsl_reload", glsl_path)
+				if not glsl_request.get("ok", false):
+					_fail("Incompatible GLSL must compile before ABI rejection: " +
+						str(glsl_request))
+					return
+				var glsl_done: Dictionary = await _await_phase(effect, "consumed")
+				var glsl_result: Dictionary = effect.call("reload_snapshot")
+				if glsl_done.get("phase") != "consumed" or glsl_result.get("ok", true) or \
+						glsl_result.get("error") != "rd_pipeline_reload_incompatible_image_or_push_constant_abi" or \
+						int(glsl_result.get("reload_generation", -1)) != 1:
+					_fail("Incompatible GLSL replaced the working RD pipeline: " +
+						str(glsl_result))
+					return
 				# A valid compiled HLSL shader with an incompatible push
 				# constant layout must fail before Godot creates native RIDs.
 				var changed_source: String = FileAccess.get_file_as_string(hlsl_source_path)
@@ -401,7 +401,44 @@ func _run() -> void:
 				inspected.get("source_reload", {}).get("active_language") != "hlsl":
 			_fail("Host-visible RD provider HLSL pipeline/diagnostic integration failed: " + str(inspected))
 			return
+		if not stage.call("godauldron_set_runtime_control", "shader_reload_language", "glsl").get("ok", false):
+			_fail("RD provider could not select GLSL for a real D3D12 PSO")
+			return
+		var glsl_queued: Dictionary = stage.call("godauldron_reload_shader")
+		if not glsl_queued.get("ok", false) or not glsl_queued.get("queued", false):
+			_fail("D3D12 provider scene could not compile GLSL: " + str(glsl_queued))
+			return
+		for frame in range(210):
+			await process_frame
+			scene_report = stage.call("godauldron_pipeline_diagnostics")
+			var entries: Array = scene_report.get("pipelines", [])
+			if not entries.is_empty() and int(entries[0].get("reload_generation", 0)) == 2:
+				break
+		var glsl_inspected: Dictionary = PipelineDiagnostics.read(stage)
+		if not glsl_inspected.get("available", false) or \
+				glsl_inspected["pipelines"].size() != 1 or \
+				int(glsl_inspected["pipelines"][0].get("reload_generation", 0)) != 2 or \
+				int(glsl_inspected["pipelines"][0].get("reload_retired_pipelines", 0)) != 2 or \
+				glsl_inspected.get("source_reload", {}).get("active_language") != "glsl":
+			_fail("D3D12 scene did not accept and retire GLSL PSO: " + str(glsl_inspected))
+			return
 		var owned: CompositorEffect = stage.get("_reload_effect")
+		if not owned.call("request_batch", PackedInt32Array([3, 5])):
+			_fail("D3D12 GLSL provider PSO could not arm real GPU work")
+			return
+		var glsl_ready: Dictionary = await _await_phase(owned, "ready")
+		if glsl_ready.get("phase") != "ready":
+			_fail("D3D12 GLSL provider PSO did not finish: " + str(glsl_ready))
+			return
+		var glsl_batch: Dictionary = owned.call("take_batch")
+		var glsl_bytes: PackedByteArray = glsl_batch.get("bytes", PackedByteArray())
+		if not glsl_batch.get("ok", false) or glsl_bytes.size() != WIDTH * HEIGHT * 4:
+			_fail("D3D12 GLSL provider produced no readback: " + str(glsl_batch))
+			return
+		for pixel in range(WIDTH * HEIGHT):
+			if glsl_bytes.decode_u32(pixel * 4) != 8 + 2 * pixel:
+				_fail("D3D12 scene GLSL replacement produced incorrect pixel %d" % pixel)
+				return
 		viewport.remove_child(stage)
 		stage.queue_free()
 		var shutdown: Dictionary = {}

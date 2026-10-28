@@ -283,6 +283,36 @@ jobs:
           $dir = Split-Path $dxc -Parent
           $dir >> $env:GITHUB_PATH
           & $dxc -help | Select-Object -First 1
+      - name: Cache GLSL compiler for native RD D3D12 acceptance
+        uses: actions/cache@v4
+        with:
+          path: .ci-glslang
+          key: windows-x64-glslang-vulkan-sdk-1.4.350
+      - name: Install GLSL compiler for D3D12 native RD acceptance
+        shell: pwsh
+        run: |
+          $tool = Join-Path (Get-Location) ".ci-glslang/glslangValidator.exe"
+          if (-not (Test-Path $tool)) {
+            $found = Get-Command glslangValidator.exe -ErrorAction SilentlyContinue
+            if ($found) {
+              $sourceBin = Split-Path $found.Source -Parent
+            } else {
+              choco install vulkan-sdk --version=1.4.350 --no-progress -y
+              if ($LASTEXITCODE -ne 0) { throw "GLSL compiler installation failed" }
+              $binary = Get-ChildItem C:\VulkanSDK -Recurse -Filter glslangValidator.exe -File |
+                Select-Object -First 1
+              if (-not $binary) { throw "Installed GLSL compiler binary unavailable" }
+              $sourceBin = $binary.DirectoryName
+            }
+            New-Item -ItemType Directory -Force .ci-glslang | Out-Null
+            Copy-Item (Join-Path $sourceBin "glslangValidator.exe") $tool
+            Get-ChildItem $sourceBin -Filter *.dll -File | ForEach-Object {
+              Copy-Item $_.FullName .ci-glslang
+            }
+          }
+          (Resolve-Path .ci-glslang).Path >> $env:GITHUB_PATH
+          & $tool --version
+          if ($LASTEXITCODE -ne 0) { throw "GLSL compiler verification failed" }
       - name: Download Godot 4 for Windows (console and GUI binaries)
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -326,7 +356,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Import Godot project with RD-only native Windows package
         run: .\.engine\godot_console.exe --headless --path . --editor --import --quit
-      - name: Verify D3D12 HLSL hot reload, real GPU execution, barriers and safe pipeline retirement
+      - name: Verify D3D12 GLSL and HLSL reload, GPU output, barriers and safe pipeline retirement
         shell: pwsh
         run: |
           & .\.engine\godot_console.exe --path . --rendering-method forward_plus --rendering-driver d3d12 --gpu-index 0 --script res://tests/native_rd_persistent_workload_smoke.gd

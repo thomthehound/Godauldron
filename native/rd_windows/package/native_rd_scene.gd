@@ -17,6 +17,7 @@ var _active_language := "embedded_spirv"
 var _queued_language := ""
 var _accepted_generation := 0
 var _last_native_failures := 0
+var _compile_request_host_usec := 0
 
 
 func godauldron_runtime_controls() -> Array[Dictionary]:
@@ -55,6 +56,7 @@ func godauldron_reload_shader() -> Dictionary:
 		camera.compositor = compositor
 	_source_attempts += 1
 	_last_compiled_language = _reload_language
+	var compile_start: int = Time.get_ticks_usec()
 	var result: Dictionary
 	if _reload_language == "glsl":
 		result = _reload_effect.call("request_glsl_reload",
@@ -62,6 +64,7 @@ func godauldron_reload_shader() -> Dictionary:
 	else:
 		result = _reload_effect.call("request_hlsl_reload",
 			hlsl_source_path, hlsl_compiler)
+	_compile_request_host_usec = Time.get_ticks_usec() - compile_start
 	if not result.get("ok", false):
 		_source_failures += 1
 		_source_last_error = String(result.get("error", "Shader compile failed")).substr(0, 1500)
@@ -103,7 +106,8 @@ func godauldron_pipeline_diagnostics() -> Dictionary:
 		"source": source_path.substr(0, 240),
 		"language": _last_compiled_language, "selected_language": _reload_language,
 		"active_language": _active_language, "compiler": compiler.substr(0, 240),
-		"last_error": _source_last_error, "last_stage": _source_last_stage
+		"last_error": _source_last_error, "last_stage": _source_last_stage,
+		"compile_request_host_usec": _compile_request_host_usec
 	}
 	return {"provider": "native-rd-compositor", "backend": "d3d12",
 		"pipelines": entries, "source_reload": source}

@@ -91,6 +91,54 @@ func _verify() -> void:
 	if Diagnostics.read(provider).get("available", true):
 		_fail("Device execution timing was misrepresented as shader compile time")
 		return
+	# Genuine providers can expose the active SPIR-V interface and last
+	# accepted rebuild costs without claiming undocumented driver cache hits.
+	provider.evidence = copy.duplicate(true)
+	var rebuild: Dictionary = provider.evidence["pipelines"][0]
+	rebuild["reload_attempts"] = 3
+	rebuild["reload_generation"] = 1
+	rebuild["reload_failures"] = 2
+	rebuild["reload_retired_pipelines"] = 1
+	rebuild["reload_host_usec"] = 15
+	rebuild["reload_error"] = "rejected_variant"
+	rebuild["reload_failure_stage"] = "descriptor"
+	rebuild["reload_available"] = true
+	rebuild["shader_variant_workgroup_x"] = 8
+	rebuild["shader_variant_workgroup_y"] = 8
+	rebuild["shader_variant_workgroup_z"] = 1
+	rebuild["shader_variant_image_format"] = "r32ui"
+	rebuild["shader_variant_push_constant_bytes"] = 8
+	rebuild["shader_variant_evidence"] = "validated_spirv_interface"
+	rebuild["reload_last_success_host_usec"] = 500
+	rebuild["reload_last_success_shader_create_host_usec"] = 100
+	rebuild["reload_last_success_pipeline_create_host_usec"] = 250
+	rebuild["reload_last_success_descriptor_create_host_usec"] = 50
+	rebuild["shader_creations"] = 2
+	rebuild["pipeline_creations"] = 2
+	var good_rebuild: Dictionary = Diagnostics.read(provider)
+	if not good_rebuild.get("available", false) or \
+			not Diagnostics.summary(good_rebuild).contains("last accepted rebuild") or \
+			not Diagnostics.summary(good_rebuild).contains("8x8x1 r32ui"):
+		_fail("Valid shader variant and accepted rebuild costs disappeared")
+		return
+	for key in ["reload_last_success_host_usec", "shader_variant_image_format",
+			"shader_variant_evidence"]:
+		provider.evidence = copy.duplicate(true)
+		var broken: Dictionary = provider.evidence["pipelines"][0]
+		for variant_key in rebuild.keys():
+			broken[variant_key] = rebuild[variant_key]
+		broken.erase(key)
+		if Diagnostics.read(provider).get("available", true):
+			_fail("Incomplete shader rebuild evidence was accepted: " + key)
+			return
+	provider.evidence = copy.duplicate(true)
+	var impossible: Dictionary = provider.evidence["pipelines"][0]
+	for rebuild_key in rebuild.keys():
+		impossible[rebuild_key] = rebuild[rebuild_key]
+	impossible["reload_last_success_host_usec"] = 50
+	if Diagnostics.read(provider).get("available", true):
+		_fail("Rebuild stage costs exceeded the actual encompassing interval")
+		return
 	provider.evidence = copy
 	var host: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(host)

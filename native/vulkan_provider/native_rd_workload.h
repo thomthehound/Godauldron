@@ -80,6 +80,11 @@ private:
     int64_t reload_generation_ = 0;
     int64_t reload_retirements_ = 0;
     int64_t reload_host_usec_ = 0;
+    // Last accepted rebuild costs are retained across rejected candidates.
+    int64_t reload_last_success_host_usec_ = 0;
+    int64_t reload_last_success_shader_create_host_usec_ = 0;
+    int64_t reload_last_success_pipeline_create_host_usec_ = 0;
+    int64_t reload_last_success_descriptor_create_host_usec_ = 0;
     godot::String reload_error_;
     godot::String reload_failure_stage_;
     godot::String shader_origin_ = "native_compiled_embedded_spirv";

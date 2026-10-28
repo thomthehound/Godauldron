@@ -132,6 +132,8 @@ void NativeRDWorkload::_bind_methods() {
                          &NativeRDWorkload::mark_readback_complete);
     ClassDB::bind_method(D_METHOD("replace_spirv", "rendering_device", "bytecode"),
                          &NativeRDWorkload::replace_spirv);
+    ClassDB::bind_method(D_METHOD("select_variant", "rendering_device", "variant_id"),
+                         &NativeRDWorkload::select_variant);
     ClassDB::bind_method(D_METHOD("release", "rendering_device"),
                          &NativeRDWorkload::release);
     ClassDB::bind_method(D_METHOD("diagnostics"), &NativeRDWorkload::diagnostics);
@@ -546,6 +548,63 @@ Dictionary NativeRDWorkload::replace_spirv(
     return out;
 }
 
+Dictionary NativeRDWorkload::select_variant(
+        RenderingDevice *rd, int64_t variant_id) {
+    ++reload_attempts_;
+    ++variant_selection_requests_;
+    const auto started = HostClock::now();
+    const auto failure = [&](const char *stage, const char *reason) {
+        ++reload_failures_;
+        ++variant_selection_failures_;
+        reload_failure_stage_ = stage;
+        reload_error_ = reason;
+        variant_last_selection_host_usec_ = elapsed_host_usec(started);
+        reload_host_usec_ = variant_last_selection_host_usec_;
+        Dictionary out = diagnostics();
+        out["ok"] = false;
+        out["error"] = reason;
+        return out;
+    };
+    variant_last_lookup_host_usec_ = 0;
+    if (phase_ != Phase::PREPARED || rd == nullptr || rd != rd_ ||
+        checkpoint_active_ || pending_batch_count_ != 0) {
+        return failure("in_flight", "rd_variant_selection_requires_completed_readback");
+    }
+    const auto lookup_started = HostClock::now();
+    Variant *selected = nullptr;
+    for (Variant &variant : variants_) {
+        if (variant.id == variant_id) {
+            selected = &variant;
+            break;
+        }
+    }
+    variant_last_lookup_host_usec_ = elapsed_host_usec(lookup_started);
+    if (selected == nullptr) {
+        return failure("variant", "rd_variant_id_not_resident");
+    }
+    const bool already_active = selected->id == active_variant_id_;
+    shader_ = selected->shader;
+    pipeline_ = selected->pipeline;
+    uniform_set_ = selected->descriptor;
+    active_variant_id_ = selected->id;
+    selected->last_used = ++variant_clock_;
+    ++variant_reuses_;
+    ++reload_generation_;
+    variant_last_action_ = already_active ? "already_active" : "reused";
+    shader_origin_ = selected->id == 1 ?
+            "native_compiled_embedded_spirv" : "provider_reloaded_spirv";
+    reload_error_ = "";
+    reload_failure_stage_ = "";
+    variant_last_selection_host_usec_ = elapsed_host_usec(started);
+    reload_host_usec_ = variant_last_selection_host_usec_;
+    Dictionary out = diagnostics();
+    out["ok"] = true;
+    out["reload_shader_create_host_usec"] = 0;
+    out["reload_pipeline_create_host_usec"] = 0;
+    out["reload_descriptor_create_host_usec"] = 0;
+    return out;
+}
+
 Dictionary NativeRDWorkload::release(RenderingDevice *rd) {
     if (phase_ == Phase::RELEASED) {
         Dictionary result = diagnostics();
@@ -623,6 +682,10 @@ Dictionary NativeRDWorkload::diagnostics() const {
     result["variant_active_id"] = active_variant_id_;
     result["variant_builds"] = variant_builds_;
     result["variant_reuses"] = variant_reuses_;
+    result["variant_selection_requests"] = variant_selection_requests_;
+    result["variant_selection_failures"] = variant_selection_failures_;
+    result["variant_last_lookup_host_usec"] = variant_last_lookup_host_usec_;
+    result["variant_last_selection_host_usec"] = variant_last_selection_host_usec_;
     result["variant_evictions"] = variant_evictions_;
     result["variant_release_retirements"] = variant_release_retirements_;
     result["variant_last_action"] = variant_last_action_;

@@ -33,6 +33,9 @@ public:
     // previous shader/pipeline/uniform set on any candidate failure.
     godot::Dictionary replace_spirv(godot::RenderingDevice *rd,
                                     const godot::PackedByteArray &spirv_bytes);
+    // Select an existing shader/pipeline/descriptor trio without invoking
+    // the shader compiler or recreating any GPU resources.
+    godot::Dictionary select_variant(godot::RenderingDevice *rd, int64_t variant_id);
     godot::Dictionary release(godot::RenderingDevice *rd);
     godot::Dictionary diagnostics() const;
     // Read-only DXGI verification of the actual engine-owned D3D12 adapter.
@@ -67,6 +70,10 @@ private:
     int64_t next_variant_id_ = 1;
     int64_t active_variant_id_ = 0;
     int64_t variant_reuses_ = 0;
+    int64_t variant_selection_requests_ = 0;
+    int64_t variant_selection_failures_ = 0;
+    int64_t variant_last_lookup_host_usec_ = 0;
+    int64_t variant_last_selection_host_usec_ = 0;
     int64_t variant_builds_ = 0;
     int64_t variant_evictions_ = 0;
     int64_t variant_release_retirements_ = 0;

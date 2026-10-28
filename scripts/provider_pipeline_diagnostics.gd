@@ -94,7 +94,7 @@ static func read(scene: Node) -> Dictionary:
 					typeof(item.get("reload_error")) != TYPE_STRING or \
 					String(item["reload_error"]).length() > MAX_LABEL or \
 					item.get("reload_failure_stage") not in ["", "shader", "pipeline",
-						"descriptor", "lifecycle", "in_flight"]:
+						"descriptor", "variant", "lifecycle", "in_flight"]:
 				return unavailable("invalid_pipeline_reload_failure")
 			entry["reload_available"] = item["reload_available"]
 			entry["reload_error"] = item["reload_error"]
@@ -149,6 +149,25 @@ static func read(scene: Node) -> Dictionary:
 					active_count += 1
 			if active_count != (1 if resident_count > 0 else 0):
 				return unavailable("invalid_active_variant")
+			var selection_keys := ["variant_selection_requests",
+				"variant_selection_failures", "variant_last_lookup_host_usec",
+				"variant_last_selection_host_usec"]
+			var has_selection := false
+			for key in selection_keys:
+				has_selection = has_selection or item.has(key)
+			if has_selection:
+				for key in selection_keys:
+					if typeof(item.get(key)) != TYPE_INT or int(item[key]) < 0:
+						return unavailable("invalid_resident_selection_measurement")
+					entry[key] = item[key]
+				var requests := int(item["variant_selection_requests"])
+				var failures := int(item["variant_selection_failures"])
+				if failures > requests or requests > reloads or \
+						requests - failures > reuses or \
+						int(item["variant_last_lookup_host_usec"]) > \
+							int(item["variant_last_selection_host_usec"]) or \
+						(requests == 0 and int(item["variant_last_selection_host_usec"]) != 0):
+					return unavailable("inconsistent_resident_selection_measurement")
 			entry["variant_last_action"] = item["variant_last_action"]
 			entry["resident_variants"] = item["resident_variants"].duplicate(true)
 		# Optional backend-owned shader variant and accepted rebuild costs.
@@ -268,6 +287,12 @@ static func summary(report: Dictionary) -> String:
 				String(entry["name"]), int(entry["reload_generation"]),
 				int(entry["reload_failures"]), int(entry["reload_retired_pipelines"])]
 			if entry.has("variant_capacity"):
+				if entry.has("variant_selection_requests"):
+					line += "; direct selections %d (%d rejected), last %.3f ms host (ID lookup %.3f ms)" % [
+						int(entry["variant_selection_requests"]),
+						int(entry["variant_selection_failures"]),
+						float(entry["variant_last_selection_host_usec"]) / 1000.0,
+						float(entry["variant_last_lookup_host_usec"]) / 1000.0]
 				line += "; variants %d/%d resident, %d built, %d reused, %d evicted, active %d (%s)" % [
 					int(entry["variant_resident_count"]),
 					int(entry["variant_capacity"]),

@@ -28,13 +28,21 @@ def fixture() -> dict:
                 "gpu_device_frame": trial * 3 + position + 1,
             }
             records.append(record)
+    def stats(value: float | None, count: int) -> dict:
+        return {"count": count, "mean_usec": value, "p50_usec": value,
+                "p95_usec": value, "p99_usec": value,
+                "minimum_usec": value, "maximum_usec": value}
+
     results = {}
     for path in PATHS:
         results[path] = {
-            "compiler_host_usec": {"count": samples if path == PATHS[0] else 0},
-            "native_path_host_usec": {"count": samples},
-            "gpu_compute_window_usec": {"count": samples},
-            "host_request_to_readback_usec": {"count": samples},
+            "compiler_host_usec": stats(800.0, samples) if path == PATHS[0]
+                                  else stats(None, 0),
+            "native_path_host_usec": stats(
+                200.0 if path == PATHS[0] else 12.0 if path == PATHS[1] else 5.0,
+                samples),
+            "gpu_compute_window_usec": stats(20.0, samples),
+            "host_request_to_readback_usec": stats(500.0, samples),
         }
     return {
         "schema_version": 1, "capture_type": "native_rd_variant_path_comparison",
@@ -65,6 +73,21 @@ class VariantPathProvenanceTest(unittest.TestCase):
         validate(report)
         with self.assertRaisesRegex(ValueError, "physical AMD"):
             validate(report, physical=True)
+
+    def test_tampered_quantile_or_missing_gpu_timestamp_is_rejected(self) -> None:
+        report = fixture()
+        report["results"][PATHS[0]]["native_path_host_usec"]["p50_usec"] = 3.0
+        with self.assertRaisesRegex(ValueError, "summary differs"):
+            validate(report)
+
+        report = fixture()
+        report["records"][4]["gpu_compute_window_usec"] = None
+        report["records"][4]["gpu_device_frame"] = None
+        report["gpu_timing"].update(available=False, resolved_measured=5)
+        # The original full-sample GPU summary cannot survive a missing
+        # device timestamp without changing its count.
+        with self.assertRaisesRegex(ValueError, "incorrect sample count"):
+            validate(report)
 
     def test_domain_mixups_and_eviction_fabrication(self) -> None:
         edits = (

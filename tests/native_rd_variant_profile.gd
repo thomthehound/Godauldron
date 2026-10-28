@@ -161,9 +161,9 @@ func _run() -> void:
 		file.store_string(candidate)
 		file.close()
 		var compile_started: int = Time.get_ticks_usec()
-		var queued: Dictionary = effect.call("request_hlsl_reload", path)
+		var queued: Dictionary = effect.call("request_hlsl_reload", path, "dxc", true)
 		var compiler_usec: int = Time.get_ticks_usec() - compile_started
-		var bytecode: PackedByteArray = effect.call("queued_candidate_bytecode")
+		var bytecode: PackedByteArray = queued.get("candidate_bytecode", PackedByteArray())
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 		if not queued.get("ok", false) or bytecode.size() < 20:
 			_fail("Real HLSL compilation did not yield queued SPIR-V: " + str(queued))

@@ -286,8 +286,13 @@ func _run() -> void:
 	var path_names := ["source_compile_and_build", "resident_spirv_byte_match",
 		"direct_resident_id"]
 	for path_name in path_names:
-		distributions[path_name] = {"compiler": [], "native": [],
-			"gpu": [], "host_readback": []}
+		var compiler_samples: Array[float] = []
+		var native_samples: Array[float] = []
+		var gpu_samples: Array[float] = []
+		var readback_samples: Array[float] = []
+		distributions[path_name] = {"compiler": compiler_samples,
+			"native": native_samples, "gpu": gpu_samples,
+			"host_readback": readback_samples}
 	var gpu_resolved := 0
 	for record in records:
 		var match: Dictionary = intervals.get(record["gpu_batch_index"], {})
